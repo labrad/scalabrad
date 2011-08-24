@@ -111,10 +111,10 @@ class PacketEncoder extends OneToOneEncoder with Logging {
     msg match {
       case Packet(request, source, context, records) =>
         debug("write packet: " + msg)
-        val flatRecs = records.flatMap {
+        val flatRecs = records.toArray.flatMap {
           case Record(id, data) =>
             Cluster(Word(id), Str(data.tag), Bytes(data.toBytes)).toBytes
-        }.toArray
+        }
         
         val data = Cluster(context.toData, Integer(request), Word(source), Bytes(flatRecs))
         val bytes = data.toBytes

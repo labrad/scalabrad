@@ -561,15 +561,18 @@ class ManagerSettingsImpl(hub: HandlerHub, messager: Messager) extends TypedActo
   
   @Setting(id=200, name="Data to String", doc="")
   @Return("s")
-  def dataToString(data: Data): Data = Str(data.toString)
+  def dataToString(data: Data): Data = Str(data.toString) // TODO: implement this
   
   @Setting(id=201, name="String to Data", doc="")
   @Return("?")
-  def stringToData(str: String): Data = Str("")
+  def stringToData(str: String): Data = Str("") // TODO: implement this
   
   // convert units
   // pretty print
-  // echo
+  
+  @Setting(id=13579, name="Echo", doc="Echoes back any data sent to this setting")
+  @Return("?")
+  def echo(data: Data): Data = data
 }
 
 
@@ -630,8 +633,8 @@ class HandlerHubImpl extends HandlerHub {
   private val handlerMap = mutable.Map.empty[Long, ClientHandler]
   private val idCache = mutable.Map.empty[String, Long]
   private val idPool = mutable.Buffer.empty[Long]
-  private var _nextId = 0L
-  private def nextId = if (!idPool.isEmpty) idPool.remove(0) else { _nextId += 1; _nextId }
+  private var _nextId = 1L
+  private def nextId = if (!idPool.isEmpty) idPool.remove(0) else { val id = _nextId; _nextId += 1; id }
   
   def connectClient(channel: Channel, name: String) =
     connect(name, false) { (id, name) => new ClientHandlerImpl(this, channel, id, name) }
@@ -639,8 +642,8 @@ class HandlerHubImpl extends HandlerHub {
   def connectServer(channel: Channel, name: String, doc: String) =
     connect(name, true) { (id, name) => new ServerHandlerImpl(this, channel, id, name, doc) }
   
-  def connect(name: String, server: Boolean)(factory: (Long, String) => ClientHandler) = synchronized {
-    val id = if (server) idCache.get(name).getOrElse(nextId) else nextId
+  def connect(name: String, isServer: Boolean)(factory: (Long, String) => ClientHandler) = synchronized {
+    val id = if (isServer) idCache.get(name).getOrElse(nextId) else nextId
     handlerMap.get(id) match {
       case Some(handler) =>
         // already have a server logged in with this id
@@ -649,7 +652,7 @@ class HandlerHubImpl extends HandlerHub {
         // id is currently unassigned
         val handler = factory(id, name)
         handlerMap(id) = handler
-        if (server) idCache(name) = handler.id
+        if (isServer) idCache(name) = handler.id
         handler
     }
   }
@@ -696,6 +699,7 @@ object Manager {
       def getPipeline = {
         val pipeline = Channels.pipeline
         pipeline.addLast("channelGrouper", grouper)
+        pipeline.addLast("byteOrderDecoder", new ByteOrderDecoder)
         pipeline.addLast("packetEncoder", packetEncoder)
         pipeline.addLast("packetDecoder", packetDecoder)
         pipeline.addLast("executionHandler", executionHandler)

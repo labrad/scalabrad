@@ -77,15 +77,6 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
    */
   def tag = t.toString
 
-  /**
-   * Flatten LabRAD data into an array of bytes, suitable for sending over the wire.
-   */
-  def toBytes: Array[Byte] = {
-    val os = new ByteArrayOutputStream
-    toBytes(os, t, data, ofs, heap)
-    os.toByteArray
-  }
-
   override def equals(other: Any): Boolean =
     other match {
       case other: Data => Data.isEqual(this, other)
@@ -97,6 +88,15 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
       case other: Data => Data.approxEqual(this, other)
       case _ => false
     }
+  
+  /**
+   * Flatten LabRAD data into an array of bytes, suitable for sending over the wire.
+   */
+  def toBytes: Array[Byte] = {
+    val os = new ByteArrayOutputStream
+    toBytes(os, t, data, ofs, heap)
+    os.toByteArray
+  }
   
   /**
    * Flatten LabRAD data into the specified ByteArrayOutputStream.
