@@ -14,6 +14,14 @@ import data._
 import types.Type
 
 
+/** Determines the byte order of a byte stream by examining the header of the first packet sent.
+ * 
+ * The target id of the first packet should be 1, which will be encoded as 0x00000001 in
+ * big-endian byte order or 0x01000000 in little-endian byte order.  The default byte order
+ * for most network protocols is big-endian, and this is the recommended endianness.  If
+ * little-endian byte order is detected, we create a new buffer factory for this channel
+ * so the byte order will be properly handled.
+ */
 @ChannelHandler.Sharable
 class ByteOrderDecoder extends FrameDecoder with Logging {
   
@@ -56,14 +64,15 @@ class ByteOrderDecoder extends FrameDecoder with Logging {
 }
 
 
+/** Decodes incoming bytes into LabRAD packets */
 @ChannelHandler.Sharable
-class PacketDecoder extends FrameDecoder {
+class PacketDecoder extends FrameDecoder with Logging {
   protected override def decode(ctx: ChannelHandlerContext, channel: Channel, buffer: ChannelBuffer): AnyRef = {
     // Wait until the header is available.
     if (buffer.readableBytes < 20) return null
     
-    //println("decoding packet: " + channel.getConfig.getBufferFactory.getDefaultOrder)
-    //println("buffer byteOrder: " + buffer.order)
+    debug("decoding packet: " + channel.getConfig.getBufferFactory.getDefaultOrder)
+    debug("buffer byteOrder: " + buffer.order)
     
     // Unpack the header
     buffer.markReaderIndex
@@ -73,13 +82,13 @@ class PacketDecoder extends FrameDecoder {
     val source = buffer.readUnsignedInt
     val dataLen = buffer.readInt
     
-    // Wait until all data is available.
+    // Wait until enough data is available
     if (buffer.readableBytes < dataLen) {
       buffer.resetReaderIndex
       return null
     }
     
-    // Unpack the received data into a list of records.
+    // Unpack the received data into a list of records
     val decoded = Array.ofDim[Byte](dataLen)
     buffer.readBytes(decoded)
     val stream = new ByteArrayInputStream(decoded)
@@ -95,6 +104,7 @@ class PacketDecoder extends FrameDecoder {
 }
 
 
+/** Flattens outgoing LabRAD packets into a stream of bytes */
 @ChannelHandler.Sharable
 class PacketEncoder extends OneToOneEncoder with Logging {
   protected override def encode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef): AnyRef =
@@ -115,6 +125,7 @@ class PacketEncoder extends OneToOneEncoder with Logging {
 }
 
 
+/** Decoder for incoming packets that replaces high context 0 with the connection id */
 class ContextDecoder(id: Long) extends OneToOneDecoder {
   override def decode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef) = msg match {
     case packet @ Packet(_, _, Context(0, low), _) =>
@@ -123,6 +134,8 @@ class ContextDecoder(id: Long) extends OneToOneDecoder {
   }
 }
 
+
+/** Encoder for outgoing packets that sets the high context to 0 if it is equal to the connection id */
 class ContextEncoder(id: Long) extends OneToOneEncoder {
   override def encode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef) = msg match {
     case packet @ Packet(_, _, Context(`id`, low), _) =>
