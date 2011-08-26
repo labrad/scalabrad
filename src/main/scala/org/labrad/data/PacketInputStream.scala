@@ -21,12 +21,13 @@ package org.labrad
 package data
 
 import java.io.{ByteArrayInputStream, FilterInputStream, IOException, InputStream}
+import java.nio.ByteOrder
 
 import scala.collection.mutable.ArrayBuffer
 
 import types.Type
 
-class PacketInputStream(in: InputStream) extends FilterInputStream(in) {
+class PacketInputStream(in: InputStream)(implicit order: ByteOrder = ByteOrder.BIG_ENDIAN) extends FilterInputStream(in) {
 
   // Read a single packet from the input stream.
   def readPacket = {

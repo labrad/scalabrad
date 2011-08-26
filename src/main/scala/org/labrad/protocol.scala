@@ -93,6 +93,7 @@ class PacketDecoder extends FrameDecoder with Logging {
     buffer.readBytes(decoded)
     val stream = new ByteArrayInputStream(decoded)
     
+    implicit val byteOrder = buffer.order
     val records = Seq.newBuilder[Record]
     while (stream.available > 0) {
       val recData = Data.fromBytes(stream, Type.RECORD)
@@ -110,6 +111,9 @@ class PacketEncoder extends OneToOneEncoder with Logging {
   protected override def encode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef): AnyRef =
     msg match {
       case Packet(request, source, context, records) =>
+        val factory = channel.getConfig.getBufferFactory
+        implicit val byteOrder = factory.getDefaultOrder
+        
         debug("write packet: " + msg)
         val flatRecs = records.toArray.flatMap {
           case Record(id, data) =>
@@ -118,7 +122,7 @@ class PacketEncoder extends OneToOneEncoder with Logging {
         
         val data = Cluster(context.toData, Integer(request), Word(source), Bytes(flatRecs))
         val bytes = data.toBytes
-        val buf = ChannelBuffers.dynamicBuffer
+        val buf = ChannelBuffers.dynamicBuffer(factory)
         buf.writeBytes(bytes)
         buf
     }

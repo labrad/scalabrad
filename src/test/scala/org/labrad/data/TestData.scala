@@ -52,3 +52,39 @@ object ManagerTester {
     }
   }
 }
+
+object EndiannessTester {
+  import java.nio.ByteOrder
+  import java.nio.ByteOrder._
+  
+  def main(args: Array[String]) {
+    def test(s: String) {
+      println(s)
+      val t = Type(s)
+      val data = Hydrant.randomData(t)
+      println("original: " + data)
+      
+      for (order <- List(BIG_ENDIAN, LITTLE_ENDIAN)) {
+        implicit val byteOrder = order
+        val bytes = data.toBytes
+        val unflattened = Data.fromBytes(bytes, t)
+      
+        println("flattened (" + byteOrder + "): " + bytes.mkString(","))
+        println("unflattened (" + byteOrder + "): " + unflattened)
+        assert(unflattened == data)
+      }
+      println
+    }
+    
+    test("i")
+    test("w")
+    test("v")
+    test("c")
+    test("t")
+    test("s")
+    test("ii")
+    test("cvtiwsbb")
+    test("*(is)")
+    test("*2(i*s)")
+  }
+}

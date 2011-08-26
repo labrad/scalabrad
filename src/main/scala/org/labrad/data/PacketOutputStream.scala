@@ -25,11 +25,12 @@ import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.ByteOrder
 
 import org.labrad.types.Type
 
 // Output stream that writes LabRAD packets.
-class PacketOutputStream(out: OutputStream) extends BufferedOutputStream(out) {
+class PacketOutputStream(out: OutputStream)(implicit order: ByteOrder = ByteOrder.BIG_ENDIAN) extends BufferedOutputStream(out) {
 
   // Write a packet to the output stream.
   def writePacket(packet: Packet) {

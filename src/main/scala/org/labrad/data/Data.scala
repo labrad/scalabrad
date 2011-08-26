@@ -21,6 +21,7 @@ package org.labrad
 package data
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, Serializable}
+import java.nio.ByteOrder
 import java.util.Date
 
 import scala.collection._
@@ -40,6 +41,7 @@ case class Context(high: Long, low: Long) {
 
 case class TimeStamp(seconds: Long, fraction: Long)
 
+
 /**
  * The Data class encapsulates the data format used to communicate between
  * LabRAD servers and clients.  This data format is based on the
@@ -47,6 +49,8 @@ case class TimeStamp(seconds: Long, fraction: Long)
  * data has a Type object which is specified by a String type tag.
  */
 class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) extends Serializable with Cloneable {
+  
+  implicit val byteOrder = ByteOrder.BIG_ENDIAN
   
   /**
    * Construct a Data object for a given Type object.
@@ -92,12 +96,12 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   /**
    * Flatten LabRAD data into an array of bytes, suitable for sending over the wire.
    */
-  def toBytes: Array[Byte] = {
+  def toBytes(implicit byteOrder: ByteOrder): Array[Byte] = {
     val os = new ByteArrayOutputStream
     toBytes(os, t, data, ofs, heap)
     os.toByteArray
   }
-  
+    
   /**
    * Flatten LabRAD data into the specified ByteArrayOutputStream.
    * 
@@ -113,27 +117,54 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
    * @throws IOException if writing to the output stream fails
    */
   private def toBytes(os: ByteArrayOutputStream, t: Type,
-      buf: Array[Byte], ofs: Int, heap: Seq[Array[Byte]]) {
-    if (t.fixedWidth) {
+      buf: Array[Byte], ofs: Int, heap: Seq[Array[Byte]])(implicit byteOrder: ByteOrder) {
+    if (t.fixedWidth && byteOrder == ByteOrder.BIG_ENDIAN) {
       os.write(buf, ofs, t.dataWidth)
     } else {
       t match {
-        case TStr => {
-          val sbuf = heap(ByteManip.getInt(buf, ofs))
+        // handle fixed-width data structures for the case when endianness must be changed
+        case TEmpty =>
+          // no bytes to copy
+        
+        case TBool =>
+          ByteManip.writeBool(os, ByteManip.getBool(buf, ofs))
+          
+        case TInteger =>
+          ByteManip.writeInt(os, ByteManip.getInt(buf, ofs)(ByteOrder.BIG_ENDIAN))
+
+        case TWord =>
+          ByteManip.writeWord(os, ByteManip.getWord(buf, ofs)(ByteOrder.BIG_ENDIAN))
+
+        case TValue(_) =>
+          ByteManip.writeDouble(os, ByteManip.getDouble(buf, ofs)(ByteOrder.BIG_ENDIAN))
+
+        case TComplex(_) =>
+          ByteManip.writeComplex(os, ByteManip.getComplex(buf, ofs)(ByteOrder.BIG_ENDIAN))
+          
+        case TTime => // two longs
+          ByteManip.writeLong(os, ByteManip.getLong(buf, ofs)(ByteOrder.BIG_ENDIAN))
+          ByteManip.writeLong(os, ByteManip.getLong(buf, ofs + 8)(ByteOrder.BIG_ENDIAN))
+          
+        // handle variable-width data structures
+        case TStr =>
+          val sbuf = heap(ByteManip.getInt(buf, ofs)(ByteOrder.BIG_ENDIAN))
           ByteManip.writeInt(os, sbuf.length)
           os.write(sbuf)
-        }
 
-        case TArr(elem, depth) => {
+        case TArr(elem, depth) =>
           // compute total number of elements in the list
           var size = 1
-          for (i <- 0 until depth)
-            size *= ByteManip.getInt(buf, ofs + 4 * i)
+          for (i <- 0 until depth) {
+            val dim = ByteManip.getInt(buf, ofs + 4*i)(ByteOrder.BIG_ENDIAN)
+            ByteManip.writeInt(os, dim)
+            size *= dim
+          }
           // write the list shape
-          os.write(buf, ofs, 4 * depth)
+          //os.write(buf, ofs, 4 * depth)
+          
           // write the list data
-          val lbuf = heap(ByteManip.getInt(buf, ofs + 4 * depth))
-          if (elem.fixedWidth) {
+          val lbuf = heap(ByteManip.getInt(buf, ofs + 4 * depth)(ByteOrder.BIG_ENDIAN))
+          if (elem.fixedWidth && byteOrder == ByteOrder.BIG_ENDIAN) {
             // for fixed-width data, just copy in one big chunk
             os.write(lbuf, 0, elem.dataWidth * size)
           } else {
@@ -142,17 +173,15 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
             for (i <- 0 until size)
               toBytes(os, elem, lbuf, width * i, heap)
           }
-        }
 
-        case t: TCluster => {
+        case t: TCluster =>
           for ((elem, delta) <- t.elems zip t.offsets)
             toBytes(os, elem, buf, ofs + delta, heap)
-        }
 
-        case TError(payload) => {
+        case TError(payload) =>
           val tag = "is" + payload.toString
           toBytes(os, Type(tag), buf, ofs, heap)
-        }
+          //toBytes(os, TCluster(TInteger, TStr, payload), buf, ofs, heap)
 
         case _ =>
           throw new RuntimeException("Unknown type.")
@@ -429,7 +458,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   def getUnits = t match {
     case TValue(u) => u.getOrElse(null)
     case TComplex(u) => u.getOrElse(null)
-    case _ => "Type " + t + " does not have units"
+    case _ => throw new Exception("Type " + t + " does not have units")
   }
 
   def getTime = {
@@ -1226,7 +1255,7 @@ object Data {
    * @return
    * @throws IOException
    */
-  def fromBytes(buf: Array[Byte], t: Type): Data =
+  def fromBytes(buf: Array[Byte], t: Type)(implicit order: ByteOrder): Data =
     fromBytes(new ByteArrayInputStream(buf), t)
 
   /**
@@ -1237,7 +1266,7 @@ object Data {
    * @return
    * @throws IOException
    */
-  def fromBytes(is: ByteArrayInputStream, t: Type): Data = {
+  def fromBytes(is: ByteArrayInputStream, t: Type)(implicit order: ByteOrder): Data = {
     val data = Array.ofDim[Byte](t.dataWidth)
     val heap = createHeap(t)
     fromBytes(is, t, data, 0, heap)
@@ -1256,28 +1285,54 @@ object Data {
    * @throws IOException
    */
   private def fromBytes(is: ByteArrayInputStream,
-      t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) {
-    if (t.fixedWidth)
+      t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]])(implicit order: ByteOrder) {
+    if (t.fixedWidth && order == ByteOrder.BIG_ENDIAN)
       is.read(buf, ofs, t.dataWidth)
     else
       t match {
+        // handle fixed-width cases when byte order needs to be switched
+        
+        case TEmpty =>
+          // no bytes to copy
+      
+        case TBool =>
+          ByteManip.setBool(buf, ofs, ByteManip.readBool(is))
+          
+        case TInteger =>
+          ByteManip.setInt(buf, ofs, ByteManip.readInt(is))(ByteOrder.BIG_ENDIAN)
+
+        case TWord =>
+          ByteManip.setWord(buf, ofs, ByteManip.readWord(is))(ByteOrder.BIG_ENDIAN)
+
+        case TValue(_) =>
+          ByteManip.setDouble(buf, ofs, ByteManip.readDouble(is))(ByteOrder.BIG_ENDIAN)
+
+        case TComplex(_) =>
+          ByteManip.setComplex(buf, ofs, ByteManip.readComplex(is))(ByteOrder.BIG_ENDIAN)
+          
+        case TTime => // two longs
+          ByteManip.setLong(buf, ofs, ByteManip.readLong(is))(ByteOrder.BIG_ENDIAN)
+          ByteManip.setLong(buf, ofs + 8, ByteManip.readLong(is))(ByteOrder.BIG_ENDIAN)
+      
         case TStr =>
           val len = ByteManip.readInt(is)
           val sbuf = Array.ofDim[Byte](len)
-          ByteManip.setInt(buf, ofs, heap.size)
+          ByteManip.setInt(buf, ofs, heap.size)(ByteOrder.BIG_ENDIAN)
           heap += sbuf
           is.read(sbuf, 0, len)
 
         case TArr(elem, depth) =>
           val elementWidth = elem.dataWidth
-          is.read(buf, ofs, 4 * depth)
           var size = 1
-          for (i <- 0 until depth)
-            size *= ByteManip.getInt(buf, ofs + 4 * i)
+          for (i <- 0 until depth) {
+            val dim = ByteManip.readInt(is)
+            ByteManip.setInt(buf, ofs + 4 * i, dim)(ByteOrder.BIG_ENDIAN)
+            size *= dim
+          }
           val lbuf = Array.ofDim[Byte](elementWidth * size)
-          ByteManip.setInt(buf, ofs + 4 * depth, heap.size)
+          ByteManip.setInt(buf, ofs + 4 * depth, heap.size)(ByteOrder.BIG_ENDIAN)
           heap += lbuf
-          if (elem.fixedWidth)
+          if (elem.fixedWidth && order == ByteOrder.BIG_ENDIAN)
             is.read(lbuf, 0, elementWidth * size)
           else
             for (i <- 0 until size)
@@ -1290,9 +1345,10 @@ object Data {
         case TError(payload) =>
           val tag = "is" + payload.toString
           fromBytes(is, Type(tag), buf, ofs, heap)
+          //fromBytes(is, TCluster(TInteger, TStr, payload), buf, ofs, heap)
 
         case _ =>
-          throw new RuntimeException("Unknown type.")
+          throw new RuntimeException("Unknown type: " + t)
       }
   }
 
@@ -1302,75 +1358,48 @@ object Data {
     
     val rand = new Random
 
-    def test(name: String)(func: => Unit) {
-      println("running test: " + name)
-      func
-      println("okay\n")
-    }
-    
-    test("integer") {
-      val d = new Data("i")
-      d.setInt(100)
-      assert(d.getInt == 100)
-    }
-
-    test("string") {
-      val d = new Data("s")
-      d.setString("This is a test.")
-      println(d.getString)
-    }
-    
-    test("date") {
-      val d = new Data("t")
-      for (count <- 0 until 100000) {
-        val date1 = new Date(rand.nextLong)
-        d.setTime(date1)
-        val date2 = d.getTime
-        assert(date1 == date2)
-      }
-    }
-
-    test("string list") {
-      val d1 = new Data("*s")
-      d1.setArraySize(20)
-      for (count <- 0 until 20)
-        d1.setString("This is string " + count, count)
-      for (count <- 0 until 20)
-        println(d1(count).getString)
-    }
-
-    test("simple cluster") {
-      val d1 = new Data("biwsvc")
-      val b = rand.nextBoolean
-      val i = rand.nextInt
-      val l = math.abs(rand.nextLong) % 4294967296L
-      val s = rand.nextLong.toString
-      val d = rand.nextGaussian
-      val re = rand.nextGaussian
-      val im = rand.nextGaussian
+    for (byteOrder <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
+      implicit val order = byteOrder
       
-      d1.setBool(b, 0)
-      d1.setInt(i, 1)
-      d1.setWord(l, 2)
-      d1.setString(s, 3)
-      d1.setValue(d, 4)
-      d1.setComplex(re, im, 5)
+      def test(name: String)(func: => Unit) {
+        println("running test: " + name)
+        func
+        println("okay\n")
+      }
+      
+      test("integer") {
+        val d = new Data("i")
+        d.setInt(100)
+        assert(d.getInt == 100)
+      }
   
-      assert(b == d1(0).getBool)
-      assert(i == d1(1).getInt)
-      assert(l == d1(2).getWord)
-      assert(s == d1(3).getString)
-      assert(d == d1(4).getValue)
-      val c = d1(5).getComplex
-      assert(re == c.real)
-      assert(im == c.imag)
-      println(d1.pretty)
-    }
-
-    test("list of cluster") {
-      val d1 = new Data("*(biwsv[m]c[m/s])")
-      d1.setArraySize(20)
-      for (count <- 0 until 20) {
+      test("string") {
+        val d = new Data("s")
+        d.setString("This is a test.")
+        println(d.getString)
+      }
+      
+      test("date") {
+        val d = new Data("t")
+        for (count <- 0 until 100000) {
+          val date1 = new Date(rand.nextLong)
+          d.setTime(date1)
+          val date2 = d.getTime
+          assert(date1 == date2)
+        }
+      }
+  
+      test("string list") {
+        val d1 = new Data("*s")
+        d1.setArraySize(20)
+        for (count <- 0 until 20)
+          d1.setString("This is string " + count, count)
+        for (count <- 0 until 20)
+          println(d1(count).getString)
+      }
+  
+      test("simple cluster") {
+        val d1 = new Data("biwsvc")
         val b = rand.nextBoolean
         val i = rand.nextInt
         val l = math.abs(rand.nextLong) % 4294967296L
@@ -1378,60 +1407,91 @@ object Data {
         val d = rand.nextGaussian
         val re = rand.nextGaussian
         val im = rand.nextGaussian
-  
-        d1.setBool(b, count, 0)
-        d1.setInt(i, count, 1)
-        d1.setWord(l, count, 2)
-        d1.setString(s, count, 3)
-        d1.setValue(d, count, 4)
-        d1.setComplex(re, im, count, 5)
-  
-        assert(b == d1(count, 0).getBool)
-        assert(i == d1(count, 1).getInt)
-        assert(l == d1(count, 2).getWord)
-        assert(s == d1(count, 3).getString)
-        assert(d == d1(count, 4).getValue)
-        val c = d1(count, 5).getComplex
+        
+        d1.setBool(b, 0)
+        d1.setInt(i, 1)
+        d1.setWord(l, 2)
+        d1.setString(s, 3)
+        d1.setValue(d, 4)
+        d1.setComplex(re, im, 5)
+    
+        assert(b == d1(0).getBool)
+        assert(i == d1(1).getInt)
+        assert(l == d1(2).getWord)
+        assert(s == d1(3).getString)
+        assert(d == d1(4).getValue)
+        val c = d1(5).getComplex
         assert(re == c.real)
         assert(im == c.imag)
+        println(d1.pretty)
       }
-      println(d1.pretty)
   
-      val flat = d1.toBytes
-      val d2 = fromBytes(flat, Type("*(biwsv[m]c[m/s])"))
-      println(d2.pretty)
-    }
-
-    test("multi-dimensional list") {
-      val d1 = Data.arr(
-          Array(
-              Array(0, 1, 2),
-              Array(3, 4, 5),
-              Array(6, 7, 8),
-              Array(9, 10, 11)
-          )
-      )
-      println(d1.pretty)
-      val flat = d1.toBytes
-      val d2 = fromBytes(flat, Type("*2i"))
-      println(d2.pretty)
+      test("list of cluster") {
+        val d1 = new Data("*(biwsv[m]c[m/s])")
+        d1.setArraySize(20)
+        for (count <- 0 until 20) {
+          val b = rand.nextBoolean
+          val i = rand.nextInt
+          val l = math.abs(rand.nextLong) % 4294967296L
+          val s = rand.nextLong.toString
+          val d = rand.nextGaussian
+          val re = rand.nextGaussian
+          val im = rand.nextGaussian
+    
+          d1.setBool(b, count, 0)
+          d1.setInt(i, count, 1)
+          d1.setWord(l, count, 2)
+          d1.setString(s, count, 3)
+          d1.setValue(d, count, 4)
+          d1.setComplex(re, im, count, 5)
+    
+          assert(b == d1(count, 0).getBool)
+          assert(i == d1(count, 1).getInt)
+          assert(l == d1(count, 2).getWord)
+          assert(s == d1(count, 3).getString)
+          assert(d == d1(count, 4).getValue)
+          val c = d1(count, 5).getComplex
+          assert(re == c.real)
+          assert(im == c.imag)
+        }
+        println(d1.pretty)
+    
+        val flat = d1.toBytes
+        val d2 = fromBytes(flat, Type("*(biwsv[m]c[m/s])"))
+        println(d2.pretty)
+      }
   
-      val d3 = Data.arr(
-          Array(
-              Array(
-                  Array("a", "b"),
-                  Array("c", "d")
-              ),
-              Array(
-                  Array("e", "f"),
-                  Array("g", "h")
-              )
-          )
-      )
-      println(d3.pretty)
-      val flat3 = d3.toBytes
-      val d4 = fromBytes(flat3, Type("*3s"))
-      println(d4.pretty)
+      test("multi-dimensional list") {
+        val d1 = Data.arr(
+            Array(
+                Array(0, 1, 2),
+                Array(3, 4, 5),
+                Array(6, 7, 8),
+                Array(9, 10, 11)
+            )
+        )
+        println(d1.pretty)
+        val flat = d1.toBytes
+        val d2 = fromBytes(flat, Type("*2i"))
+        println(d2.pretty)
+    
+        val d3 = Data.arr(
+            Array(
+                Array(
+                    Array("a", "b"),
+                    Array("c", "d")
+                ),
+                Array(
+                    Array("e", "f"),
+                    Array("g", "h")
+                )
+            )
+        )
+        println(d3.pretty)
+        val flat3 = d3.toBytes
+        val d4 = fromBytes(flat3, Type("*3s"))
+        println(d4.pretty)
+      }
     }
   }
 }
