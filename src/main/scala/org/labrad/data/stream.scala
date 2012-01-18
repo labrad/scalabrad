@@ -17,37 +17,38 @@
  * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package org.labrad.data
-
-import scala.collection.JavaConversions._
+package org.labrad
+package data
 
 import java.io.BufferedOutputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.ByteOrder
 
-import org.labrad.types.Type
+import scala.collection.mutable.ArrayBuffer
+
+import types.Type
+
+class PacketInputStream(in: InputStream)
+                       (implicit order: ByteOrder = ByteOrder.BIG_ENDIAN)
+  extends FilterInputStream(in) {
+
+  // Read a single packet from the input stream.
+  def readPacket = Packet.fromBytes(in)
+}
 
 // Output stream that writes LabRAD packets.
-class PacketOutputStream(out: OutputStream)(implicit order: ByteOrder = ByteOrder.BIG_ENDIAN) extends BufferedOutputStream(out) {
+class PacketOutputStream(out: OutputStream)
+                        (implicit order: ByteOrder = ByteOrder.BIG_ENDIAN)
+  extends BufferedOutputStream(out) {
 
   // Write a packet to the output stream.
   def writePacket(packet: Packet) {
-    // flatten records
-    val flatRecs = packet.records.flatMap {
-      case Record(id, data) =>
-        Cluster(Word(id), Str(data.tag), Bytes(data.toBytes)).toBytes
-    }.toArray
-
-    // flatten packet header and append records
-    val ctx = packet.context
-    val packetData = Cluster(Cluster(Word(ctx.high), Word(ctx.low)),
-                             Integer(packet.id),
-                             Word(packet.target),
-                             Bytes(flatRecs))
-    val bytes = packetData.toBytes
-    out.write(bytes)
+    out.write(packet.toBytes)
     out.flush
   }
 }
