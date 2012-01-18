@@ -26,6 +26,47 @@ import java.util.Random
 
 import scala.math
 
+trait EndianAwareInputStream {
+  def byteOrder: ByteOrder
+  def readByte: Byte
+  def readBytes: Array[Byte]
+  def readBool: Boolean
+  def readInt: Int
+  def readWord: Long
+}
+
+object EndianAwareInputStream {
+  def apply(is: ByteArrayInputStream)(implicit order: ByteOrder) = new EndianAwareInputStream {
+    def byteOrder = order
+    def readByte = {
+      val bytes = Array.ofDim[Byte](1)
+      is.read(bytes, 0, 1)
+      bytes(0)
+    }
+    def readBytes = {
+      val bytes = Array.ofDim[Byte](1000)
+      is.read(bytes, 0, 1000)
+      bytes
+    }
+    def readBool = ByteManip.readBool(is)(order)
+    def readInt = ByteManip.readInt(is)(order)
+    def readWord = ByteManip.readWord(is)(order)
+  }
+}
+
+trait EndianAwareOutputStream {
+  def byteOrder: ByteOrder
+  def writeByte(b: Byte)
+  def writeBytes(bs: Array[Byte])
+  def writeBool(b: Boolean)
+  def writeInt(i: Int)
+  def writeWord(w: Long)
+}
+
+object EndianAwareOutputStream {
+  
+}
+
 /**
  * Functions for storing basic data types in arrays of bytes, and
  * for converting arrays of bytes back into basic data types.
@@ -62,12 +103,12 @@ object ByteManip {
     case ByteOrder.BIG_ENDIAN => getIntBE(buf, ofs)
     case ByteOrder.LITTLE_ENDIAN => getIntLE(buf, ofs)
   }
-  def getIntBE(buf: Array[Byte], ofs: Int): Int =
+  private def getIntBE(buf: Array[Byte], ofs: Int): Int =
     ((0xFF & buf(ofs + 0).toInt) << 24 |
      (0xFF & buf(ofs + 1).toInt) << 16 |
      (0xFF & buf(ofs + 2).toInt) << 8 |
      (0xFF & buf(ofs + 3).toInt) << 0).toInt
-   def getIntLE(buf: Array[Byte], ofs: Int): Int =
+  private def getIntLE(buf: Array[Byte], ofs: Int): Int =
     ((0xFF & buf(ofs + 3).toInt) << 24 |
      (0xFF & buf(ofs + 2).toInt) << 16 |
      (0xFF & buf(ofs + 1).toInt) << 8 |
@@ -82,13 +123,13 @@ object ByteManip {
       case ByteOrder.LITTLE_ENDIAN => setIntLE(buf, ofs, data)
     }
   }
-  def setIntBE(buf: Array[Byte], ofs: Int, data: Int) {
+  private def setIntBE(buf: Array[Byte], ofs: Int, data: Int) {
     buf(ofs + 0) = ((data & 0xFF000000) >> 24).toByte
     buf(ofs + 1) = ((data & 0x00FF0000) >> 16).toByte
     buf(ofs + 2) = ((data & 0x0000FF00) >> 8).toByte
     buf(ofs + 3) = ((data & 0x000000FF) >> 0).toByte
   }
-  def setIntLE(buf: Array[Byte], ofs: Int, data: Int) {
+  private def setIntLE(buf: Array[Byte], ofs: Int, data: Int) {
     buf(ofs + 3) = ((data & 0xFF000000) >> 24).toByte
     buf(ofs + 2) = ((data & 0x00FF0000) >> 16).toByte
     buf(ofs + 1) = ((data & 0x0000FF00) >> 8).toByte
@@ -128,12 +169,12 @@ object ByteManip {
     case ByteOrder.BIG_ENDIAN => getWordBE(buf, ofs)
     case ByteOrder.LITTLE_ENDIAN => getWordLE(buf, ofs)
   }
-  def getWordBE(buf: Array[Byte], ofs: Int): Long =
+  private def getWordBE(buf: Array[Byte], ofs: Int): Long =
     ((0xFF & buf(ofs + 0).toLong) << 24 |
      (0xFF & buf(ofs + 1).toLong) << 16 |
      (0xFF & buf(ofs + 2).toLong) << 8 |
      (0xFF & buf(ofs + 3).toLong) << 0).toLong
-  def getWordLE(buf: Array[Byte], ofs: Int): Long =
+  private def getWordLE(buf: Array[Byte], ofs: Int): Long =
     ((0xFF & buf(ofs + 3).toLong) << 24 |
      (0xFF & buf(ofs + 2).toLong) << 16 |
      (0xFF & buf(ofs + 1).toLong) << 8 |
@@ -148,13 +189,13 @@ object ByteManip {
       case ByteOrder.LITTLE_ENDIAN => setWordLE(buf, ofs, data)
     }
   }
-  def setWordBE(buf: Array[Byte], ofs: Int, data: Long) {
+  private def setWordBE(buf: Array[Byte], ofs: Int, data: Long) {
     buf(ofs + 0) = ((data & 0xFF000000) >> 24).toByte
     buf(ofs + 1) = ((data & 0x00FF0000) >> 16).toByte
     buf(ofs + 2) = ((data & 0x0000FF00) >> 8).toByte
     buf(ofs + 3) = ((data & 0x000000FF) >> 0).toByte
   }
-  def setWordLE(buf: Array[Byte], ofs: Int, data: Long) {
+  private def setWordLE(buf: Array[Byte], ofs: Int, data: Long) {
     buf(ofs + 3) = ((data & 0xFF000000) >> 24).toByte
     buf(ofs + 2) = ((data & 0x00FF0000) >> 16).toByte
     buf(ofs + 1) = ((data & 0x0000FF00) >> 8).toByte
@@ -181,7 +222,7 @@ object ByteManip {
     case ByteOrder.BIG_ENDIAN => getLongBE(buf, ofs)
     case ByteOrder.LITTLE_ENDIAN => getLongLE(buf, ofs)
   }
-  def getLongBE(buf: Array[Byte], ofs: Int): Long =
+  private def getLongBE(buf: Array[Byte], ofs: Int): Long =
     ((0xFF & buf(ofs + 0).toLong) << 56 |
      (0xFF & buf(ofs + 1).toLong) << 48 |
      (0xFF & buf(ofs + 2).toLong) << 40 |
@@ -190,7 +231,7 @@ object ByteManip {
      (0xFF & buf(ofs + 5).toLong) << 16 |
      (0xFF & buf(ofs + 6).toLong) << 8 |
      (0xFF & buf(ofs + 7).toLong) << 0).toLong
-  def getLongLE(buf: Array[Byte], ofs: Int): Long =
+  private def getLongLE(buf: Array[Byte], ofs: Int): Long =
     ((0xFF & buf(ofs + 7).toLong) << 56 |
      (0xFF & buf(ofs + 6).toLong) << 48 |
      (0xFF & buf(ofs + 5).toLong) << 40 |
@@ -209,7 +250,7 @@ object ByteManip {
       case ByteOrder.LITTLE_ENDIAN => setLongLE(buf, ofs, data)
     }
   }
-  def setLongBE(buf: Array[Byte], ofs: Int, data: Long) {
+  private def setLongBE(buf: Array[Byte], ofs: Int, data: Long) {
     buf(ofs + 0) = ((data & 0xFF00000000000000L) >> 56).toByte
     buf(ofs + 1) = ((data & 0x00FF000000000000L) >> 48).toByte
     buf(ofs + 2) = ((data & 0x0000FF0000000000L) >> 40).toByte
@@ -219,7 +260,7 @@ object ByteManip {
     buf(ofs + 6) = ((data & 0x000000000000FF00L) >> 8).toByte
     buf(ofs + 7) = ((data & 0x00000000000000FFL) >> 0).toByte
   }
-  def setLongLE(buf: Array[Byte], ofs: Int, data: Long) {
+  private def setLongLE(buf: Array[Byte], ofs: Int, data: Long) {
     buf(ofs + 7) = ((data & 0xFF00000000000000L) >> 56).toByte
     buf(ofs + 6) = ((data & 0x00FF000000000000L) >> 48).toByte
     buf(ofs + 5) = ((data & 0x0000FF0000000000L) >> 40).toByte

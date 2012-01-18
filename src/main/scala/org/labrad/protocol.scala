@@ -14,7 +14,8 @@ import data._
 import types.Type
 
 
-/** Determines the byte order of a byte stream by examining the header of the first packet sent.
+/**
+ * Determines the byte order of a byte stream by examining the header of the first packet sent.
  * 
  * The target id of the first packet should be 1, which will be encoded as 0x00000001 in
  * big-endian byte order or 0x01000000 in little-endian byte order.  The default byte order
@@ -47,7 +48,7 @@ class ByteOrderDecoder extends FrameDecoder with Logging {
           case ByteOrder.BIG_ENDIAN => ByteOrder.LITTLE_ENDIAN
           case ByteOrder.LITTLE_ENDIAN => ByteOrder.BIG_ENDIAN
         }
-        debug("swapping byte order: " + byteOrder)
+        debug("swapped byte order: " + byteOrder)
         channel.getConfig.setBufferFactory(new HeapChannelBufferFactory(byteOrder))
         val newBuffer = ChannelBuffers.wrappedBuffer(buffer.toByteBuffer.order(byteOrder))
         buffer.readBytes(buffer.readableBytes)

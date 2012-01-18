@@ -42,13 +42,192 @@ case class Context(high: Long, low: Long) {
 case class TimeStamp(seconds: Long, fraction: Long)
 
 
+trait IError {
+  def code: Int
+  def message: String
+  def payload: IData
+}
+
+trait IBool {
+  def toBool: Boolean
+}
+
+trait IInt {
+  def toInt: Int
+}
+
+trait IWord {
+  def toLong: Long
+}
+
+trait IBytes {
+  def toBytes: Array[Byte]
+}
+
+trait IStr {
+  def toStr: String
+}
+
+trait IArray extends IData {
+  def apply(idx: Int): IData
+  def size: Int
+  def shape: Array[Int]
+  
+  def toSeq[T: ClassManifest](getter: IData => T): Seq[T] = t match {
+    case TArr(_, 1) => Array.tabulate[T](size)(i => getter(this(i))).toSeq
+    case _ => throw new Exception("Must be an array")
+  }
+  
+  override def toBytes(implicit byteOrder: ByteOrder): Array[Byte] = {
+    val os = new ByteArrayOutputStream
+    for (dim <- shape) ByteManip.writeWord(os, dim)
+    os.toByteArray
+  }
+}
+
+trait ICluster extends IData {
+  def apply(idx: Int): IData
+  def size: Int
+  
+  override def toBytes(implicit byteOrder: ByteOrder): Array[Byte] =
+    (0 until size).flatMap(this(_).toBytes).toArray
+}
+
+trait IData {
+  def t: Type
+    
+  def approxEquals(other: Any): Boolean
+  
+  /** Flatten to array of bytes, suitable for sending over the wire. */
+  def toBytes(implicit byteOrder: ByteOrder): Array[Byte]
+
+  // type checks
+  def isEmpty = t == TEmpty
+  def isBool = t == TBool
+  def isInt = t == TInteger
+  //def isInt8: Boolean
+  //def isInt16: Boolean
+  //def isInt32: Boolean
+  //def isInt64: Boolean
+  def isWord = t == TWord
+  //def isWord8: Boolean
+  //def isWord16: Boolean
+  //def isWord32: Boolean
+  //def isWord64: Boolean
+  def isBytes = t == TStr
+  def isString = t == TStr
+  def isValue = t.isInstanceOf[TValue]
+  def isComplex = t.isInstanceOf[TComplex]
+  def isTime = t == TTime
+  def isArray = t.isInstanceOf[TArr]
+  def isCluster = t.isInstanceOf[TCluster]
+  def isError = t.isInstanceOf[TError]
+  def hasUnits = t match {
+    case TValue(u) => u != null
+    case TComplex(u) => u != null
+    case _ => false
+  }
+  
+  // getters
+  def getBool: Boolean
+  def getInt: Int
+  def getWord: Long
+  def getBytes: Array[Byte]
+  def getString: String
+  def getString(enc: String): String
+  def getValue: Double
+  def getComplex: Complex
+  def getUnits: String
+  def getTime: Date
+  def getTimeStamp: TimeStamp
+  def getArrayShape: Array[Int]
+  def getClusterSize: Int
+  def getError: IError
+
+  // setters
+  def setBool(data: Boolean): Data
+  def setInt(data: Int): Data
+  def setWord(data: Long): Data
+  def setBytes(data: Array[Byte]): Data
+  def setString(data: String): Data
+  def setString(data: String, encoding: String): Data
+  def setValue(data: Double): Data
+  def setComplex(data: Complex): Data
+  def setComplex(re: Double, im: Double): Data
+  def setTime(date: Date): Data
+  def setTimeStamp(timestamp: TimeStamp): Data
+  def setArraySize(size: Int): Data
+  def setArrayShape(shape: Int*): Data
+  def setError(code: Int, message: String): Data
+
+  // indexed setters
+  def setBool(data: Boolean, indices: Int*): Data
+  def setInt(data: Int, indices: Int*): Data
+  def setWord(data: Long, indices: Int*): Data
+  def setBytes(data: Array[Byte], indices: Int*): Data
+  def setString(data: String, indices: Int*): Data
+  def setString(data: String, encoding: String, indices: Int*): Data
+  def setValue(data: Double, indices: Int*): Data
+  def setComplex(data: Complex, indices: Int*): Data
+  def setComplex(re: Double, im: Double, indices: Int*): Data
+  def setTime(date: Date, indices: Int*): Data
+  def setArraySize(size: Int, indices: Int*): Data
+  def setArrayShape(shape: Array[Int], indices: Int*): Data
+
+  // array getters
+  def getBoolArray: Array[Boolean]
+  def getIntArray: Array[Int]
+  def getWordArray: Array[Long]
+  def getValueArray: Array[Double]
+  def getStringArray: Array[String]
+  def getDataArray: Array[Data]
+
+  // vectorized getters
+  //def getDataSeq: Seq[Data] = getDataArray.toSeq
+
+  //def getBoolSeq = getSeq(_.getBool)
+  //def getIntSeq = getSeq(_.getInt)
+  //def getWordSeq = getSeq(_.getWord)
+  //def getStringSeq = getSeq(_.getString)
+  //def getDateSeq = getSeq(_.getTime)
+  //def getDoubleSeq = getSeq(_.getValue)
+  //def getComplexSeq = getSeq(_.getComplex)
+
+  // vectorized indexed getters
+  //  public List<Boolean> getBoolList(int...indices) { return get(indices).getBoolList(); }
+  //  public List<Integer> getIntList(int...indices) { return get(indices).getIntList(); }
+  //  public List<Long> getWordList(int...indices) { return get(indices).getWordList(); }
+  //  public List<String> getStringList(int...indices) { return get(indices).getStringList(); }
+
+
+  // vectorized setters
+  def setSeq[T](data: Seq[T])(implicit setter: Setter[T]): Data
+  def setBoolSeq(data: Seq[Boolean]) = setSeq(data)(Setters.boolSetter)
+  def setIntSeq(data: Seq[Int]) = setSeq(data)(Setters.intSetter)
+  def setWordSeq(data: Seq[Long]) = setSeq(data)(Setters.wordSetter)
+  def setStringSeq(data: Seq[String]) = setSeq(data)(Setters.stringSetter)
+  def setDateSeq(data: Seq[Date]) = setSeq(data)(Setters.dateSetter)
+  def setDoubleSeq(data: Seq[Double]) = setSeq(data)(Setters.valueSetter)
+  def setComplexSeq(data: Seq[Complex]) = setSeq(data)(Setters.complexSetter)
+
+
+  // vectorized indexed setters
+  def setBoolList(data: Seq[Boolean], indices: Int*): Data
+  def setIntList(data: Seq[Int], indices: Int*): Data
+  def setWordList(data: Seq[Long], indices: Int*): Data
+  def setStringList(data: Seq[String], indices: Int*): Data
+  def setDateList(data: Seq[Date], indices: Int*): Data
+  def setDoubleList(data: Seq[Double], indices: Int*): Data
+  def setComplexList(data: Seq[Complex], indices: Int*): Data
+}
+
 /**
  * The Data class encapsulates the data format used to communicate between
  * LabRAD servers and clients.  This data format is based on the
  * capabilities of LabVIEW, from National Instruments.  Each piece of LabRAD
  * data has a Type object which is specified by a String type tag.
  */
-class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) extends Serializable with Cloneable {
+class Data private(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) extends IData with Serializable with Cloneable {
   
   implicit val byteOrder = ByteOrder.BIG_ENDIAN
   
@@ -58,16 +237,8 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
    * @param tag
    *            the LabRAD Type of this Data object
    */
-  def this(t: Type) =
+  protected def this(t: Type) =
     this(t, Data.createFilledByteArray(t.dataWidth), 0, Data.createHeap(t))
-  
-  /**
-   * Construct a Data object for a given LabRAD type tag.
-   * 
-   * @param tag
-   *            the LabRAD type tag of this Data object
-   */
-  def this(tag: String) = this(Type(tag))
     
   /**
    * Make a copy of this Data object.
@@ -110,7 +281,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
    * bytes are to be interpreted.
    * 
    * @param os
-   * @param type 
+   * @param type
    * @param buf
    * @param ofs
    * @param heap
@@ -152,17 +323,15 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
           os.write(sbuf)
 
         case TArr(elem, depth) =>
-          // compute total number of elements in the list
+          // write list shape and compute total number of elements in the list
           var size = 1
           for (i <- 0 until depth) {
             val dim = ByteManip.getInt(buf, ofs + 4*i)(ByteOrder.BIG_ENDIAN)
             ByteManip.writeInt(os, dim)
             size *= dim
           }
-          // write the list shape
-          //os.write(buf, ofs, 4 * depth)
           
-          // write the list data
+          // write list data
           val lbuf = heap(ByteManip.getInt(buf, ofs + 4 * depth)(ByteOrder.BIG_ENDIAN))
           if (elem.fixedWidth && byteOrder == ByteOrder.BIG_ENDIAN) {
             // for fixed-width data, just copy in one big chunk
@@ -179,9 +348,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
             toBytes(os, elem, buf, ofs + delta, heap)
 
         case TError(payload) =>
-          val tag = "is" + payload.toString
-          toBytes(os, Type(tag), buf, ofs, heap)
-          //toBytes(os, TCluster(TInteger, TStr, payload), buf, ofs, heap)
+          toBytes(os, TCluster(TInteger, TStr, payload), buf, ofs, heap)
 
         case _ =>
           throw new RuntimeException("Unknown type.")
@@ -223,13 +390,13 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
         getTime.toString + " (" + getTime.getTime + ")"
       
       case TStr => '"' + (getString flatMap { char => char match {
-          case '\n' => "\\n"
-          case '\t' => "\\t"
           case 'a'|'b'|'c'|'d'|'e'|'f'|'g'|'h'|'i'|'j'|'k'|'l'|'m'|'n'|'o'|'p'|'q'|'r'|'s'|'t'|'u'|'v'|'w'|'x'|'y'|'z'|
                'A'|'B'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'J'|'K'|'L'|'M'|'N'|'O'|'P'|'Q'|'R'|'S'|'T'|'U'|'V'|'W'|'X'|'Y'|'Z'|
                '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|
                ' '|'!'|'@'|'#'|'$'|'%'|'^'|'&'|'*'|'('|')'|'-'|'_'|'='|'+'|'|'|'+'|'['|']'|'{'|'}'|':'|';'|','|'.'|'<'|'>'|'?'|'/'
-            => char.toString()
+            => char.toString
+          case '\n' => "\\n"
+          case '\t' => "\\t"
           case char => "\\x%02x".format(char.asInstanceOf[Int])
         }}) + '"'
 
@@ -271,14 +438,6 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
     } else {
       "[]"
     }
-
-  private def checkType(t: Type) {
-    checkType(_ == t)
-  }
-  
-  private def checkType(f: Type => Boolean) {
-    if (!f(t)) throw new Exception("Type mismatch!")
-  }
 
   /**
    * Extracts a subtype without typechecking.
@@ -402,43 +561,24 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   }
 
 
-  // type checks
-  def isBool = t == TBool
-  def isInt = t == TInteger
-  def isWord = t == TWord
-  def isBytes = t == TStr
-  def isString = t == TStr
-  def isValue = t.isInstanceOf[TValue]
-  def isComplex = t.isInstanceOf[TComplex]
-  def isTime = t == TTime
-  def isArray = t.isInstanceOf[TArr]
-  def isCluster = t.isInstanceOf[TCluster]
-  def isEmpty = t == TEmpty
-  def isError = t.isInstanceOf[TError]
-  def hasUnits = t match {
-    case TValue(u) => u != null
-    case TComplex(u) => u != null
-    case _ => false
-  }
-
   // getters
   def getBool = {
-    checkType(TBool)
+    require(isBool)
     ByteManip.getBool(offset)
   }
 
   def getInt = {
-    checkType(TInteger)
+    require(isInt)
     ByteManip.getInt(offset)
   }
 
   def getWord = {
-    checkType(TWord)
+    require(isWord)
     ByteManip.getWord(offset)
   }
 
   def getBytes = {
-    checkType(TStr)
+    require(isBytes)
     heap(ByteManip.getInt(offset))
   }
 
@@ -446,12 +586,12 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   def getString(enc: String) = new String(getBytes, enc)
 
   def getValue = {
-    checkType(_.isInstanceOf[TValue])
+    require(isValue)
     ByteManip.getDouble(offset)
   }
 
   def getComplex = {
-    checkType(_.isInstanceOf[TComplex])
+    require(isComplex)
     ByteManip.getComplex(offset)
   }
 
@@ -462,7 +602,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   }
 
   def getTime = {
-    checkType(TTime)
+    require(isTime)
     val ofs = offset
     var seconds = ByteManip.getLong(ofs.bytes, ofs.offset)
     var fraction = ByteManip.getLong(ofs.bytes, ofs.offset + 8)
@@ -472,7 +612,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   }
 
   def getTimeStamp = {
-    checkType(TTime)
+    require(isTime)
     val ofs = offset
     var seconds = ByteManip.getLong(ofs.bytes, ofs.offset)
     var fraction = ByteManip.getLong(ofs.bytes, ofs.offset + 8)
@@ -502,13 +642,22 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
       case _ => throw new Exception("Cannot get cluster size of non-cluster data")
     }
 
+  def getError = {
+    require(isError)
+    new IError {
+      def code = getErrorCode
+      def message = getErrorMessage
+      def payload = getErrorPayload
+    }
+  }
+  
   def getErrorCode = {
-    checkType(_.isInstanceOf[TError])
+    require(isError)
     ByteManip.getInt(offset)
   }
 
   def getErrorMessage = {
-    checkType(_.isInstanceOf[TError])
+    require(isError)
     val pos = offset
     val index = ByteManip.getInt(pos.bytes, pos.offset + 4)
     new String(heap(index), Data.STRING_ENCODING)
@@ -546,25 +695,25 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
 
   // setters
   def setBool(data: Boolean): Data = {
-    checkType(TBool)
+    require(isBool)
     ByteManip.setBool(offset, data)
     this
   }
 
   def setInt(data: Int): Data = {
-    checkType(TInteger)
+    require(isInt)
     ByteManip.setInt(offset, data)
     this
   }
 
   def setWord(data: Long): Data = {
-    checkType(TWord)
+    require(isWord)
     ByteManip.setWord(offset, data)
     this
   }
 
   def setBytes(data: Array[Byte]): Data = {
-    checkType(TStr)
+    require(isString)
     val ofs = offset
     var heapLocation = ByteManip.getInt(ofs)
     if (heapLocation == -1) {
@@ -586,13 +735,13 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
     setBytes(data.getBytes(encoding))
 
   def setValue(data: Double): Data = {
-    checkType(_.isInstanceOf[TValue])
+    require(isValue)
     ByteManip.setDouble(offset, data)
     this
   }
 
   def setComplex(data: Complex): Data = {
-    checkType(_.isInstanceOf[TComplex])
+    require(isComplex)
     ByteManip.setComplex(offset, data)
     this
   }
@@ -601,7 +750,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
     setComplex(new Complex(re, im))
 
   def setTime(date: Date): Data = {
-    checkType(TTime)
+    require(isTime)
     val millis = date.getTime
     val seconds = millis / 1000 + Data.DELTA_SECONDS
     var fraction = millis % 1000
@@ -613,7 +762,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
   }
 
   def setTimeStamp(timestamp: TimeStamp) = {
-    checkType(TTime)
+    require(isTime)
     val ofs = offset
     ByteManip.setLong(ofs.bytes, ofs.offset, timestamp.seconds)
     ByteManip.setLong(ofs.bytes, ofs.offset + 8, timestamp.fraction)
@@ -799,14 +948,6 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
     case _ =>
       throw new Exception("must be an array")
   }
-  def setBoolSeq(data: Seq[Boolean]) = setSeq(data)(Setters.boolSetter)
-  def setIntSeq(data: Seq[Int]) = setSeq(data)(Setters.intSetter)
-  def setWordSeq(data: Seq[Long]) = setSeq(data)(Setters.wordSetter)
-  def setStringSeq(data: Seq[String]) = setSeq(data)(Setters.stringSetter)
-  def setDateSeq(data: Seq[Date]) = setSeq(data)(Setters.dateSetter)
-  def setDoubleSeq(data: Seq[Double]) = setSeq(data)(Setters.valueSetter)
-  def setComplexSeq(data: Seq[Complex]) = setSeq(data)(Setters.complexSetter)
-
 
   // vectorized indexed setters
   def setBoolList(data: Seq[Boolean], indices: Int*): Data = {
@@ -847,7 +988,7 @@ class Data(val t: Type, data: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]]) 
 
 object Data {
   val STRING_ENCODING = "ISO-8859-1"
-  val EMPTY = new Data("")
+  val EMPTY = Data("")
   
   // time
   // TODO check timezones in time translation
@@ -856,6 +997,9 @@ object Data {
   // The difference between these two is 24107 days.
   // 
   val DELTA_SECONDS = 24107L * 24L * 60L * 60L
+  
+  def apply(t: Type) = new Data(t)
+  def apply(tag: String) = new Data(Type(tag))
   
   /**
    * Creates a byte array of the specified length filled with 0xff.
@@ -1108,16 +1252,16 @@ object Data {
   }
   
   // static constructors for basic types
-  def valueOf(b: Boolean) = new Data("b").setBool(b)
-  def valueOf(i: Int) = new Data("i").setInt(i)
-  def valueOf(w: Long) = new Data("w").setWord(w)
-  def valueOf(b: Array[Byte]) = new Data("s").setBytes(b)
-  def valueOf(s: String) = new Data("s").setString(s)
-  def valueOf(t: Date) = new Data("t").setTime(t)
-  def valueOf(v: Double) = new Data("v").setValue(v)
-  def valueOf(v: Double, units: String) = new Data("v[" + units + "]").setValue(v)
-  def valueOf(re: Double, im: Double) = new Data("c").setComplex(re, im)
-  def valueOf(re: Double, im: Double, units: String) = new Data("c[" + units + "]").setComplex(re, im)
+  def valueOf(b: Boolean) = Data("b").setBool(b)
+  def valueOf(i: Int) = Data("i").setInt(i)
+  def valueOf(w: Long) = Data("w").setWord(w)
+  def valueOf(b: Array[Byte]) = Data("s").setBytes(b)
+  def valueOf(s: String) = Data("s").setString(s)
+  def valueOf(t: Date) = Data("t").setTime(t)
+  def valueOf(v: Double) = Data("v").setValue(v)
+  def valueOf(v: Double, units: String) = Data("v[" + units + "]").setValue(v)
+  def valueOf(re: Double, im: Double) = Data("c").setComplex(re, im)
+  def valueOf(re: Double, im: Double, units: String) = Data("c[" + units + "]").setComplex(re, im)
 
   // static constructors for arrays of basic types
   def valueOf(a: Array[Boolean]) = {
@@ -1243,8 +1387,7 @@ object Data {
   
   
   // static constructors for specific types
-  def ofType(tag: String) = new Data(tag)
-
+  def ofType(tag: String) = new Data(Type(tag))
   def ofType(t: Type) = new Data(t)
 
   /**
@@ -1350,149 +1493,6 @@ object Data {
         case _ =>
           throw new RuntimeException("Unknown type: " + t)
       }
-  }
-
-  // some basic tests of the data object
-  def main(args: Array[String]) {
-    import java.util.Random
-    
-    val rand = new Random
-
-    for (byteOrder <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
-      implicit val order = byteOrder
-      
-      def test(name: String)(func: => Unit) {
-        println("running test: " + name)
-        func
-        println("okay\n")
-      }
-      
-      test("integer") {
-        val d = new Data("i")
-        d.setInt(100)
-        assert(d.getInt == 100)
-      }
-  
-      test("string") {
-        val d = new Data("s")
-        d.setString("This is a test.")
-        println(d.getString)
-      }
-      
-      test("date") {
-        val d = new Data("t")
-        for (count <- 0 until 100000) {
-          val date1 = new Date(rand.nextLong)
-          d.setTime(date1)
-          val date2 = d.getTime
-          assert(date1 == date2)
-        }
-      }
-  
-      test("string list") {
-        val d1 = new Data("*s")
-        d1.setArraySize(20)
-        for (count <- 0 until 20)
-          d1.setString("This is string " + count, count)
-        for (count <- 0 until 20)
-          println(d1(count).getString)
-      }
-  
-      test("simple cluster") {
-        val d1 = new Data("biwsvc")
-        val b = rand.nextBoolean
-        val i = rand.nextInt
-        val l = math.abs(rand.nextLong) % 4294967296L
-        val s = rand.nextLong.toString
-        val d = rand.nextGaussian
-        val re = rand.nextGaussian
-        val im = rand.nextGaussian
-        
-        d1.setBool(b, 0)
-        d1.setInt(i, 1)
-        d1.setWord(l, 2)
-        d1.setString(s, 3)
-        d1.setValue(d, 4)
-        d1.setComplex(re, im, 5)
-    
-        assert(b == d1(0).getBool)
-        assert(i == d1(1).getInt)
-        assert(l == d1(2).getWord)
-        assert(s == d1(3).getString)
-        assert(d == d1(4).getValue)
-        val c = d1(5).getComplex
-        assert(re == c.real)
-        assert(im == c.imag)
-        println(d1.pretty)
-      }
-  
-      test("list of cluster") {
-        val d1 = new Data("*(biwsv[m]c[m/s])")
-        d1.setArraySize(20)
-        for (count <- 0 until 20) {
-          val b = rand.nextBoolean
-          val i = rand.nextInt
-          val l = math.abs(rand.nextLong) % 4294967296L
-          val s = rand.nextLong.toString
-          val d = rand.nextGaussian
-          val re = rand.nextGaussian
-          val im = rand.nextGaussian
-    
-          d1.setBool(b, count, 0)
-          d1.setInt(i, count, 1)
-          d1.setWord(l, count, 2)
-          d1.setString(s, count, 3)
-          d1.setValue(d, count, 4)
-          d1.setComplex(re, im, count, 5)
-    
-          assert(b == d1(count, 0).getBool)
-          assert(i == d1(count, 1).getInt)
-          assert(l == d1(count, 2).getWord)
-          assert(s == d1(count, 3).getString)
-          assert(d == d1(count, 4).getValue)
-          val c = d1(count, 5).getComplex
-          assert(re == c.real)
-          assert(im == c.imag)
-        }
-        println(d1.pretty)
-    
-        val flat = d1.toBytes
-        val d2 = fromBytes(flat, Type("*(biwsv[m]c[m/s])"))
-        println(d2.pretty)
-      }
-  
-      test("multi-dimensional list") {
-        val d1 = Data.arr(
-            Array(
-                Array(0, 1, 2),
-                Array(3, 4, 5),
-                Array(6, 7, 8),
-                Array(9, 10, 11)
-            )
-        )
-        println(d1.pretty)
-        val flat = d1.toBytes
-        val d2 = fromBytes(flat, Type("*2i"))
-        println(d2.pretty)
-    
-        val d3 = Data.arr(
-            Array(
-                Array(
-                    Array("a", "b"),
-                    Array("c", "d")
-                ),
-                Array(
-                    Array("e", "f"),
-                    Array("g", "h")
-                )
-            )
-        )
-        println(d3.pretty)
-        val flat3 = d3.toBytes
-        val d4 = fromBytes(flat3, Type("*3s"))
-        println(d4.pretty)
-      }
-    }
   }
 }
 
