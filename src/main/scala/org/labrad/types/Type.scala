@@ -98,6 +98,7 @@ object Type {
     def skip(i: Int = 1) { s = s.substring(i) }
     def skipWhitespace { s = s.replaceFirst("[,\\s]*", "") }
 
+    def isEmpty = length == 0
     def length = s.length
     override def toString = s
   }
@@ -105,7 +106,7 @@ object Type {
   def apply(tag: String): Type = {
     val tb = new Buffer(stripComments(tag))
     val buf = Seq.newBuilder[Type]
-    while (tb.length > 0) buf += parseSingleType(tb)
+    while (!tb.isEmpty) buf += parseSingleType(tb)
     buf.result match {
       case Seq() => TEmpty
       case Seq(t) => t
@@ -126,8 +127,8 @@ object Type {
           case '_' => TEmpty
           case '?' => TAny
           case 'b' => TBool
-          case 'i' => TInteger
-          case 'w' => TWord
+          case 'i' => parseInt(tb)
+          case 'w' => parseUInt(tb)
           case 's' => TStr
           case 't' => TTime
           case 'v' => TValue(parseUnits(tb))
@@ -136,16 +137,39 @@ object Type {
           case '<' => parseChoice(tb)
           case '*' => parseArray(tb)
           case 'E' => parseError(tb)
-          case char => throw new Exception("Unknown character in type tag: " + char)
+          case char => error("Unknown character in type tag: " + char)
         }
         tb.skipWhitespace
         t
     }
   }
 
+  private def parseInt(tb: Buffer): Type = {
+    val bitWidth = parseNum(tb) getOrElse 32
+    TInteger
+  }
+  
+  private def parseUInt(tb: Buffer): Type = {
+    val bitWidth = parseNum(tb) getOrElse 32
+    TWord
+  }
+  
+  private def parseNum(tb: Buffer): Option[Int] = {
+    var n = 0
+    var digits = 0
+    while (!tb.isEmpty && tb.peekChar.isDigit) {
+      n = 10*n + tb.get().toInt
+      digits += 1
+    }
+    digits match {
+      case 0 => None
+      case _ => Some(n)
+    }
+  }
+  
   private def parseCluster(tb: Buffer): Type = {
     val subTypes = Seq.newBuilder[Type]
-    while (tb.length > 0) {
+    while (!tb.isEmpty) {
       if (tb.peekChar == ')') {
         tb.getChar
         return TCluster(subTypes.result: _*)
@@ -153,24 +177,24 @@ object Type {
         tb.get(4)
         subTypes.result match {
           case Seq(t) => return TExpando(t)
-          case _ => throw new Exception("Expando cluster requires one element type.")
+          case _ => error("Expando cluster requires one element type.")
         }
       }
       subTypes += parseSingleType(tb)
     }
-    throw new Exception("No closing ) found.")
+    error("No closing ) found.")
   }
 
   private def parseChoice(tb: Buffer): Type = {
     var currentType = Seq.newBuilder[Type]
     val subTypes = Seq.newBuilder[Type]
-    while (tb.length > 0) {
+    while (!tb.isEmpty) {
       tb.peekChar match {
         case '|' =>
           tb.getChar
           subTypes += {
             currentType.result match {
-              case Seq() => throw new Exception("Choice elements cannot be empty clusters")
+              case Seq() => error("Choice elements cannot be empty clusters")
               case Seq(t) => t
               case types => TCluster(types: _*)
             }
@@ -180,32 +204,32 @@ object Type {
           tb.getChar
           subTypes += {
             currentType.result match {
-              case Seq() => throw new Exception("Choice elements cannot be empty clusters")
+              case Seq() => error("Choice elements cannot be empty clusters")
               case Seq(t) => t
               case types => TCluster(types: _*)
             }
           }
           subTypes.result match {
-            case Seq() => throw new Exception("Choice must contain at least one type.")
+            case Seq() => error("Choice must contain at least one type.")
             case subTypes => return TChoice(subTypes: _*)
           }
         case _ =>
           currentType += parseSingleType(tb)
       }
     }
-    throw new Exception("No closing '>' found.")
+    error("No closing '>' found.")
   }
   
   private def parseArray(tb: Buffer): Type = {
     tb.skipWhitespace
     var depth = 0
     var nDigits = 0
-    while (Character.isDigit(tb.peekChar)) {
+    while (tb.peekChar.isDigit) {
       depth = depth * 10 + tb.get().toInt
       nDigits += 1
     }
     if (depth == 0) {
-      if (nDigits > 0) throw new Exception("List depth must be non-zero.")
+      if (nDigits > 0) error("List depth must be non-zero.")
       depth = 1
     }
     tb.skipWhitespace
@@ -219,84 +243,14 @@ object Type {
   private def parseUnits(tb: Buffer): String = {
     tb.skipWhitespace
     val units = new StringBuffer
-    if ((tb.length == 0) || (tb.peekChar != '[')) return null
+    if (tb.isEmpty || (tb.peekChar != '[')) return null
     tb.getChar // drop '['
-    while (tb.length > 0) {
+    while (!tb.isEmpty) {
       val c = tb.getChar
       if (c == ']') return units.toString
       units.append(c)
     }
-    throw new Exception("No closing ] found.")
-  }
-}
-
-
-object TypeTests {
-  def main(args: Array[String]) {
-    val tests = Array(
-        // basic types
-        "b", "i", "w", "is", "*(is)", "v", "v[]", "v[m/s]",
-        "", "?", "*?", "*2?", "(s?)",
-        // comments
-        "s: this has a trailing comment",
-        "ss{embedded comment}is",
-        "ss{embedded comment}is: trailing comment",
-        // whitespace and commas
-        "s,s", "s, s", "* 3 v[m]")
-        
-    for (s <- tests) {
-      val t = Type(s)
-      println("original: " + s)
-      println("parsed: " + t.toString)
-      println("")
-    }
-
-    // check pairs that should match
-    val acceptTests = Array(
-        ("", ""),
-        ("?", ""),
-        ("?", "?"),
-        ("v[s]", "v"),
-        ("v[s]", "v[s]"),
-        ("*s", "*s"),
-        ("*?", "*s"),
-        ("<i|w>", "i"),
-        ("<i|w>", "w"),
-        ("<i|w> <s|v>", "is"),
-        ("<i|w> <s|v>", "iv"),
-        ("<i|w> <s|v>", "ws"),
-        ("<i|w> <s|v>", "wv"),
-        ("<w|s>", "<w|s>"),
-        ("(i...)", "(i)"),
-        ("(i...)", "(ii)"),
-        ("(i...)", "(iii)"),
-        ("(i...)", "(iiii)"),
-        ("(<i|w>...)", "(i)"),
-        ("(<i|w>...)", "(iw)"),
-        ("(<i|w>...)", "(iww)"),
-        ("(<i|w>...)", "(wwww)")
-    )
-    for ((s1, s2) <- acceptTests) {
-      val t1 = Type(s1)
-      val t2 = Type(s2)
-      assert(t1 accepts t2)
-      println("'" + t1 + "' accepts '" + t2 + "'")
-    }
-
-    // check pairs that should not match
-    val notAcceptTests = Array(
-        ("", "i"),
-        ("s", "?"),
-        ("v[s]", "v[m]"),
-        ("(ss)", "(si)"),
-        ("*s", "*2s"),
-        ("<i|w>", "s"))
-    for ((s1, s2) <- notAcceptTests) {
-      val t1 = Type(s1)
-      val t2 = Type(s2)
-      assert(!(t1 accepts t2))
-      println("'" + t1 + "' does not accept '" + t2 + "'")
-    }
+    error("No closing ] found.")
   }
 }
 
