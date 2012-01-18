@@ -82,8 +82,6 @@ class ServerConnection(
     }
   }
   
-  
-  
   /**
    * The main serve loop.  This function pulls requests from the incoming
    * queue and serves them.  Note that this function does not return unless
@@ -108,7 +106,6 @@ class ServerConnection(
     
     this.start
   }
-
 
   override protected def handleRequest(packet: Packet) {
     this ! Serve(packet)
@@ -224,7 +221,7 @@ object ServerConnection extends Logging {
     // because of overloading, there may be multiple methods with the same name and different
     // calling signatures, all of which need to get dispatched to by the same handler.
     
-    val settingMap = mutable.Map.empty[String, Setting]
+    val settingsMap = mutable.Map.empty[String, Setting]
     val settingsById = mutable.Map.empty[Long, Method]
     val settingsByName = mutable.Map.empty[String, Method]
     
@@ -241,8 +238,8 @@ object ServerConnection extends Logging {
 
       // only one overload of a method can have @Setting annotation 
       val name = m.getName
-      require(!settingMap.contains(name), "Multiple overloads '%s' have @Setting annotation".format(name))
-      settingMap(name) = s
+      require(!settingsMap.contains(name), "Multiple overloads '%s' have @Setting annotation".format(name))
+      settingsMap(name) = s
       
       name
     }
@@ -254,13 +251,14 @@ object ServerConnection extends Logging {
       val symbols = classSymbol.children.collect { case m: MethodSymbol => m }
       
       for (name <- settingNames) yield {
-        val setting = settingMap(name)
+        val setting = settingsMap(name)
         val methods = clazz.getMethods.filter(_.getName == name).toSeq
         
         def methodNumParams(m: Method) = m.getGenericParameterTypes.size
         
         val nParams = methods map methodNumParams
-        assert(Set(nParams.toSeq: _*).size == nParams.size, "overloaded settings must have different numbers of parameters")
+        assert(Set(nParams.toSeq: _*).size == nParams.size,
+               "overloaded settings must have different numbers of parameters")
         
         def symbolNumParams(ms: MethodSymbol) = ms.infoType match {
           case NullaryMethodType(_) => 0
@@ -277,7 +275,7 @@ object ServerConnection extends Logging {
     } else {
       // java class
       for (name <- settingNames) yield {
-        val setting = settingMap(name)
+        val setting = settingsMap(name)
         val methods = clazz.getMethods.filter(_.getName == name).toSeq
         setting -> (for (m <- methods) yield (m, None))
       }

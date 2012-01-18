@@ -191,7 +191,7 @@ class ClientHandlerImpl(hub: HandlerHub, channel: Channel, val id: Long, val nam
     }
   }
   
-  // the handle* methods are for incoming packets from this server/client, to be sent elsewhere
+  // the handle* methods are for packets from this client, to be sent elsewhere
   protected def handleMessage(packet: Packet) {
     hub.getHandler(packet.target) match {
       case Some(handler) =>
@@ -214,7 +214,7 @@ class ClientHandlerImpl(hub: HandlerHub, channel: Channel, val id: Long, val nam
     error("got response packet in ClientHandler: " + packet)
   }
   
-  // the send* methods are for outgoing packets from other servers/clients
+  // the send* methods are for packets from other servers/clients, to be sent to this client
   def sendMessage(packet: Packet) {
     channel.write(packet)
   }
