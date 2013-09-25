@@ -1,5 +1,4 @@
-package org.labrad
-package types
+package org.labrad.types
 
 import org.scalatest.FunSuite
 
@@ -13,9 +12,9 @@ class RatioTests extends FunSuite {
   test("ratios cannot have 0 denominator") {
     try {
       val r = Ratio(2, 0)
-      error("ratio created with 0 denominator")
+      sys.error("ratio created with 0 denominator")
     } catch {
-      case _ => // no problem
+      case _: IllegalArgumentException => // expected
     }
   }
   
@@ -34,7 +33,9 @@ class RatioTests extends FunSuite {
     assert(r.num == 3)
     assert(r.denom == 7)
     
-    // TODO: also test multiplication by ints
+    val r2 = Ratio(1, 2) * 5
+    assert(r2.num == 5)
+    assert(r2.denom == 2)
   }
   
   test("ratios can be divided") {
@@ -60,5 +61,40 @@ class RatioTests extends FunSuite {
     assert(Ratio(0) != Ratio(1, 6))
     assert(Ratio(0) != 1)
     assert(Ratio(1) != 0)
+  }
+}
+
+class UnitTests extends FunSuite {
+  test("basic units can be parsed") {
+    val tests = Seq(
+        "m",
+        "s",
+        "m/s",
+        "/s",
+        "m*s",
+        "m^2",
+        "m^1/2",
+        "m^-2",
+        "m^-1/2"
+    )
+    for (test <- tests)
+      assert(Units.parse(test) != null)
+  }
+  
+  def approxEq(a: Double, b: Double) = math.abs(a - b) < 10e-8
+  def converts(a: Double, ua: String, b: Double, ub: String) = {
+    approxEq(Units.convert(ua, ub)(a), b)
+  }
+  
+  test("nonlinear units") {
+    assert(Units.parse("dBm") != null)
+    assert(converts(0, "dBm", 1, "mW"))
+    assert(converts(0, "dBW", 1, "W"))
+    assert(converts(0, "degC", 273.15, "K"))
+  }
+  
+  test("nonlinear units can be used as factors") {
+    assert(converts(1, "dBm/s", 60, "dBm/min"))
+    assert(converts(1, "dBm^2", 1, "dBm*dBm"))
   }
 }

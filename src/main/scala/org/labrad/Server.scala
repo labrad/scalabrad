@@ -1,52 +1,76 @@
-/*
- * Copyright 2008 Matthew Neeley
- *
- * This file is part of JLabrad.
- *
- * JLabrad is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * JLabrad is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 package org.labrad
 
-import data.{Data, Context}
+import java.io.{PrintWriter, StringWriter}
+import org.labrad.data._
+import org.labrad.errors.LabradException
+import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
+import scala.reflect.runtime.universe.TypeTag
+import scala.util.{Success, Failure}
 
-
-trait Server {  
-  var connection: ServerConnection = _
-
-  type ContextType <: ServerContext
-  val contextClass: Class[ContextType]
-  
-  def getServerContext(context: Context): ContextType =
-    contextClass.cast(connection.getServerContext(context))
+abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
+  var cxn: ServerConnection[_] = _
 
   def init: Unit
   def shutdown: Unit
-  
-  def main(args: Array[String]) {
-    val cxn = ServerConnection(this, contextClass)
+
+  def main(args: Array[String]): Unit = {
+    val cxn = ServerConnection[T](this, "localhost", 7682, "")
     cxn.connect
-    Runtime.getRuntime.addShutdownHook(new Thread {
-      override def run { cxn.triggerShutdown }
-    })
+    sys.ShutdownHookThread(cxn.triggerShutdown)
     cxn.serve
   }
 }
 
-abstract class ServerContext(val connection: Connection, val server: Server, val context: Context) {
-  var source: Long = _
-
+abstract class ServerContext(val cxn: Connection, val server: Server[_], val context: Context) {
   def init: Unit
   def expire: Unit
+}
+
+object Server {
+  def handle(packet: Packet)(f: RequestContext => Data): Packet = {
+    val Packet(request, source, context, records) = packet
+
+    def process(records: Seq[Record]): Seq[Record] = records match {
+      case Seq(Record(id, data), tail @ _*) =>
+        val resp = try {
+          f(RequestContext(source, context, id, data))
+        } catch {
+          case ex: Throwable =>
+            val sw = new StringWriter
+            ex.printStackTrace(new PrintWriter(sw))
+            Error(0, sw.toString)
+        }
+        Record(id, resp) +: (if (resp.isError) Seq() else process(tail))
+
+      case Seq() =>
+        Seq()
+    }
+    Packet(-request, source, context, process(records))
+  }
+
+  def handleAsync(packet: Packet)(f: RequestContext => Future[Data])(implicit ec: ExecutionContext): Future[Packet] = {
+    val Packet(request, source, context, records) = packet
+
+    def process(records: Seq[Record]): Future[Seq[Record]] = records match {
+      case Seq(Record(id, data), tail @ _*) =>
+        f(RequestContext(source, context, id, data)) recover {
+          case ex =>
+            val sw = new StringWriter
+            ex.printStackTrace(new PrintWriter(sw))
+            Error(0, sw.toString)
+        } flatMap {
+          case resp if resp.isError =>
+            Future.successful { Record(id, resp) +: Seq() }
+          case resp =>
+            process(tail) map { Record(id, resp) +: _ }
+        }
+
+      case Seq() =>
+        Future.successful(Seq())
+    }
+    process(records) map {
+      Packet(-request, source, context, _)
+    }
+  }
 }

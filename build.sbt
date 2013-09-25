@@ -1,46 +1,66 @@
-name := "Scalabrad"
-
-version := "0.1"
-
 organization := "org.labrad"
 
-scalaVersion := "2.9.1"
+name := "scalabrad"
 
-libraryDependencies += "junit" % "junit" % "4.8" % "test"
+version := "0.2-SNAPSHOT"
 
-// netty
-resolvers += "JBoss Netty repository" at "https://repository.jboss.org/nexus/content/repositories/releases/"
+scalaVersion := "2.11.2"
 
-libraryDependencies += "org.jboss.netty" % "netty" % "3.2.4.Final"
+scalacOptions ++= Seq(
+  "-deprecation",
+  "-target:jvm-1.6",
+  "-feature"
+  // "-Ymacro-debug-lite"
+)
+
+EclipseKeys.withSource := true
+
+EclipseKeys.eclipseOutput := Some("target/eclipseOutput")
+
+resolvers += Resolver.sonatypeRepo("snapshots")
+
+resolvers += Resolver.sonatypeRepo("releases")
+
+//addCompilerPlugin("org.scala-lang.plugins" % "macro-paradise_2.11.1" % "2.0.0-SNAPSHOT")
 
 
-// akka
-resolvers += "Akka Repo" at "http://akka.io/repository"
+libraryDependencies ++= Seq(
+  "org.scala-lang" % "scala-reflect" % scalaVersion.value,
+  "org.scala-lang" % "scala-actors" % scalaVersion.value,
+  "org.scala-lang.modules" %% "scala-swing" % "1.0.1",
+  "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1"
+)
 
-// don't know why it can't find this automatically...
-resolvers += "GuiceyFruit Release Repository" at "http://guiceyfruit.googlecode.com/svn/repo/releases/"
+libraryDependencies ++= Seq(
+  "joda-time" % "joda-time" % "2.1" withSources(),
+  "org.joda" % "joda-convert" % "1.2" withSources(),
+  "org.slf4j" % "slf4j-api" % "1.7.2"
+)
 
-libraryDependencies += "se.scalablesolutions.akka" % "akka-typed-actor" % "1.1.2"
+publishArtifact in (Compile, packageDoc) := false
 
 
 // logging
-libraryDependencies += "org.clapper" % "grizzled-slf4j_2.9.0" % "0.5"
-
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "0.9.29"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.0.6" withSources()
 
 
-// scala test
-//libraryDependencies += "org.scalatest" %% "scalatest" % "1.6.1" % "test"
-libraryDependencies += "org.scalatest" % "scalatest_2.9.0" % "1.6.1" //% "test"
+// akka
+resolvers ++= Seq(
+  "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
+  "Typesafe Snapshots" at "http://repo.typesafe.com/typesafe/snapshots/"
+)
+
+libraryDependencies ++= Seq(
+  "com.typesafe.akka" %% "akka-actor" % "2.3.4" withSources(),
+  "com.typesafe.akka" %% "akka-remote" % "2.3.4" withSources(),
+  "com.typesafe.akka" %% "akka-slf4j" % "2.3.4" withSources()
+)
 
 
-// specs2
-resolvers += "Scala-Tools Maven2 Snapshots Repository" at "http://scala-tools.org/repo-snapshots"
+// testing
+libraryDependencies ++= Seq(
+  "org.scalatest" %% "scalatest" % "2.2.0" % "test"
+)
 
-//libraryDependencies += "org.specs2" %% "specs2" % "1.4" % "test"
+parallelExecution in Test := false
 
-//libraryDependencies += "org.specs2" %% "specs2-scalaz-core" % "6.0.RC2" % "test"
-
-
-// scala check
-libraryDependencies += "org.scala-tools.testing" %% "scalacheck" % "1.9" //% "test"

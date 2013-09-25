@@ -1,128 +1,115 @@
 package org.labrad
 
-import java.io.ByteArrayInputStream
 import java.nio.ByteOrder
-
+import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
 import org.jboss.netty.buffer.{ChannelBuffer, ChannelBuffers, HeapChannelBufferFactory}
 import org.jboss.netty.channel._
 import org.jboss.netty.handler.codec.frame.FrameDecoder
 import org.jboss.netty.handler.codec.oneone.{OneToOneDecoder, OneToOneEncoder}
-
-import grizzled.slf4j.Logging
-
-import data._
-import types.Type
+import org.labrad.data._
+import org.labrad.types._
+import org.labrad.util.Logging
 
 
 /**
  * Determines the byte order of a byte stream by examining the header of the first packet sent.
- * 
+ *
  * The target id of the first packet should be 1, which will be encoded as 0x00000001 in
  * big-endian byte order or 0x01000000 in little-endian byte order.  The default byte order
  * for most network protocols is big-endian, and this is the recommended endianness.  If
  * little-endian byte order is detected, we create a new buffer factory for this channel
  * so the byte order will be properly handled.
  */
-@ChannelHandler.Sharable
-class ByteOrderDecoder extends FrameDecoder with Logging {
-  
-  override def decode(ctx: ChannelHandlerContext, channel: Channel, buffer: ChannelBuffer): AnyRef = {
+object ByteOrderDecoder extends FrameDecoder with Logging {
+
+  override def decode(ctx: ChannelHandlerContext, channel: Channel, buf: ChannelBuffer): AnyRef = {
     // Wait until full header is available
-    if (buffer.readableBytes < 20) return null
-    
+    if (buf.readableBytes < 20) return null
+
     // Unpack the header
-    buffer.markReaderIndex
-    val ctxHigh = buffer.readInt
-    val ctxLow = buffer.readInt
-    val request = buffer.readInt
-    val target = buffer.readInt
-    val dataLen = buffer.readInt
-    buffer.resetReaderIndex
-    
+    buf.markReaderIndex
+    val ctxHigh = buf.readInt
+    val ctxLow = buf.readInt
+    val request = buf.readInt
+    val target = buf.readInt
+    val dataLen = buf.readInt
+    buf.resetReaderIndex
+
     val newBuffer = target match {
       case 0x00000001 => // endianness is okay. do nothing
-        debug("standard byte order")
-        buffer
+        log.debug("standard byte order")
+        buf
       case 0x01000000 => // endianness needs to be reversed
-        val byteOrder = channel.getConfig.getBufferFactory.getDefaultOrder match {
-          case ByteOrder.BIG_ENDIAN => ByteOrder.LITTLE_ENDIAN
-          case ByteOrder.LITTLE_ENDIAN => ByteOrder.BIG_ENDIAN
+        val byteOrder = buf.order match {
+          case BIG_ENDIAN => LITTLE_ENDIAN
+          case LITTLE_ENDIAN => BIG_ENDIAN
         }
-        debug("swapped byte order: " + byteOrder)
+        log.debug(s"swapped byte order: ${byteOrder}")
         channel.getConfig.setBufferFactory(new HeapChannelBufferFactory(byteOrder))
-        val newBuffer = ChannelBuffers.wrappedBuffer(buffer.toByteBuffer.order(byteOrder))
-        buffer.readBytes(buffer.readableBytes)
+        val newBuffer = ChannelBuffers.wrappedBuffer(buf.toByteBuffer.order(byteOrder))
+        buf.readBytes(buf.readableBytes)
         newBuffer
       case _ =>
-        throw new Exception("Invalid login packet")
+        sys.error("Invalid login packet")
     }
-    
+
+    // having determined the byte order, our work here is done
     ctx.getPipeline.remove(this)
-    
+
     // hand off data to packet decoder
     newBuffer.readBytes(newBuffer.readableBytes)
   }
 }
 
 
-/** Decodes incoming bytes into LabRAD packets */
-@ChannelHandler.Sharable
-class PacketDecoder extends FrameDecoder with Logging {
-  protected override def decode(ctx: ChannelHandlerContext, channel: Channel, buffer: ChannelBuffer): AnyRef = {
-    // Wait until the header is available.
-    if (buffer.readableBytes < 20) return null
-    
-    debug("decoding packet: " + channel.getConfig.getBufferFactory.getDefaultOrder)
-    debug("buffer byteOrder: " + buffer.order)
-    
+/**
+ * Decoder that reads incoming LabRAD packets on a netty channel
+ */
+object PacketDecoder extends FrameDecoder with Logging {
+  protected override def decode(ctx: ChannelHandlerContext, ch: Channel, buf: ChannelBuffer): AnyRef = {
+    // Wait until the full header is available
+    if (buf.readableBytes < 20) return null
+
+    log.trace(s"decoding packet: ${ch.getConfig.getBufferFactory.getDefaultOrder}")
+    log.trace(s"buffer byteOrder: ${buf.order}")
+
     // Unpack the header
-    buffer.markReaderIndex
-    val high = buffer.readUnsignedInt
-    val low = buffer.readUnsignedInt
-    val request = buffer.readInt
-    val source = buffer.readUnsignedInt
-    val dataLen = buffer.readInt
-    
-    // Wait until enough data is available
-    if (buffer.readableBytes < dataLen) {
-      buffer.resetReaderIndex
-      return null
+    buf.markReaderIndex
+    val high = buf.readUnsignedInt
+    val low = buf.readUnsignedInt
+    val request = buf.readInt
+    val target = buf.readUnsignedInt
+    val dataLen = buf.readInt
+
+    if (buf.readableBytes < dataLen) {
+      // Wait until enough data is available
+      buf.resetReaderIndex
+      null
+    } else {
+      // Unpack the received data into a list of records
+      val data = Array.ofDim[Byte](dataLen)
+      buf.readBytes(data)
+      val records = Packet.extractRecords(data)(buf.order)
+
+      // Pass along the assembled packet
+      Packet(request, target, Context(high, low), records)
     }
-    
-    // Unpack the received data into a list of records
-    val decoded = Array.ofDim[Byte](dataLen)
-    buffer.readBytes(decoded)
-    val stream = new ByteArrayInputStream(decoded)
-    
-    implicit val byteOrder = buffer.order
-    val records = Seq.newBuilder[Record]
-    while (stream.available > 0) {
-      val recData = Data.fromBytes(stream, Type.RECORD)
-      val Cluster(Word(id), Str(tag), Bytes(data)) = recData
-      records += Record(id, Data.fromBytes(data, Type(tag)))
-    }
-    Packet(request, source, Context(high, low), records.result)
   }
 }
 
 
-/** Flattens outgoing LabRAD packets into a stream of bytes */
-@ChannelHandler.Sharable
-class PacketEncoder extends OneToOneEncoder with Logging {
-  protected override def encode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef): AnyRef =
+/**
+ * Encoder that outputs LabRAD packets on a netty channel
+ */
+object PacketEncoder extends OneToOneEncoder with Logging {
+  override def encode(ctx: ChannelHandlerContext, ch: Channel, msg: AnyRef): AnyRef =
     msg match {
-      case Packet(request, source, context, records) =>
-        val factory = channel.getConfig.getBufferFactory
+      case packet: Packet =>
+        val factory = ch.getConfig.getBufferFactory
         implicit val byteOrder = factory.getDefaultOrder
-        
-        debug("write packet: " + msg)
-        val flatRecs = records.toArray.flatMap {
-          case Record(id, data) =>
-            Cluster(Word(id), Str(data.tag), Bytes(data.toBytes)).toBytes
-        }
-        
-        val data = Cluster(context.toData, Integer(request), Word(source), Bytes(flatRecs))
-        val bytes = data.toBytes
+
+        log.trace(s"write packet: $msg")
+        val bytes = packet.toBytes
         val buf = ChannelBuffers.dynamicBuffer(factory)
         buf.writeBytes(bytes)
         buf
@@ -130,17 +117,21 @@ class PacketEncoder extends OneToOneEncoder with Logging {
 }
 
 
-/** Decoder for incoming packets that replaces high context 0 with the connection id */
+/**
+ * Transforms incoming packets by replacing high context 0 with the connection id
+ */
 class ContextDecoder(id: Long) extends OneToOneDecoder {
   override def decode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef) = msg match {
     case packet @ Packet(_, _, Context(0, low), _) =>
-      packet.copy(context = Context(id, 0))
+      packet.copy(context = Context(id, low))
     case msg => msg
   }
 }
 
 
-/** Encoder for outgoing packets that sets the high context to 0 if it is equal to the connection id */
+/**
+ * Transforms outgoing packets by setting high context to 0 if it is equal to the connection id
+ */
 class ContextEncoder(id: Long) extends OneToOneEncoder {
   override def encode(ctx: ChannelHandlerContext, channel: Channel, msg: AnyRef) = msg match {
     case packet @ Packet(_, _, Context(`id`, low), _) =>

@@ -1,1095 +1,537 @@
-/*
- * Copyright 2008 Matthew Neeley
- * 
- * This file is part of JLabrad.
- *
- * JLabrad is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- * 
- * JLabrad is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 package org.labrad
 
-import java.lang.reflect.{Method, GenericArrayType, ParameterizedType, Type => JType, InvocationTargetException}
+import java.lang.reflect.InvocationTargetException
+import java.util.Date
+import org.labrad.annotations.Setting
+import org.labrad.annotations.Matchers._
+import org.labrad.data._
+import org.labrad.types.{Pattern, PArr, PChoice, PCluster, PValue, PComplex, TNone}
+import org.labrad.util.Logging
+import scala.collection.mutable
+import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.runtime.universe.{Return => _, _}
+import scala.reflect.runtime.currentMirror
 
-import scala.collection._
-import scala.tools.scalap._
-import scala.tools.scalap.scalax.rules.scalasig
-import scala.tools.scalap.scalax.rules.scalasig.{Symbol, MethodSymbol, MethodType, NullaryMethodType, TypeRefType}
+case class SettingInfo(id: Long, name: String, doc: String, accepts: Pattern, returns: Pattern)
 
-import grizzled.slf4j.Logging
-
-import annotations.Setting
-import annotations.Matchers._
-import data._
-import types._
-
-
-case class SettingInfo(
-    id: Long,
-    name: String,
-    doc: String,
-    accepted: Seq[TypeDescriptor],
-    returned: Seq[TypeDescriptor]) {
-  def accepts(typ: Type): Boolean = accepted exists { _.accepts(typ) }
-  def accepts(data: Data): Boolean = accepts(data.t)
-  def registrationInfo =
-    Cluster(
-      Word(id),
-      Str(name),
-      Str(doc),
-      Arr(accepted map { td => Str(td.tag) }),
-      Arr(returned map { td => Str(td.tag) }),
-      Str(""))
+case class ServerInfo(id: Long, name: String, doc: String, settings: Seq[SettingInfo]) {
+  def setting(id: Long): Option[SettingInfo] = settings.find(_.id == id)
+  def setting(name: String): Option[SettingInfo] = settings.find(_.name == name)
 }
 
-
-trait SettingHandler extends Function2[Any, Data, Data] {
-  val info: Setting
-  val accepts: Seq[TypeDescriptor]
-  val returns: Seq[TypeDescriptor]
-  def isDefinedAt(data: Data): Boolean = accepts exists { _.accepts(data.t) }
-  def registrationInfo =
-    Cluster(
-      Word(info.id),
-      Str(info.name),
-      Str(info.doc),
-      Arr(accepts map { td => Str(td.tag) }),
-      Arr(returns map { td => Str(td.tag) }),
-      Str(""))
-  def apply(context: Any, data: Data): Data
-}
-
-trait MethodHandler extends SettingHandler {
-  val method: Method
-  def input(data: Data): Seq[Any] = Seq(data)
-  def output(ans: Any): Data = ans.asInstanceOf[Data]
-  def apply(context: Any, data: Data): Data = {
-    val args = input(data) map { _.asInstanceOf[AnyRef] }
-    val ans = try {
-      method.invoke(context.asInstanceOf[AnyRef], args: _*)
-    } catch {
-      case e: InvocationTargetException => throw e.getCause
-    }
-    output(ans)
-  }
-}
-
-trait ZeroArg {
-  this: MethodHandler =>
-  val accepts = Seq(TypeDescriptor(""))
-  override def apply(context: Any, data: Data): Data = {
-    val ans = try {
-      method.invoke(context.asInstanceOf[AnyRef])
-    } catch {
-      case e: InvocationTargetException => throw e.getCause
-    }
-    output(ans)
-  }
-}
-
-trait SingleArg {
-  this: MethodHandler =>
-  val getter: Data => Any
-  override def input(data: Data): Seq[Any] = Seq(getter(data))
-}
-
-trait MultiArg {
-  this: MethodHandler =>
-  val getters: Seq[Data => Any]
-  override def input(data: Data): Seq[Any] =
-    for (i <- 0 until getters.length) yield {
-      val getter = getters(i)
-      val arg = data(i)
-      getter(arg)
-    }
-}
-
-trait VoidOutput {
-  this: MethodHandler =>
-  val returns = Seq(TypeDescriptor(""))
-  override def output(ans: Any): Data = Data.EMPTY
-}
-
-class MultiArgHandler(
-  val method: Method,
-  val info: Setting,
-  val accepts: Seq[TypeDescriptor],
-  val returns: Seq[TypeDescriptor],
-  val getters: Seq[Data => Any])
-    extends MethodHandler with MultiArg
-
-class MultiArgVoidHandler(
-  val method: Method,
-  val info: Setting,
-  val accepts: Seq[TypeDescriptor],
-  val getters: Seq[Data => Any])
-    extends MethodHandler with MultiArg with VoidOutput
-
-class SingleArgHandler(
-  val method: Method,
-  val info: Setting,
-  val accepts: Seq[TypeDescriptor],
-  val returns: Seq[TypeDescriptor],
-  val getter: Data => Any)
-    extends MethodHandler with SingleArg
-
-class SingleArgVoidHandler(
-  val method: Method,
-  val info: Setting,
-  val accepts: Seq[TypeDescriptor],
-  val getter: Data => Any)
-    extends MethodHandler with SingleArg with VoidOutput
-
-class ZeroArgHandler(
-  val method: Method,
-  val info: Setting,
-  val returns: Seq[TypeDescriptor])
-    extends MethodHandler with ZeroArg
-
-class ZeroArgVoidHandler(
-  val method: Method,
-  val info: Setting)
-    extends MethodHandler with ZeroArg with VoidOutput
-
-class OverloadedSettingHandler(
-  val info: Setting,
-  val accepts: Seq[TypeDescriptor],
-  val returns: Seq[TypeDescriptor],
-  handlers: Seq[SettingHandler])
-    extends SettingHandler {
-  override def apply(context: Any, data: Data): Data = {
-    handlers find { _.isDefinedAt(data) } match {
-      case Some(handler) => handler(context, data).asInstanceOf[Data]
-      case None => throw new RuntimeException("No handler found for type '" + data.tag + "'")
-    }
-  }
-}
+case class Handler(f: PartialFunction[Data, Data], accepts: Pattern = Pattern("?"), returns: Pattern = Pattern("?"))
 
 object SettingHandler extends Logging {
-  
-  /**
-   * Create a SettingHandler for a method or set of overridden methods
-   * @param s annotation containing 
-   * @param overloads
-   * @return
-   */
-  def forMethods(s: Setting, overloads: Seq[(Method, Option[MethodSymbol])]): SettingHandler = {
-    // TODO add returned types to typed handlers since they may need to flatten objects before sending them
+  // TODO handle annotated types such as units
+  // TODO if there is an annotation and inferred type, make sure they are compatible
 
-    debug("creating setting handler for '" + s.name + "'")
-    
-    // for registration with labrad, we need to keep track of the full list
-    // of accepted and returned types across all overloads of this method
-    val accepts = mutable.Buffer.empty[TypeDescriptor] // list of all accepted types
-    val returns = mutable.Buffer.empty[TypeDescriptor] // list of all returned types
-    
-    val handlers = for ((m, symbol) <- overloads) yield {
-      // get a handler for this overload
-      val handler = getHandler(s, m, symbol)
-            
-      // get accepted types for this overload
-      // new accepted types will be kept if there is not already a more
-      // general type that accepts (is more general than) the new type
-      for (t <- handler.accepts)
-        if (!accepts.exists(_ accepts t )) accepts += t
-      
-      // get returned types for this overload
-      // new return types will be kept if there is not already a more
-      // general type that accepts (is more general than) the new type
-      for (t <- handler.returns)
-        if (!returns.exists(_ accepts t)) returns += t
-      
-      handler
-    }
-    
-    if (handlers.size == 1) {
-      // just use the unique handler
-      // need to specify return types here
-      handlers(0)
+  /** Get metadata and an unbound handler function for a sequence of overridden methods */
+  def forMethods(methods: Seq[(MethodSymbol, Seq[MethodSymbol])]): (Pattern, Pattern, Any => PartialFunction[RequestContext, Data]) = {
+    require(methods.size > 0, "must specify at least one method")
 
-    } else {
-      // make a map from all types to the appropriate handlers
-      new OverloadedSettingHandler(s, accepts.toSeq, returns.toSeq, handlers)
-    }
+    val (accepts, returns, binders) = methods.map { case (m, defaults) => makeHandler(m, defaults) }.unzip3
+
+    // create a binder that binds all overloads, then tries each one in sequence
+    val binder = (self: Any) => binders.map(_(self)).reduceLeft(_ orElse _)
+
+    (Pattern.reduce(accepts: _*), Pattern.reduce(returns: _*), binder)
   }
 
+  /** Get metadata and an unbound handler function for a method */
+  def makeHandler(m: MethodSymbol, defaultMethods: Seq[MethodSymbol]): (Pattern, Pattern, Any => PartialFunction[RequestContext, Data]) = {
+    val (types, returnType) = m.typeSignature match {
+      case PolyType(args, ret) => (args.map(_.asType), ret)
+      case MethodType(args, ret) => (args.map(_.asTerm), ret)
+      case NullaryMethodType(ret) => (Nil, ret)
+    }
 
-  /**
-   * Get a handler for a particular method, along with a list of all
-   * accepted types for the method (since each parameter may accept multiple types) 
-   * @param m
-   * @param s
-   * @return
-   */
-  def getHandler(s: Setting, m: Method, symbol: Option[MethodSymbol]): SettingHandler = {
-    // each parameter to the method has a type that we can infer,
-    // as well as optional types from the @Accepts annotation
+    require(types.length >= 1, s"cannot make handler for $m: expected at least 1 parameter")
+    require(types(0).typeSignature <:< typeOf[RequestContext], s"cannot make handler for $m: first parameter must be RequestContext")
 
-    val jTypes = m.getGenericParameterTypes.toSeq
-    val jAnnots = m.getParameterAnnotations.toSeq.map(_.toSeq)
-    val sTypes = symbol match {
-      case Some(symbol) =>
-        symbol.infoType match {
-          case NullaryMethodType(_) =>
-            Seq()
-          case mt: MethodType =>
-            mt.paramSymbols map { case ms: MethodSymbol => Some(ms) }
+    // a sequence of optional defaults for every parameter of the method
+    val defaults = for (i <- 2 to types.length) yield
+      defaultMethods.find(_.name.decodedName.toString == m.name.decodedName.toString + "$default$" + i)
+
+    // get patterns and unpackers for all method parameters
+    val (patterns, unpackers) = types.tail.map(t => inferParamType(t.typeSignature, t.annotations)).unzip
+
+    // modify argument patterns to allow none if the argument has a default
+    val defaultPatterns = for ((p, defaultOpt) <- patterns zip defaults) yield
+      if (defaultOpt.isDefined) Pattern.reduce(p, TNone) else p
+
+    // create patterns for combined arguments, including with trailing optional args dropped
+    // each pattern is combined in a tuple with the number of function arguments included in
+    // the pattern and the number of function arguments omitted from the pattern
+    val acceptPats = defaultPatterns match {
+      case Seq()  => Seq((TNone, 0, 0))
+      case Seq(p) => Seq((p, 1, 0))
+      case ps     =>
+        // create additional patterns with trailing optional arguments omitted
+        val omittable = defaultPatterns.reverse.takeWhile(_ accepts TNone).length
+        val patterns = for (omitted <- omittable to 0 by -1) yield {
+          val pattern = ps.dropRight(omitted) match {
+            case Seq()  => TNone
+            case Seq(p) => p
+            case ps     => PCluster(ps: _*)
+          }
+          (pattern, ps.length - omitted, omitted)
         }
-      case None =>
-        jTypes map { _ => None }
-        
+        // ensure that patterns with omitted arguments are unambiguous
+        // ambiguity can occur if the first argument accepts a cluster
+        // that matches another pattern with multiple arguments
+        for {
+          (p1, 1, _) <- patterns
+          (pn, n, _) <- patterns
+          if n > 1
+          p <- pn.expand
+        } require(!p1.accepts(p), s"ambiguous patterns: $p accepted with either 1 or $n arguments")
+        patterns
     }
-    assert(jTypes.size == sTypes.size, "must have same number of java and scala parameters")
-    val params = jTypes zip jAnnots zip sTypes
-    
-    val typesAndGetters = for (((cls, annots), symbol) <- params) yield {
-      // infer the type of each argument and create a getter for it
-      debug("inferring type: " + cls + ", " + annots + ", " + symbol)
-      val (inferredType, getter) = symbol match {
-        case Some(symbol) =>
-          inferType(symbol.infoType)
-        case None =>
-          inferType(cls)
+    val acceptPat = Pattern.reduce(acceptPats.map(_._1): _*)
+
+    // get return pattern and function to repack the return value into data
+    val (returnPat, repack) = inferReturnType(returnType, m.annotations)
+
+    val binder = (self: Any) => {
+      // bind default methods to this instance
+      val defaultFuncs = defaults.map { _.map(method => invoke(self, method)) }
+
+      // modify unpackers to call default methods if they receive empty data
+      val defaultUnpackers = for ((unpack, defaultOpt) <- unpackers zip defaultFuncs) yield {
+        defaultOpt match {
+          case Some(default) => (d: Data) => if (d.isNone) default(Nil) else unpack(d)
+          case None => unpack
+        }
       }
-      
-      // For all @Accepts annotations on this parameter,
-      // check that accepted types are compatible with inferred type.
-      // If there is no such annotation, use the inferred type
-      var accepts = for (Accepts(tag) <- annots) yield TypeDescriptor(tag)
-      if (accepts.isEmpty) accepts = Seq(TypeDescriptor(inferredType))
-      
-      // check that the inferred type accepts all annotatation-specified types
-      for (td <- accepts)
-        require(inferredType accepts td.typ,
-          "Accepted type '%s' does not match inferred type '%s'".format(td.tag, inferredType))
-      
-      // return accepted types and getter
-      (accepts, getter)
-    }
-    val (paramTypes, getters) = typesAndGetters.unzip
-    
-    // create a handler of the appropriate type for this setting
-    val numIn = paramTypes.length
-    val numOut = m.getReturnType match { case VoidType() => 0; case _ => 1 }    
-    val accepts = getAcceptedTypeCombinations(paramTypes)
-    val returns = getReturnedTypes(m)
-    
-    debug("method: " + m)
-    debug("accepts: " + accepts.mkString(" | "))
-    debug("returns: " + returns.mkString(" | "))
-    
-    (numIn, numOut) match {
-      case (0, 0) => new ZeroArgVoidHandler(m, s)
-      case (0, 1) => new ZeroArgHandler(m, s, returns)
 
-      case (1, 0) => new SingleArgVoidHandler(m, s, accepts, getters(0))
-      case (1, 1) => new SingleArgHandler(m, s, accepts, returns, getters(0))
-
-      case (_, 0) => new MultiArgVoidHandler(m, s, accepts, getters)
-      case (_, 1) => new MultiArgHandler(m, s, accepts, returns, getters)
-    }
-  }
-  
-  private object BooleanType {
-    def unapply(cls: JType): Boolean =
-      (cls == classOf[Boolean]) || (cls == classOf[java.lang.Boolean])
-  }
-  
-  private object IntType {
-    def unapply(cls: JType): Boolean =
-      (cls == classOf[Int]) || (cls == classOf[java.lang.Integer])
-  }
-  
-  private object LongType {
-    def unapply(cls: JType): Boolean =
-      (cls == classOf[Long]) || (cls == classOf[java.lang.Long])
-  }
-  
-  private object DoubleType {
-    def unapply(cls: JType): Boolean =
-      (cls == classOf[Double]) || (cls == classOf[java.lang.Double])
-  }
-  
-  private object StringType {
-    def unapply(cls: JType): Boolean = cls == classOf[String]
-  }
-  
-  private object DataType {
-    def unapply(cls: JType): Boolean = cls == classOf[Data]
-  }
-  
-  private object VoidType {
-    def unapply(cls: JType): Boolean =
-      (cls == classOf[Void]) || (cls.toString == "void")
-  }
-  
-  private object BooleanArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[Boolean]]
-  }
-  
-  private object ByteArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[Byte]]
-  }
-  
-  private object IntArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[Int]]
-  }
-  
-  private object LongArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[Long]]
-  }
-  
-  private object StringArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[String]]
-  }
-  
-  private object DoubleArrayType {
-    def unapply(cls: JType): Boolean = cls == classOf[Array[Double]]
-  }
-  
-  private object ArrayType {
-    def unapply(cls: JType): Option[JType] =
-      if (cls.isInstanceOf[GenericArrayType])
-        Some(cls.asInstanceOf[GenericArrayType].getGenericComponentType)
-      else
-        None
-  }
-  
-  private object ParamType {
-    def unapply(cls: JType): Option[(JType, Array[JType])] = {
-      if (cls.isInstanceOf[ParameterizedType]) {
-        val paramCls = cls.asInstanceOf[ParameterizedType]
-        Some((paramCls.getRawType, paramCls.getActualTypeArguments))
-      } else {
-        None
+      // create a function to unpack incoming data to the appropriate number of parameters
+      val unpack = defaultUnpackers match {
+        case Seq()  => (r: RequestContext) => Seq(r)
+        case Seq(f) => (r: RequestContext) => Seq(r, f(r.data))
+        case fs     => (r: RequestContext) => {
+          // extract data into args, adding empty for omitted args based on matching pattern
+          val xs = acceptPats.find {
+            case (p, _, _) => p.accepts(r.data.t)
+          }.map {
+            case (p, 1, k) => Seq(r.data) ++ Seq.fill(k)(Data.NONE)
+            case (p, n, k) => Seq.tabulate(n)(r.data(_)) ++ Seq.fill(k)(Data.NONE)
+          }.getOrElse {
+            sys.error(s"data of type ${r.data.t} not accepted")
+          }
+          r +: (fs zip xs).map { case (f, x) => f(x) }
+        }
       }
+      guard(acceptPat, unpack andThen invoke(self, m) andThen repack)
     }
-  }
-  
-  private object OptionType {
-    def unapply(cls: JType): Option[JType] = cls match {
-      case ParamType(cls, Array(param)) =>
-        if (cls == classOf[Option[_]])
-          Some(param)
-        else
-          None
-      case _ => None
-    }
-    
-//    def unapply(arg: scalasig.Type): Option[scalasig.Type] = arg match {
-//      case TypeRefType(prefix, symbol, Seq(t)) if symbol.path == "scala.Option" =>
-//        Some(t)
-//      case _ =>
-//        None
-//    }
-  }
-  
-  private object EitherType {
-    def unapply(cls: JType): Option[(JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2)) =>
-        if (cls == classOf[Either[_, _]])
-          Some((c1, c2))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object SeqType {
-    def unapply(cls: JType): Option[JType] = cls match {
-      case ParamType(cls, Array(param)) =>
-        if (cls == classOf[Seq[_]])
-          Some(param)
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object Tuple2Type {
-    def unapply(cls: JType): Option[(JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2)) =>
-        if (cls == classOf[Tuple2[_, _]])
-          Some((c1, c2))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object Tuple3Type {
-    def unapply(cls: JType): Option[(JType, JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2, c3)) =>
-        if (cls == classOf[Tuple3[_, _, _]])
-          Some((c1, c2, c3))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object Tuple4Type {
-    def unapply(cls: JType): Option[(JType, JType, JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2, c3, c4)) =>
-        if (cls == classOf[Tuple4[_, _, _, _]])
-          Some((c1, c2, c3, c4))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object Tuple5Type {
-    def unapply(cls: JType): Option[(JType, JType, JType, JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2, c3, c4, c5)) =>
-        if (cls == classOf[Tuple5[_, _, _, _, _]])
-          Some((c1, c2, c3, c4, c5))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  private object Tuple6Type {
-    def unapply(cls: JType): Option[(JType, JType, JType, JType, JType, JType)] = cls match {
-      case ParamType(cls, Array(c1, c2, c3, c4, c5, c6)) =>
-        if (cls == classOf[Tuple6[_, _, _, _, _, _]])
-          Some((c1, c2, c3, c4, c5, c6))
-        else
-          None
-      case _ => None
-    }
-  }
-  
-  def inferType(cls: java.lang.reflect.Type): (Type, Data => _) = cls match {
-    case BooleanType() => (Type("b"), (d: Data) => d.getBool) //, (b: Boolean) => Bool(b))
-    case IntType() => (Type("i"), (d: Data) => d.getInt) //, (i: Int) => Integer(i))
-    case LongType() => (Type("w"), (d: Data) => d.getWord) //, (w: Long) => Word(w))
-    case StringType() => (Type("s"), (d: Data) => d.getString) //, (s: String) => Str(s))
-    case DoubleType() => (Type("v"), (d: Data) => d.getValue) //, (d: Double) => Value(d)) // todo: what about units here?
-    case DataType() => (Type("?"), (d: Data) => d) //, (d: Data) => d)
 
-    // Array
-    case ByteArrayType() => (Type("s"), (d: Data) => d.getBytes) //, (ba: Array[Byte]) => Bytes(ba))
-    case BooleanArrayType() => (Type("*b"), (d: Data) => d.getBoolArray) //, (ba: Array[Boolean]) => Data.valueOf(ba))
-    case IntArrayType() => (Type("*i"), (d: Data) => d.getIntArray) //, (ia: Array[Int]) => Data.valueOf(ia))
-    case LongArrayType() => (Type("*w"), (d: Data) => d.getWordArray) //, (wa: Array[Long]) => Data.valueOf(wa))
-    case DoubleArrayType() => (Type("*v"), (d: Data) => d.getValueArray) //, (da: Array[Double]) => Data.valueOf(da))
-    case StringArrayType() => (Type("*s"), (d: Data) => d.getStringArray) //, (sa: Array[String]) => Data.valueOf(sa))
-    case ArrayType(DataType()) => (Type("*?"), (d: Data) => d.getDataArray) //, (da: Array[Data]) => Data.listOf(da: _*))
-    case ArrayType(cls) =>
-      val (typ, f) = inferType(cls)
-      (TArr(typ),
-       (data: Data) => { (for (i <- 0 until data.getArraySize) yield f(data(i))).toArray })
-
-    // Seq
-    case SeqType(BooleanType()) => (Type("*b"), (d: Data) => d.getBoolSeq)
-    case SeqType(IntType()) => (Type("*i"), (d: Data) => d.getIntSeq)
-    case SeqType(LongType()) => (Type("*w"), (d: Data) => d.getWordSeq)
-    case SeqType(StringType()) => (Type("*s"), (d: Data) => d.getStringSeq)
-    case SeqType(DataType()) => (Type("*?"), (d: Data) => d.getDataSeq)
-    case SeqType(cls) =>
-      val (typ, f) = inferType(cls)
-      (TArr(typ), (data: Data) => {
-        for (i <- 0 until data.getArraySize) yield f(data(i))
-      })
-    
-    // optional argument
-    case OptionType(cls) =>
-      val (typ, f) = inferType(cls)
-      val optionGetter = (data: Data) => Some(f(data))
-      (typ, optionGetter)
-    
-    // either
-    case EitherType(cL, cR) =>
-      val (tL, fL) = inferType(cL)
-      val (tR, fR) = inferType(cR)
-      (TChoice(tL, tR), (data: Data) => {
-        if (tL accepts (data.t))
-          Left(fL(data))
-        else
-          Right(fR(data))
-      })
-      
-    // tuples
-    case Tuple2Type(c1, c2) =>
-      val (t1, f1) = inferType(c1)
-      val (t2, f2) = inferType(c2)
-      (TCluster(t1, t2), (data: Data) => data match {
-        case Cluster(d1, d2) => (f1(d1), f2(d2))
-      })
-    
-    case Tuple3Type(c1, c2, c3) =>
-      val (t1, f1) = inferType(c1)
-      val (t2, f2) = inferType(c2)
-      val (t3, f3) = inferType(c3)
-      (TCluster(t1, t2, t3), (data: Data) => data match {
-        case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3))
-      })
-    
-    case Tuple4Type(c1, c2, c3, c4) =>
-      val (t1, f1) = inferType(c1)
-      val (t2, f2) = inferType(c2)
-      val (t3, f3) = inferType(c3)
-      val (t4, f4) = inferType(c4)
-      (TCluster(t1, t2, t3, t4), (data: Data) => data match {
-        case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4))
-      })
-    
-    case Tuple5Type(c1, c2, c3, c4, c5) =>
-      val (t1, f1) = inferType(c1)
-      val (t2, f2) = inferType(c2)
-      val (t3, f3) = inferType(c3)
-      val (t4, f4) = inferType(c4)
-      val (t5, f5) = inferType(c5)
-      (TCluster(t1, t2, t3, t4, t5), (data: Data) => data match {
-        case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5))
-      })
-      
-    case Tuple6Type(c1, c2, c3, c4, c5, c6) =>
-      val (t1, f1) = inferType(c1)
-      val (t2, f2) = inferType(c2)
-      val (t3, f3) = inferType(c3)
-      val (t4, f4) = inferType(c4)
-      val (t5, f5) = inferType(c5)
-      val (t6, f6) = inferType(c6)
-      (TCluster(t1, t2, t3, t4, t5, t6), (data: Data) => data match {
-        case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6))
-      })
-      
-    case _ => throw new Exception("no match for " + cls)
+    (acceptPat, returnPat, binder)
   }
-  
-//  def createGetter(t: Type): Data => _ = t match {
-//    case TBool => (d: Data) => d.getBool
-//    case TInteger => (d: Data) => d.getInt
-//    case TWord => (d: Data) => d.getWord
-//    case TStr => (d: Data) => d.getString
-//    case TValue(_) => (d: Data) => d.getValue // todo: what about units here?
-//    case TAny => (d: Data) => d
-//
-//    // Array
-//    case ByteArrayType() => (Type("s"), (d: Data) => d.getBytes) //, (ba: Array[Byte]) => Bytes(ba))
-//    case BooleanArrayType() => (Type("*b"), (d: Data) => d.getBoolArray) //, (ba: Array[Boolean]) => Data.valueOf(ba))
-//    case IntArrayType() => (Type("*i"), (d: Data) => d.getIntArray) //, (ia: Array[Int]) => Data.valueOf(ia))
-//    case LongArrayType() => (Type("*w"), (d: Data) => d.getWordArray) //, (wa: Array[Long]) => Data.valueOf(wa))
-//    case DoubleArrayType() => (Type("*v"), (d: Data) => d.getValueArray) //, (da: Array[Double]) => Data.valueOf(da))
-//    case StringArrayType() => (Type("*s"), (d: Data) => d.getStringArray) //, (sa: Array[String]) => Data.valueOf(sa))
-//    case ArrayType(DataType()) => (Type("*?"), (d: Data) => d.getDataArray) //, (da: Array[Data]) => Data.listOf(da: _*))
-//    case ArrayType(cls) =>
-//      val (typ, f) = inferType(cls)
-//      (TArr(typ),
-//       (data: Data) => { (for (i <- 0 until data.getArraySize) yield f(data(i))).toArray })
-//
-//    // Seq
-//    case SeqType(BooleanType()) => (Type("*b"), (d: Data) => d.getBoolSeq)
-//    case SeqType(IntType()) => (Type("*i"), (d: Data) => d.getIntSeq)
-//    case SeqType(LongType()) => (Type("*w"), (d: Data) => d.getWordSeq)
-//    case SeqType(StringType()) => (Type("*s"), (d: Data) => d.getStringSeq)
-//    case SeqType(DataType()) => (Type("*?"), (d: Data) => d.getDataSeq)
-//    case SeqType(cls) =>
-//      val (typ, f) = inferType(cls)
-//      (TArr(typ), (data: Data) => {
-//        for (i <- 0 until data.getArraySize) yield f(data(i))
-//      })
-//    
-//    // optional argument
-//    case OptionType(cls) =>
-//      val (typ, f, g) = inferType(cls)
-//      val optionGetter = (data: Data) => Some(f(data))
-//      (typ, optionGetter)
-//    
-//    // either
-//    case EitherType(cL, cR) =>
-//      val (tL, fL, gL) = inferType(cL)
-//      val (tR, fR, gR) = inferType(cR)
-//      (TChoice(tL, tR), (data: Data) => {
-//        if (tL accepts (data.t))
-//          Left(fL(data))
-//        else
-//          Right(fR(data))
-//      })
-//      
-//    // tuples
-//    case Tuple2Type(c1, c2) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      (TCluster(t1, t2), (data: Data) => data match {
-//        case Cluster(d1, d2) => (f1(d1), f2(d2))
-//      })
-//    
-//    case Tuple3Type(c1, c2, c3) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      (TCluster(t1, t2, t3), (data: Data) => data match {
-//        case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3))
-//      })
-//    
-//    case Tuple4Type(c1, c2, c3, c4) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      (TCluster(t1, t2, t3, t4), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4))
-//      })
-//    
-//    case Tuple5Type(c1, c2, c3, c4, c5) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      val (t5, f5, g5) = inferType(c5)
-//      (TCluster(t1, t2, t3, t4, t5), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5))
-//      })
-//      
-//    case Tuple6Type(c1, c2, c3, c4, c5, c6) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      val (t5, f5, g5) = inferType(c5)
-//      val (t6, f6, g6) = inferType(c6)
-//      (TCluster(t1, t2, t3, t4, t5, t6), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6))
-//      })
-//      
-//    case _ => throw new Exception("no match for " + t)
-//  }
-//  
-//  def createSetter(t: Type): Any => Data = t match {
-//    case TBool => { case b: Boolean => Bool(b) }
-//    case TInteger => { case i: Int => Integer(i) }
-//    case TWord => { case w: Long => Word(w) }
-//    case TStr => { case s: String => Str(s) }
-//    case TValue(None) => { case d: Double => Value(d) } // todo: what about units here?
-//    case TValue(Some(units)) => { case d: Double => Value(d, units) }
-//    case TAny => { case d: Data => d } // todo: handle anything here, dynamically convert to the right type
-//
-//    // Array
-//    case TArr(TBool, 1) => {
-//      case ba: Array[Boolean] => Data.valueOf(ba)
-//      case bs: Seq[Boolean] => Data.valueOf(bs)
-//    }
-//    case TArr(TInteger, 1) => {
-//      case ia: Array[Int] => Data.valueOf(ia)
-//      case is: Seq[Int] => Data.valueOf(is)
-//    }
-//    case TArr(TWord, 1) => {
-//      case wa: Array[Long] => Data.valueOf(wa)
-//      case ws: Seq[Long] => Data.valueOf(ws)
-//    }
-//    case TArr(TValue(None), 1) => {
-//      case da: Array[Double] => Data.valueOf(da)
-//      case ds: Seq[Double] => Data.valueOf(ds)
-//    }
-//    case TArr(TValue(Some(units)), 1) => {
-//      case da: Array[Double] => Data.valueOf(da)
-//      case ds: Seq[Double] => Data.valueOf(ds)
-//    } // todo: handle units
-//    case TArr(TStr, 1) => {
-//      case sa: Array[String] => Data.valueOf(sa)
-//      case ss: Seq[String] => Data.valueOf(ss)
-//    }
-//    /*case t @ TArr(elem) =>
-//      val getter = createGetter(elem)
-//      {
-//        case arr: Array[Any] =>
-//          val data = Data.ofType(t)
-//          data.setArraySize(arr.length)
-//          for (i <- 0 until arr.length)
-//            data.get(i).set(getter(arr(i)))
-//          data
-//      }*/
-//    
-//    // optional argument
-//    case OptionType(cls) =>
-//      val (typ, f, g) = inferType(cls)
-//      val optionGetter = (data: Data) => Some(f(data))
-//      (typ, optionGetter)
-//    
-//    // either
-//    case EitherType(cL, cR) =>
-//      val (tL, fL, gL) = inferType(cL)
-//      val (tR, fR, gR) = inferType(cR)
-//      (TChoice(tL, tR), (data: Data) => {
-//        if (tL accepts (data.t))
-//          Left(fL(data))
-//        else
-//          Right(fR(data))
-//      })
-//      
-//    // tuples
-//    case Tuple2Type(c1, c2) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      (TCluster(t1, t2), (data: Data) => data match {
-//        case Cluster(d1, d2) => (f1(d1), f2(d2))
-//      })
-//    
-//    case Tuple3Type(c1, c2, c3) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      (TCluster(t1, t2, t3), (data: Data) => data match {
-//        case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3))
-//      })
-//    
-//    case Tuple4Type(c1, c2, c3, c4) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      (TCluster(t1, t2, t3, t4), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4))
-//      })
-//    
-//    case Tuple5Type(c1, c2, c3, c4, c5) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      val (t5, f5, g5) = inferType(c5)
-//      (TCluster(t1, t2, t3, t4, t5), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5))
-//      })
-//      
-//    case Tuple6Type(c1, c2, c3, c4, c5, c6) =>
-//      val (t1, f1, g1) = inferType(c1)
-//      val (t2, f2, g2) = inferType(c2)
-//      val (t3, f3, g3) = inferType(c3)
-//      val (t4, f4, g4) = inferType(c4)
-//      val (t5, f5, g5) = inferType(c5)
-//      val (t6, f6, g6) = inferType(c6)
-//      (TCluster(t1, t2, t3, t4, t5, t6), (data: Data) => data match {
-//        case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6))
-//      })
-//      
-//    case _ => throw new Exception("no match for " + cls)
-//  }
-  
-  def inferType(arg: scalasig.Type): (Type, Data => _) = {
-    arg match {
-      case TypeRefType(prefix, symbol, typeArgs) => symbol.path match {
-        case "scala.Boolean" => (Type("b"), (d: Data) => d.getBool)
-        case "scala.Int" => (Type("i"), (d: Data) => d.getInt)
-        case "scala.Long" => (Type("w"), (d: Data) => d.getWord)
-        case "scala.Predef.String" => (Type("s"), (d: Data) => d.getString)
-        case "scala.Double" => (Type("v"), (d: Data) => d.getValue)
-        case "org.labrad.data.Data" => (Type("?"), (d: Data) => d)
-  
-        // Array
-        case "scala.Array" =>
-          typeArgs.head match {
-            case arg @ TypeRefType(prefix, symbol, typeArgs) => symbol.path match {
-              case "scala.Byte" => (Type("s"), (d: Data) => d.getBytes)
-              case "scala.Boolean" => (Type("*b"), (d: Data) => d.getBoolArray)
-              case "scala.Int" => (Type("*i"), (d: Data) => d.getIntArray)
-              case "scala.Long" => (Type("*w"), (d: Data) => d.getWordArray)
-              case "scala.Double" => (Type("*v"), (d: Data) => d.getValueArray)
-              case "scala.Predef.String" => (Type("*s"), (d: Data) => d.getStringArray)
-              case "org.labrad.data.Data" => (Type("*?"), (d: Data) => d.getDataArray)
-              case _ =>
-                val (typ, f) = inferType(arg)
-                (TArr(typ), (data: Data) => {
-                  (for (i <- 0 until data.getArraySize) yield f(data(i))).toArray
-                })
-            }
-          }
-  
-        // Seq
-        case "scala.package.Seq" =>
-          typeArgs.head match {
-            case arg @ TypeRefType(prefix, symbol, typeArgs) => symbol.path match {
-              case "scala.Byte" => (Type("s"), (d: Data) => d.getBytes.toSeq)
-              case "scala.Boolean" => (Type("*b"), (d: Data) => d.getBoolSeq)
-              case "scala.Int" => (Type("*i"), (d: Data) => d.getIntSeq)
-              case "scala.Long" => (Type("*w"), (d: Data) => d.getWordSeq)
-              case "scala.Predef.String" => (Type("*s"), (d: Data) => d.getStringSeq)
-              case "org.labrad.data.Data" => (Type("*?"), (d: Data) => d.getDataSeq)
-              case _ =>
-                // TODO: support inhomogeneous datatypes as TExpando
-                val (typ, f) = inferType(arg)
-                (TArr(typ), (data: Data) => {
-                  (for (i <- 0 until data.getArraySize) yield f(data(i)))
-                })
-            }
-          }
-        
-        // optional argument
-        case "scala.Option" =>
-          typeArgs.head match {
-            case arg @ TypeRefType(prefix, symbol, typeArgs) =>
-              val (typ, f) = inferType(arg)
-              val optionGetter = (data: Data) => Some(f(data))
-              (typ, optionGetter)
-          }
-        
-        // either
-        case "scala.Either" =>
-          typeArgs match {
-            case Seq(aL, aR) =>
-              val (tL, fL) = inferType(aL)
-              val (tR, fR) = inferType(aR)
-              (TChoice(tL), (data: Data) => {
-                if (tL accepts (data.t))
-                  Left(fL(data))
-                else
-                  Right(fR(data))
-              })
-          }
-        
-        // tuples
-        case "scala.Tuple1" =>
-          typeArgs match {
-            case Seq(a1) =>
-              val (t1, f1) = inferType(a1)
-              (TCluster(t1), (data: Data) => data match {
-                case Cluster(d1) => Tuple1(f1(d1))
-              })
-          }
-          
-        case "scala.Tuple2" =>
-          typeArgs match {
-            case Seq(a1, a2) =>
-              val (t1, f1) = inferType(a1)
-              val (t2, f2) = inferType(a2)
-              (TCluster(t1, t2), (data: Data) => data match {
-                case Cluster(d1, d2) => (f1(d1), f2(d2))
-              })
-          }
-          
-        case "scala.Tuple3" =>
-          typeArgs match {
-            case Seq(a1, a2, a3) =>
-              val (t1, f1) = inferType(a1)
-              val (t2, f2) = inferType(a2)
-              val (t3, f3) = inferType(a3)
-              (TCluster(t1, t2, t3), (data: Data) => data match {
-                case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3))
-              })
-          }
-        
-        case "scala.Tuple4" =>
-          typeArgs match {
-            case Seq(a1, a2, a3, a4) =>
-              val (t1, f1) = inferType(a1)
-              val (t2, f2) = inferType(a2)
-              val (t3, f3) = inferType(a3)
-              val (t4, f4) = inferType(a4)
-              (TCluster(t1, t2, t3, t4), (data: Data) => data match {
-                case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4))
-              })
-          }
-          
-        case "scala.Tuple5" =>
-          typeArgs match {
-            case Seq(a1, a2, a3, a4, a5) =>
-              val (t1, f1) = inferType(a1)
-              val (t2, f2) = inferType(a2)
-              val (t3, f3) = inferType(a3)
-              val (t4, f4) = inferType(a4)
-              val (t5, f5) = inferType(a5)
-              (TCluster(t1, t2, t3, t4, t5),
-               (data: Data) => data match {
-                  case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5))
-               })
-          }
-          
-        case "scala.Tuple6" =>
-          typeArgs match {
-            case Seq(a1, a2, a3, a4, a5, a6) =>
-              val (t1, f1) = inferType(a1)
-              val (t2, f2) = inferType(a2)
-              val (t3, f3) = inferType(a3)
-              val (t4, f4) = inferType(a4)
-              val (t5, f5) = inferType(a5)
-              val (t6, f6) = inferType(a6)
-              (TCluster(t1, t2, t3, t4, t5, t6), (data: Data) => data match {
-                case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6))
-              })
-          }
-          
-        case _ => throw new Exception("no match for " + arg)
+
+  /** infer the pattern and create an unpacker for a method parameter */
+  def inferParamType(tpe: Type, annots: Seq[Annotation]): (Pattern, Data => Any) = {
+    val annotated = annotatedPattern(annots) { case Accept(tag) => tag }
+    (patternFor(tpe, annotated), unpacker(tpe, annotated))
+  }
+
+  /** infer the pattern and create a repacker for a method return type */
+  def inferReturnType(tpe: Type, annots: Seq[Annotation]): (Pattern, Any => Data) = {
+    val annotated = annotatedPattern(annots) { case Return(tag) => tag }
+    (patternFor(tpe, annotated), packer(tpe, annotated))
+  }
+
+  /** try to extract a pattern from a sequence of annotations */
+  def annotatedPattern(annots: Seq[Annotation])(collector: PartialFunction[Annotation, String]) =
+    annots.collect(collector).headOption.map(Pattern(_))
+
+  /** create a function that will invoke the given method on the given object */
+  private def invoke(self: Any, method: MethodSymbol): Seq[Any] => Any = {
+    val func = currentMirror.reflect(self).reflectMethod(method)
+    (args: Seq[Any]) =>
+      try {
+        func(args: _*)
+      } catch {
+        case e: InvocationTargetException => throw e.getCause
       }
-    }
-  }
-  
-//  def inferType(cls: scala.tools.scalap.scalax.rules.scalasig.Type): (Type, Data => _) = {
-//    cls match {
-//      case BooleanType() => (Type("b"), (d: Data) => d.getBool)
-//      case IntType() => (Type("i"), (d: Data) => d.getInt)
-//      case LongType() => (Type("w"), (d: Data) => d.getWord)
-//      case StringType() => (Type("s"), (d: Data) => d.getString)
-//      case DoubleType() => (Type("v"), (d: Data) => d.getValue)
-//      case DataType() => (Type("?"), (d: Data) => d)
-//
-//      // Array
-//      case ByteArrayType() => (Type("s"), (d: Data) => d.getBytes)
-//      case BooleanArrayType() => (Type("*b"), (d: Data) => d.getBoolArray)
-//      case IntArrayType() => (Type("*i"), (d: Data) => d.getIntArray)
-//      case LongArrayType() => (Type("*w"), (d: Data) => d.getWordArray)
-//      case DoubleArrayType() => (Type("*v"), (d: Data) => d.getValueArray)
-//      case StringArrayType() => (Type("*s"), (d: Data) => d.getStringArray)
-//      case ArrayType(DataType()) => (Type("*?"), (d: Data) => d.getDataArray)
-//      case ArrayType(cls) =>
-//        val (typ, f) = inferType(cls)
-//        (TArr(typ), (data: Data) => {
-//          (for (i <- 0 until data.getArraySize) yield f(data(i))).toArray
-//        })
-//
-//      // Seq
-//      case SeqType(BooleanType()) => (Type("*b"), (d: Data) => d.getBoolSeq)
-//      case SeqType(IntType()) => (Type("*i"), (d: Data) => d.getIntSeq)
-//      case SeqType(LongType()) => (Type("*w"), (d: Data) => d.getWordSeq)
-//      case SeqType(StringType()) => (Type("*s"), (d: Data) => d.getStringSeq)
-//      case SeqType(DataType()) => (Type("*?"), (d: Data) => d.getDataSeq)
-//      case SeqType(cls) =>
-//        val (typ, f) = inferType(cls)
-//        (TArr(typ), (data: Data) => {
-//          for (i <- 0 until data.getArraySize) yield f(data(i))
-//        })
-//      
-//      // optional argument
-//      case OptionType(cls) =>
-//        val (typ, f) = inferType(cls)
-//        val optionGetter = (data: Data) => Some(f(data))
-//        (typ, optionGetter)
-//      
-//      // either
-//      case EitherType(cL, cR) =>
-//        val (tL, fL) = inferType(cL)
-//        val (tR, fR) = inferType(cR)
-//        (TChoice(tL, tR), (data: Data) => {
-//          if (tL accepts (data.t))
-//            Left(fL(data))
-//          else
-//            Right(fR(data))
-//        })
-//        
-//      // tuples
-//      case Tuple2Type(c1, c2) =>
-//        val (t1, f1) = inferType(c1)
-//        val (t2, f2) = inferType(c2)
-//        (TCluster(t1, t2), (data: Data) => data match {
-//          case Cluster(d1, d2) => (f1(d1), f2(d2))
-//        })
-//      
-//      case Tuple3Type(c1, c2, c3) =>
-//        val (t1, f1) = inferType(c1)
-//        val (t2, f2) = inferType(c2)
-//        val (t3, f3) = inferType(c3)
-//        (TCluster(t1, t2, t3), (data: Data) => data match {
-//          case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3))
-//        })
-//      
-//      case Tuple4Type(c1, c2, c3, c4) =>
-//        val (t1, f1) = inferType(c1)
-//        val (t2, f2) = inferType(c2)
-//        val (t3, f3) = inferType(c3)
-//        val (t4, f4) = inferType(c4)
-//        (TCluster(t1, t2, t3, t4), (data: Data) => data match {
-//          case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4))
-//        })
-//      
-//      case Tuple5Type(c1, c2, c3, c4, c5) =>
-//        val (t1, f1) = inferType(c1)
-//        val (t2, f2) = inferType(c2)
-//        val (t3, f3) = inferType(c3)
-//        val (t4, f4) = inferType(c4)
-//        val (t5, f5) = inferType(c5)
-//        (TCluster(t1, t2, t3, t4, t5), (data: Data) => data match {
-//          case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5))
-//        })
-//        
-//      case Tuple6Type(c1, c2, c3, c4, c5, c6) =>
-//        val (t1, f1) = inferType(c1)
-//        val (t2, f2) = inferType(c2)
-//        val (t3, f3) = inferType(c3)
-//        val (t4, f4) = inferType(c4)
-//        val (t5, f5) = inferType(c5)
-//        val (t6, f6) = inferType(c6)
-//        (TCluster(t1, t2, t3, t4, t5, t6), (data: Data) => data match {
-//          case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6))
-//        })
-//        
-//      case _ => throw new Exception("no match for " + cls)
-//    }
-//  }
-  
-  /**
-   * Get overall accepted types given types accepted for each parameter.
-   * @param paramAccepts
-   * @return
-   */
-  def getAcceptedTypeCombinations(paramAccepts: Seq[Seq[TypeDescriptor]]) = {
-    /*
-    def choices(tds: Array[TypeDescriptor]) = tds match {
-      case Array(td) => td.typ
-      case tds => TChoice(tds.map(_.typ): _*)
-    }
-    
-    val typ = paramAccepts.map(choices) match {
-      case Array(typ) => typ
-      case types => TCluster(types: _*)
-    }
-    
-    TypeDescriptor(typ)
-    */
-    
-    def combinations[T](lists: List[List[T]]): List[List[T]] = lists match {
-      case Nil => List(Nil)
-      case heads :: rest =>
-        val tails = combinations(rest)
-        for (head <- heads; tail <- tails) yield head :: tail
-    }
-    
-    
-    
-    val combs = for (types <- combinations(paramAccepts.map(arr => arr.flatMap(_.typ.expanded).toList).toList)) yield {
-      // XXX need an intelligent way to combine tags here
-      //val tag = types.map(_.typ.toString).mkString(", ")
-      //val description = types.map(_.tag).mkString(", ")
-      val tag = types.map(_.toString).mkString(", ")
-      TypeDescriptor(tag) // + ": " + description)
-    }
-    combs.toSeq
-  }
-  
-
-  /**
-   * Get a list of all returned LabRAD types for a method
-   * @param m
-   * @return
-   */
-  private def getReturnedTypes(m: Method): Seq[TypeDescriptor] = {
-    // TODO check Java return types and provide setters for them if possible
-    // TODO if there is an annotation and inferred types, make sure they are compatible
-    
-    val types = for (Returns(tag) <- m.getAnnotations) yield TypeDescriptor(tag)
-    
-    if (types.isEmpty)
-      Seq(TypeDescriptor(m.getReturnType match {
-        case DataType() => "?"
-        case VoidType() => ""
-      }))
-    else
-      types.toSeq.flatMap(_.typ.expanded).map(TypeDescriptor(_))
   }
 
-  // TODO new "unpack" annotation for unpacking arbitrary types
-  // TODO allow Option types to be omitted
-  // TODO handle arguments that have default values
+  /** turn a function into a partial function based on a pattern of accepted types */
+  private def guard(pattern: Pattern, func: RequestContext => Data): PartialFunction[RequestContext, Data] =
+    new PartialFunction[RequestContext, Data] {
+      def isDefinedAt(r: RequestContext) = pattern.accepts(r.data.t)
+      def apply(r: RequestContext) = func(r)
+    }
+
+  def inferType(tpe: Type): (Pattern, Data => Any, PartialFunction[Any, Data]) = (patternFor(tpe), unpacker(tpe), packer(tpe))
+
+  def patternFor[T: TypeTag]: Pattern = patternFor(typeOf[T])
+
+  def patternFor(tpe: Type, pat: Option[Pattern] = None): Pattern = tpe match {
+    case tpe if tpe =:= typeOf[Unit]    => Pattern("_")
+    case tpe if tpe =:= typeOf[Boolean] => Pattern("b")
+    case tpe if tpe =:= typeOf[Int]     => Pattern("i")
+    case tpe if tpe =:= typeOf[Long]    => Pattern("w")
+    case tpe if tpe =:= typeOf[Double]  =>
+      pat match {
+        case None => Pattern("v")
+        case Some(p @ PValue(units)) => p
+        case Some(p) => sys.error(s"cannot infer type for $tpe with pattern $p")
+      }
+
+    case tpe if tpe =:= typeOf[Date]    => Pattern("t")
+    case tpe if tpe =:= typeOf[String]  => Pattern("s")
+    case tpe if tpe =:= typeOf[Data]    => Pattern("?")
+
+    case TypeRef(_, Sym("Array") | Sym("Seq"), Seq(t)) => if (t =:= typeOf[Byte]) Pattern("s") else PArr(patternFor(t))
+
+    case TypeRef(_, Sym("Option"), Seq(t)) => Pattern.reduce(PChoice(patternFor(t), Pattern("_")))
+
+    case TypeRef(_, Sym("Either"), Seq(aL, aR)) => PChoice(patternFor(aL), patternFor(aR))
+
+    case TypeRef(_, Sym("Tuple1"), Seq(a1)) => PCluster(patternFor(a1))
+    case TypeRef(_, Sym("Tuple2"), Seq(a1, a2)) => PCluster(patternFor(a1), patternFor(a2))
+    case TypeRef(_, Sym("Tuple3"), Seq(a1, a2, a3)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3))
+    case TypeRef(_, Sym("Tuple4"), Seq(a1, a2, a3, a4)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4))
+    case TypeRef(_, Sym("Tuple5"), Seq(a1, a2, a3, a4, a5)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5))
+    case TypeRef(_, Sym("Tuple6"), Seq(a1, a2, a3, a4, a5, a6)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5), patternFor(a6))
+    case TypeRef(_, Sym("Tuple7"), Seq(a1, a2, a3, a4, a5, a6, a7)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5), patternFor(a6), patternFor(a7))
+    case TypeRef(_, Sym("Tuple8"), Seq(a1, a2, a3, a4, a5, a6, a7, a8)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5), patternFor(a6), patternFor(a7), patternFor(a8))
+    case TypeRef(_, Sym("Tuple9"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5), patternFor(a6), patternFor(a7), patternFor(a8), patternFor(a9))
+    case TypeRef(_, Sym("Tuple10"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10)) => PCluster(patternFor(a1), patternFor(a2), patternFor(a3), patternFor(a4), patternFor(a5), patternFor(a6), patternFor(a7), patternFor(a8), patternFor(a9), patternFor(a10))
+  }
+
+  def unpacker[T: TypeTag]: Data => T = unpacker(typeOf[T]).asInstanceOf[Data => T]
+
+  def unpacker(tpe: Type, pat: Option[Pattern] = None): Data => Any = tpe match {
+    case tpe if tpe =:= typeOf[Unit]    => (d: Data) => ()
+    case tpe if tpe =:= typeOf[Boolean] => (d: Data) => d.getBool
+    case tpe if tpe =:= typeOf[Int]     => (d: Data) => d.getInt
+    case tpe if tpe =:= typeOf[Long]    => (d: Data) => d.getUInt
+    case tpe if tpe =:= typeOf[Double]  => (d: Data) => d.getValue
+    case tpe if tpe =:= typeOf[Date]    => (d: Data) => d.getTime.toDate
+    case tpe if tpe =:= typeOf[String]  => (d: Data) => d.getString
+    case tpe if tpe =:= typeOf[Data]    => (d: Data) => d
+
+    case TypeRef(_, Sym("Array"), Seq(t)) =>
+      t match {
+        case t if t =:= typeOf[Byte]    => (d: Data) => d.getBytes
+        case t if t =:= typeOf[Boolean] => (d: Data) => d.getBoolArray
+        case t if t =:= typeOf[Int]     => (d: Data) => d.getIntArray
+        case t if t =:= typeOf[Long]    => (d: Data) => d.getUIntArray
+        case t if t =:= typeOf[Double]  => (d: Data) => d.getValueArray
+        case t if t =:= typeOf[String]  => (d: Data) => d.getStringArray
+        case t if t =:= typeOf[Data]    => (d: Data) => d.getDataArray
+        case _ =>
+          val f = unpacker(t)
+          (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i))).toArray
+      }
+
+    case TypeRef(_, Sym("Seq"), Seq(t)) =>
+      t match {
+        case t if t =:= typeOf[Byte]    => (d: Data) => d.getBytes.toSeq
+        case t if t =:= typeOf[Boolean] => (d: Data) => d.getBoolSeq
+        case t if t =:= typeOf[Int]     => (d: Data) => d.getIntSeq
+        case t if t =:= typeOf[Long]    => (d: Data) => d.getUIntSeq
+        case t if t =:= typeOf[String]  => (d: Data) => d.getStringSeq
+        case t if t =:= typeOf[Data]    => (d: Data) => d.getDataSeq
+        case _ =>
+          val f = unpacker(t)
+          (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i)))
+      }
+
+    case TypeRef(_, Sym("Option"), Seq(t)) =>
+      val f = unpacker(t)
+      (data: Data) => if (data.isNone) None else Some(f(data))
+
+    case TypeRef(_, Sym("Either"), Seq(aL, aR)) =>
+      val (pL, fL, fR) = (patternFor(aL), unpacker(aL), unpacker(aR))
+      (data: Data) => if (pL accepts (data.t)) Left(fL(data)) else Right(fR(data))
+
+    case TypeRef(_, Sym("Tuple1"), Seq(a1)) =>
+      val f1 = unpacker(a1)
+      (_: Data) match { case Cluster(d1) => Tuple1(f1(d1)) }
+
+    case TypeRef(_, Sym("Tuple2"), Seq(a1, a2)) =>
+      val (f1, f2) = (unpacker(a1), unpacker(a2))
+      (_: Data) match { case Cluster(d1, d2) => (f1(d1), f2(d2)) }
+
+    case TypeRef(_, Sym("Tuple3"), Seq(a1, a2, a3)) =>
+      val (f1, f2, f3) = (unpacker(a1), unpacker(a2), unpacker(a3))
+      (_: Data) match { case Cluster(d1, d2, d3) => (f1(d1), f2(d2), f3(d3)) }
+
+    case TypeRef(_, Sym("Tuple4"), Seq(a1, a2, a3, a4)) =>
+      val (f1, f2, f3, f4) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4))
+      (_: Data) match { case Cluster(d1, d2, d3, d4) => (f1(d1), f2(d2), f3(d3), f4(d4)) }
+
+    case TypeRef(_, Sym("Tuple5"), Seq(a1, a2, a3, a4, a5)) =>
+      val (f1, f2, f3, f4, f5) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5)) }
+
+    case TypeRef(_, Sym("Tuple6"), Seq(a1, a2, a3, a4, a5, a6)) =>
+      val (f1, f2, f3, f4, f5, f6) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5), unpacker(a6))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5, d6) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6)) }
+
+    case TypeRef(_, Sym("Tuple7"), Seq(a1, a2, a3, a4, a5, a6, a7)) =>
+      val (f1, f2, f3, f4, f5, f6, f7) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5), unpacker(a6), unpacker(a7))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5, d6, d7) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6), f7(d7)) }
+
+    case TypeRef(_, Sym("Tuple8"), Seq(a1, a2, a3, a4, a5, a6, a7, a8)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5), unpacker(a6), unpacker(a7), unpacker(a8))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5, d6, d7, d8) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6), f7(d7), f8(d8)) }
+
+    case TypeRef(_, Sym("Tuple9"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8, f9) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5), unpacker(a6), unpacker(a7), unpacker(a8), unpacker(a9))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5, d6, d7, d8, d9) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6), f7(d7), f8(d8), f9(d9)) }
+
+    case TypeRef(_, Sym("Tuple10"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) = (unpacker(a1), unpacker(a2), unpacker(a3), unpacker(a4), unpacker(a5), unpacker(a6), unpacker(a7), unpacker(a8), unpacker(a9), unpacker(a10))
+      (_: Data) match { case Cluster(d1, d2, d3, d4, d5, d6, d7, d8, d9, d10) => (f1(d1), f2(d2), f3(d3), f4(d4), f5(d5), f6(d6), f7(d7), f8(d8), f9(d9), f10(d10)) }
+  }
+
+  def toData[T: TypeTag](value: T): Data = { val f = packer[T]; f(value) }
+
+  def packer[T: TypeTag]: PartialFunction[Any, Data] = packer(typeOf[T])
+
+  def packer(tpe: Type, pat: Option[Pattern] = None): PartialFunction[Any, Data] = tpe match {
+    case tpe if tpe =:= typeOf[Unit]    => { case _ => Data.NONE }
+    case tpe if tpe =:= typeOf[Boolean] => { case x: Boolean => Bool(x) }
+    case tpe if tpe =:= typeOf[Int]     => { case x: Int => Integer(x) }
+    case tpe if tpe =:= typeOf[Long]    => { case x: Long => UInt(x) }
+    case tpe if tpe =:= typeOf[Double]  =>
+      pat match {
+        case None => { case x: Double => Value(x) }
+        case Some(PValue(units)) => { case x: Double => Value(x, units) }
+        case Some(p) => sys.error(s"cannot create packer for type $tpe with pattern $p")
+      }
+
+    case tpe if tpe =:= typeOf[Date]    => { case x: Date => Data("t").setTime(x) }
+    case tpe if tpe =:= typeOf[String]  => { case x: String => Str(x) }
+    case tpe if tpe =:= typeOf[Data]    => { case x: Data => x }
+
+    case TypeRef(_, Sym("Array"), Seq(t)) =>
+      t match {
+        case t if t =:= typeOf[Byte]    => { case x: Array[Byte] => Bytes(x) }
+        case t if t =:= typeOf[Boolean] => { case x: Array[Boolean] => Arr(x) }
+        case t if t =:= typeOf[Int]     => { case x: Array[Int] => Arr(x) }
+        case t if t =:= typeOf[Long]    => { case x: Array[Long] => Arr(x) }
+        case t if t =:= typeOf[Double]  => { case x: Array[Double] => Arr(x) }
+        case t if t =:= typeOf[String]  => { case x: Array[String] => Arr(x) }
+        case t if t =:= typeOf[Data]    => { case x: Array[Data] => Arr(x) }
+        case _ =>
+          val f: Any => Data = packer(t)
+          (_: Any) match { case x: Array[_] => Arr(x map f) }
+      }
+
+    case TypeRef(_, Sym("Seq"), Seq(t)) =>
+      t match {
+        case t if t =:= typeOf[Byte]    => { case x: Seq[_] => Bytes(x.asInstanceOf[Seq[Byte]].toArray) }
+        case t if t =:= typeOf[Boolean] => { case x: Seq[_] => Arr(x.asInstanceOf[Seq[Boolean]].toArray) }
+        case t if t =:= typeOf[Int]     => { case x: Seq[_] => Arr(x.asInstanceOf[Seq[Int]].toArray) }
+        case t if t =:= typeOf[Long]    => { case x: Seq[_] => Arr(x.asInstanceOf[Seq[Long]].toArray) }
+        case t if t =:= typeOf[String]  => { case x: Seq[_] => Arr(x.asInstanceOf[Seq[String]].toArray) }
+        case t if t =:= typeOf[Data]    => { case x: Seq[_] => Arr(x.asInstanceOf[Seq[Data]].toArray) }
+        case _ =>
+          val f = packer(t)
+          (_: Any) match { case x: Seq[_] => Arr(x map f) }
+      }
+
+    case TypeRef(_, Sym("Option"), Seq(t)) =>
+      val f = packer(t)
+      (_: Any) match { case Some(x) => f(x); case None => Data.NONE }
+
+    case TypeRef(_, Sym("Either"), Seq(aL, aR)) =>
+      val (fL, fR) = (packer(aL), packer(aR))
+      (_: Any) match { case Left(x) => fL(x); case Right(y) => fR(y) }
+
+    case TypeRef(_, Sym("Tuple1"), Seq(a1)) =>
+      val f1 = packer(a1)
+      (_: Any) match { case Tuple1(x) => Cluster(f1(x)) }
+
+    case TypeRef(_, Sym("Tuple2"), Seq(a1, a2)) =>
+      val (f1, f2) = (packer(a1), packer(a2))
+      (_: Any) match { case (x1, x2) => Cluster(f1(x1), f2(x2)) }
+
+    case TypeRef(_, Sym("Tuple3"), Seq(a1, a2, a3)) =>
+      val (f1, f2, f3) = (packer(a1), packer(a2), packer(a3))
+      (_: Any) match { case (x1, x2, x3) => Cluster(f1(x1), f2(x2), f3(x3)) }
+
+    case TypeRef(_, Sym("Tuple4"), Seq(a1, a2, a3, a4)) =>
+      val (f1, f2, f3, f4) = (packer(a1), packer(a2), packer(a3), packer(a4))
+      (_: Any) match { case (x1, x2, x3, x4) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4)) }
+
+    case TypeRef(_, Sym("Tuple5"), Seq(a1, a2, a3, a4, a5)) =>
+      val (f1, f2, f3, f4, f5) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5))
+      (_: Any) match { case (x1, x2, x3, x4, x5) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5)) }
+
+    case TypeRef(_, Sym("Tuple6"), Seq(a1, a2, a3, a4, a5, a6)) =>
+      val (f1, f2, f3, f4, f5, f6) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5), packer(a6))
+      (_: Any) match { case (x1, x2, x3, x4, x5, x6) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5), f6(x6)) }
+
+    case TypeRef(_, Sym("Tuple7"), Seq(a1, a2, a3, a4, a5, a6, a7)) =>
+      val (f1, f2, f3, f4, f5, f6, f7) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5), packer(a6), packer(a7))
+      (_: Any) match { case (x1, x2, x3, x4, x5, x6, x7) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5), f6(x6), f7(x7)) }
+
+    case TypeRef(_, Sym("Tuple8"), Seq(a1, a2, a3, a4, a5, a6, a7, a8)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5), packer(a6), packer(a7), packer(a8))
+      (_: Any) match { case (x1, x2, x3, x4, x5, x6, x7, x8) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5), f6(x6), f7(x7), f8(x8)) }
+
+    case TypeRef(_, Sym("Tuple9"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8, f9) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5), packer(a6), packer(a7), packer(a8), packer(a9))
+      (_: Any) match { case (x1, x2, x3, x4, x5, x6, x7, x8, x9) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5), f6(x6), f7(x7), f8(x8), f9(x9)) }
+
+    case TypeRef(_, Sym("Tuple10"), Seq(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10)) =>
+      val (f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) = (packer(a1), packer(a2), packer(a3), packer(a4), packer(a5), packer(a6), packer(a7), packer(a8), packer(a9), packer(a10))
+      (_: Any) match { case (x1, x2, x3, x4, x5, x6, x7, x8, x9, x10) => Cluster(f1(x1), f2(x2), f3(x3), f4(x4), f5(x5), f6(x6), f7(x7), f8(x8), f9(x9), f10(x10)) }
+  }
+
+  object Sym {
+    def unapply(sym: Symbol): Option[String] = Some(sym.name.decodedName.toString)
+  }
+
+  def arg0(): String = ""
+  def arg1(a: String): String = ""
+  def arg2(a: String, b: String): String = ""
+
+  val handlers = mutable.Map.empty[Long, Data => Data]
+
+  def _handle(id: Long, name: String, doc: String, handler: Data => Data): Unit = {
+    handlers(id) = handler
+  }
+  def handle[B: TypeTag](id: Long, name: String, doc: String)(f: () => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4, A5) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4, A5, A6) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4, A5, A6, A7) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4, A5, A6, A7, A8) => B): Unit = _handle(id, name, doc, lift(f))
+  def handle[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, A9: TypeTag, B: TypeTag](id: Long, name: String, doc: String)(f: (A1, A2, A3, A4, A5, A6, A7, A8, A9) => B): Unit = _handle(id, name, doc, lift(f))
+
+  def handleS[A1: TypeTag, A2: TypeTag, B: TypeTag](f: (A1, Seq[A2]) => B): Unit = {}
+  def f(a1: Int, a2: Int*): String = a2.mkString(",")
+  handleS(f)
+
+  // for later...
+  def lift[B: TypeTag](f: () => B): Data => Data =
+    ((_: Data) => f()) andThen packer[B]
+
+  def lift[A: TypeTag, B: TypeTag](f: A => B): Data => Data =
+    unpacker[A] andThen f andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, B: TypeTag](f: (A1, A2) => B): Data => Data =
+    unpacker[(A1, A2)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, B: TypeTag](f: (A1, A2, A3) => B): Data => Data =
+    unpacker[(A1, A2, A3)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, B: TypeTag](f: (A1, A2, A3, A4) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4, A5)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4, A5, A6)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4, A5, A6, A7)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7, A8) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4, A5, A6, A7, A8)] andThen f.tupled andThen packer[B]
+
+  def lift[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, A9: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7, A8, A9) => B): Data => Data =
+    unpacker[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] andThen f.tupled andThen packer[B]
+
+  def liftAsync[A: TypeTag, B: TypeTag](f: A => Future[B]) = {
+    val unpack = unpacker[A]
+    val pack = packer[B]
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        f(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, B: TypeTag](f: (A1, A2) => Future[B]) = {
+    val unpack = unpacker[(A1, A2)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, B: TypeTag](f: (A1, A2, A3) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, B: TypeTag](f: (A1, A2, A3, A4) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4, A5)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4, A5, A6)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4, A5, A6, A7)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7, A8) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4, A5, A6, A7, A8)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  def liftAsync[A1: TypeTag, A2: TypeTag, A3: TypeTag, A4: TypeTag, A5: TypeTag, A6: TypeTag, A7: TypeTag, A8: TypeTag, A9: TypeTag, B: TypeTag](f: (A1, A2, A3, A4, A5, A6, A7, A8, A9) => Future[B]) = {
+    val unpack = unpacker[(A1, A2, A3, A4, A5, A6, A7, A8, A9)]
+    val pack = packer[B]
+    val ft = f.tupled
+    new FutureFunction1[Data, Data] {
+      def apply(data: Data)(implicit ec: ExecutionContext): Future[Data] =
+        ft(unpack(data)).map(pack)
+    }
+  }
+
+  trait FutureFunction1[-T1, +R] {
+    def apply(data: T1)(implicit ec: ExecutionContext): Future[R]
+  }
 }

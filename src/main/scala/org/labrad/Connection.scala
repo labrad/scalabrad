@@ -1,88 +1,71 @@
-/*
- * Copyright 2008 Matthew Neeley
- *
- * This file is part of JLabrad.
- *
- * JLabrad is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * JLabrad is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 package org.labrad
 
-import java.awt.EventQueue
 import java.io.IOException
 import java.net.Socket
+import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
-import java.util.concurrent.{BlockingQueue, Callable, ExecutionException, Executors, Future, LinkedBlockingQueue}
-
-import data._
-import errors._
-import events.MessageListener
-import util.LookupProvider
-
+import java.util.concurrent.{ExecutionException, Executors}
+import org.labrad.data._
+import org.labrad.errors._
+import org.labrad.events.MessageListener
+import org.labrad.manager.Manager
+import org.labrad.util.{Counter, LookupProvider}
+import scala.concurrent.{Await, Channel, ExecutionContext, Future}
+import scala.concurrent.duration._
+import scala.swing.Swing
 
 trait Connection {
-  
+
   val name: String
   val host: String
   val port: Int
   def password: String
-  
+
   var id: Long = _
   var loginMessage: String = _
-    
+
   private var isConnected = false
   def connected = isConnected
-  private def connected_=(state: Boolean) { isConnected = state }
-  
-  // events
+  private def connected_=(state: Boolean): Unit = { isConnected = state }
+
+  protected var connectionListeners: List[PartialFunction[Boolean, Unit]] = Nil
   protected var messageListeners: List[PartialFunction[Message, Unit]] = Nil
 
-  def addMessageListener(listener: PartialFunction[Message, Unit]) { messageListeners ::= listener }
-  def removeMessageListener(listener: PartialFunction[Message, Unit]) {
+  def addConnectionListener(listener: PartialFunction[Boolean, Unit]): Unit = {
+    connectionListeners ::= listener
+  }
+  def removeConnectionListener(listener: PartialFunction[Boolean, Unit]): Unit = {
+    connectionListeners = connectionListeners filterNot (_ == listener)
+  }
+
+  def addMessageListener(listener: PartialFunction[Message, Unit]): Unit = {
+    messageListeners ::= listener
+  }
+  def removeMessageListener(listener: PartialFunction[Message, Unit]): Unit = {
     messageListeners = messageListeners filterNot (_ == listener)
   }
-  
-  
-  protected var requestDispatcher: RequestDispatcher = _
-  protected var writeQueue: BlockingQueue[Packet] = _
+
+  protected val writeQueue: Channel[Packet] = new Channel[Packet]
   protected val lookupProvider = new LookupProvider(this)
+  protected val requestDispatcher = new RequestDispatcher(sendPacket)
   protected val executor = Executors.newCachedThreadPool
-  
-  
-  // networking stuff
+  protected implicit val executionContext = ExecutionContext.fromExecutor(executor)
+
   private var socket: Socket = _
   private var reader: Thread = _
   private var writer: Thread = _
-  
-  /**
-   * Connect to the LabRAD manager.
-   * @throws IOException if a network error occurred
-   * @throws IncorrectPasswordException if the password was not correct
-   * @throws LoginFailedException if the login failed for some other reason
-   */
-  def connect {
+
+  def connect: Unit = {
     socket = new Socket(host, port)
     socket.setTcpNoDelay(true)
     socket.setKeepAlive(true)
+    implicit val byteOrder = ByteOrder.BIG_ENDIAN
     val inputStream = new PacketInputStream(socket.getInputStream)
     val outputStream = new PacketOutputStream(socket.getOutputStream)
 
-    writeQueue = new LinkedBlockingQueue[Packet]
-    requestDispatcher = new RequestDispatcher(packet => writeQueue.add(packet))
-
     reader = new Thread(new Runnable {
-      def run {
+      def run: Unit = {
         try {
           while (!Thread.interrupted)
             handlePacket(inputStream.readPacket)
@@ -91,204 +74,131 @@ trait Connection {
           case e: Exception => close(e)
         }
       }
-    }, "Packet Reader Thread")
+    }, s"${name}-reader")
 
     writer = new Thread(new Runnable {
-      def run {
+      def run: Unit = {
         try {
-          while (true) {
-            val p = writeQueue.take
-            outputStream.writePacket(p)
-          }
+          while (true)
+            outputStream.writePacket(writeQueue.read)
         } catch {
-          case e: InterruptedException => // this happens when the connection is closed.
-          case e: IOException => close(e) // let the client know that we have disconnected.
+          case e: InterruptedException => // connection closed
+          case e: IOException => close(e)
           case e: Exception => close(e)
         }
       }
-    }, "Packet Writer Thread")
+    }, s"${name}-writer")
+
+    reader.setDaemon(true)
+    writer.setDaemon(true)
 
     reader.start
     writer.start
 
+    connected = true
     try {
-      // we set connected to true temporarily so that login requests will complete
-      // however, we do not use the usual setter since that would send a message
-      // to interested parties
-      isConnected = true
       doLogin(password)
     } catch {
-      case e: LoginFailedException => close(e); throw e
-      case e: IncorrectPasswordException => close(e); throw e
-    } finally {
-      isConnected = false
+      case e: Throwable => close(e); throw e
     }
-    connected = true
+
+    for (listener <- connectionListeners) listener.lift(true)
   }
-  
-  
-  /**
-   * Logs in to LabRAD using the standard protocol.
-   * @param password
-   * @throws IncorrectPasswordException if the password was not correct
-   * @throws LoginFailedException if the login failed for some other reason
-   */
-  private def doLogin(password: String) {
-    val mgr = Constants.MANAGER
 
+  private def doLogin(password: String): Unit = {
     try {
-      // send first ping packet
-      val Bytes(challenge) = sendAndWait(Request(mgr))(0)
+      // send first ping packet; response is password challenge
+      val Bytes(challenge) = Await.result(send(Request(Manager.ID)), 10.seconds)(0)
 
-      // get password challenge
       val md = MessageDigest.getInstance("MD5")
       md.update(challenge)
-      md.update(password.getBytes(Data.STRING_ENCODING))
-
-      // send password response
+      md.update(password.getBytes(UTF_8))
       val data = Bytes(md.digest)
+
+      // send password response; response is welcome message
       val Str(msg) = try {
-        sendAndWait(Request(mgr, records = Seq(Record(0, data))))(0)
+        Await.result(send(Request(Manager.ID, records = Seq(Record(0, data)))), 10.seconds)(0)
       } catch {
         case e: ExecutionException => throw new IncorrectPasswordException
       }
-
-      // get welcome message
       loginMessage = msg
 
-      // send identification packet
-      val Word(assignedId) = sendAndWait(Request(mgr, records = Seq(Record(0, loginData))))(0)
+      // send identification packet; response is our assigned connection id
+      val UInt(assignedId) = Await.result(send(Request(Manager.ID, records = Seq(Record(0, loginData)))), 10.seconds)(0)
       id = assignedId
-      
+
     } catch {
       case e: InterruptedException => throw new LoginFailedException(e)
       case e: ExecutionException => throw new LoginFailedException(e)
       case e: IOException => throw new LoginFailedException(e)
     }
   }
-  
+
   protected def loginData: Data
-    
-  /** Closes the network connection to LabRAD */
-  def close { close(new IOException("Connection closed.")) }
 
+  def close: Unit = close(new IOException("Connection closed."))
 
-  /** Closes the connection to LabRAD after an error */
-  private def close(cause: Throwable) = synchronized {
+  private def close(cause: Throwable): Unit = synchronized {
     if (connected) {
-      // set our status as closed
       connected = false
-
-      // shutdown the lookup service
+      requestDispatcher.failAll(cause)
       executor.shutdown
 
-      // cancel all pending requests
-      requestDispatcher.failAll(cause)
-
-      // interrupt the writer thread
       writer.interrupt
-      try { writer.join }
-      catch { case e: InterruptedException => }
+      try { writer.join } catch { case e: InterruptedException => }
 
-      // interrupt the reader thread
       reader.interrupt
-      // this doesn't actually kill the thread, because it is blocked
-      // on a stream read.  To kill the reader, we close the socket.
       try { socket.close } catch { case e: IOException => }
       try { reader.join } catch { case e: InterruptedException => }
+
+      for (listener <- connectionListeners) listener.lift(false)
     }
   }
-  
-  
-  /** Low word of next context that will be created. */
-  private var nextContext = 0L
-  private val contextLock = new Object
 
-  /**
-   * Create a new context for this connection.
-   * @return
-   */
-  def newContext = contextLock synchronized {
-    nextContext += 1
-    new Context(0, nextContext)
-  }
-  
-  
-  // sending requests
-  
-  def send(target: String, context: Context = Context(0, 0))
-          (records: (String, Data)*): () => Seq[Data] = {
+  def send(target: String, records: (String, Data)*): Future[Seq[Data]] =
+    send(target, Context(0, 0), records: _*)
+
+  def send(target: String, context: Context, records: (String, Data)*): Future[Seq[Data]] = {
     val recs = for ((name, data) <- records) yield NameRecord(name, data)
-    sendRequest(NameRequest(target, context, recs))
+    send(NameRequest(target, context, recs))
   }
-  
-  def sendAndWait(target: String, context: Context = Context(0, 0))
-          (records: (String, Data)*): Seq[Data] =
-    send(target, context)(records: _*)()
-  
-  
-  def sendRequest(request: NameRequest): () => Seq[Data] =
-    lookupProvider.doLookupsFromCache(request) match {
-      case Some(request) => sendWithoutLookups(request)
-      case None => {
-        val callable = new Callable[Seq[Data]] {
-          def call: Seq[Data] =
-            sendWithoutLookups(lookupProvider.doLookups(request))()
-        }
-        val future = executor.submit(callable)
-        () => future.get
-      }
-    }
 
-  def sendAndWait(request: NameRequest) = sendRequest(request)()
+  def send(request: NameRequest): Future[Seq[Data]] =
+    lookupProvider.resolve(request).flatMap(send)
 
-  
-  def sendRequest(request: Request): () => Seq[Data] = sendWithoutLookups(request)
-  def sendAndWait(request: Request): Seq[Data] = sendRequest(request)()
-  
-
-  private def sendWithoutLookups(request: Request): () => Seq[Data] = {
+  def send(request: Request): Future[Seq[Data]] = {
     require(connected, "Not connected.")
     requestDispatcher.startRequest(request)
   }
 
+  def sendMessage(request: NameRequest): Unit =
+    lookupProvider.resolve(request).map(r => sendPacket(Packet.forMessage(r)))
 
-  def sendMessage(request: NameRequest) {
-    sendMessageWithoutLookups(lookupProvider.doLookups(request))
-  }
-  
-  private def sendMessageWithoutLookups(request: Request) {
+  protected def sendPacket(packet: Packet): Unit = {
     require(connected, "Not connected.")
-    writeQueue.add(Packet.forMessage(request))
+    writeQueue.write(packet)
   }
 
-  
-  
-  /** Handle packets coming in from the wire */
-  protected def handlePacket(packet: Packet) {
-    packet match {
-      case Packet(id, _, _, _) if id < 0 => handleResponse(packet)
-      case Packet(0, _, _, _) => handleMessage(packet)
-      case _ => handleRequest(packet)
+
+  private val contextCounter = new Counter(0, 0xFFFFFFFFL)
+  def newContext = Context(0, contextCounter.next)
+
+  protected def handlePacket(packet: Packet): Unit = packet match {
+    case Packet(id, _, _, _) if id > 0 => handleRequest(packet)
+    case Packet( 0, _, _, _)           => handleMessage(packet)
+    case Packet(id, _, _, _) if id < 0 => handleResponse(packet)
+  }
+
+  protected def handleResponse(packet: Packet): Unit = {
+    requestDispatcher.finishRequest(packet)
+  }
+
+  protected def handleMessage(packet: Packet): Unit = Swing.onEDT {
+    for (Record(id, data) <- packet.records) {
+      val message = Message(packet.target, packet.context, id, data)
+      messageListeners.foreach(_.lift(message))
     }
   }
 
-  protected def handleResponse(packet: Packet) {
-    requestDispatcher.finishRequest(packet)
-  }
-  
-  protected def handleMessage(packet: Packet) {
-    EventQueue.invokeLater(new Runnable {
-      def run {
-        for (Record(id, data) <- packet.records) {
-          val message = Message(packet.target, packet.context, id, data)
-          for (listener <- messageListeners if listener.isDefinedAt(message))
-            listener(message)
-        }
-      }
-    })
-  }
-  
-  protected def handleRequest(packet: Packet) {}
+  protected def handleRequest(packet: Packet): Unit = {}
 }
-

@@ -1,378 +1,350 @@
-/*
- * Copyright 2008 Matthew Neeley
- * 
- * This file is part of JLabrad.
- *
- * JLabrad is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- * 
- * JLabrad is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
- */
+package org.labrad.types
 
-package org.labrad
-package types
+import scala.collection.mutable
+import scala.util.parsing.combinator.RegexParsers
 
+object Parsers extends RegexParsers {
 
-// TODO: separate type matchers (abstract) from types (concrete)
+  private def stripComments(tag: String): String =
+    tag.split(":")(0) // strip off any trailing comments
+       .replaceAll("""\{[^\{\}]*\}""", "") // remove bracketed comments
+
+  private def parseOrThrow[A](p: Parser[A], s: String): A =
+    parseAll(p, s) match {
+      case Success(x, _) => x
+      case NoSuccess(msg, _) => sys.error(msg)
+    }
+
+  def parsePattern(tag: String): Pattern = parseOrThrow(aPattern, stripComments(tag))
+  def parseType(tag: String): Type = parseOrThrow(aType, stripComments(tag))
+  def parseUnit(s: String): Seq[(String, Ratio)] = parseOrThrow(unitStr, s)
 
 
-// A type descriptor consists of a tag and a type parsed from that tag
-// this is because parsing can remove some information, eg comments and whitespace
-class TypeDescriptor(val tag: String) {
-  val typ = Type(tag)
-  
-  def accepts(other: String) = typ accepts other
-  def accepts(other: Type) = typ accepts other
-  def accepts(other: TypeDescriptor) = typ accepts other.typ
-  
-  override def toString = tag
+  def aType: Parser[Type] =
+    ( errorType
+    | repsep(singleType, ",".?) ^^ {
+        case Seq()  => TNone
+        case Seq(t) => t
+        case ts     => TCluster(ts: _*)
+      }
+    )
+
+  def noneType: Parser[Type] =
+      "_" ^^ { _ => TNone }
+
+  def errorType: Parser[Type] =
+      "E" ~> singleType.? ^^ { t => TError(t getOrElse TNone) }
+
+  def someType: Parser[Type] =
+    ( "b"   ^^ { _ => TBool }
+    | "i"   ^^ { _ => TInt }
+    | "i8"  ^^ { _ => TInt8 }
+    | "i16" ^^ { _ => TInt16 }
+    | "i32" ^^ { _ => TInt }
+    | "i64" ^^ { _ => TInt64 }
+    | "w"   ^^ { _ => TUInt }
+    | "u8"  ^^ { _ => TUInt8 }
+    | "u16" ^^ { _ => TUInt16 }
+    | "u32" ^^ { _ => TUInt }
+    | "u64" ^^ { _ => TUInt64 }
+    | "s"   ^^ { _ => TStr }
+    | "t"   ^^ { _ => TTime }
+    | valueType
+    | complexType
+    | arrayType
+    | clusterType
+    )
+
+  def singleType: Parser[Type] = noneType | someType
+
+  def valueType: Parser[Type] =
+      "v" ~> units.? ^^ { u => TValue(u) }
+
+  def complexType: Parser[Type] =
+      "c" ~> units.? ^^ { u => TComplex(u) }
+
+  def units: Parser[String] = "[" ~> """[^\[\]]*""".r <~ "]"
+
+  def arrayType: Parser[Type] =
+      "*" ~> number.? ~ singleType ^^ { case d ~ t => TArr(t, d getOrElse 1) }
+
+  def number: Parser[Int] = """\d+""".r ^^ { _.toInt }
+
+  def clusterType: Parser[Type] =
+      "(" ~> repsep(singleType, ",".?) <~ ")" ^^ { ts => TCluster(ts: _*) }
+
+
+
+  def aPattern: Parser[Pattern] =
+    ( errorPattern
+    | repsep(nonemptyPattern, "|") ^^ {
+        case Seq()  => TNone
+        case Seq(p) => p
+        case ps     => PChoice(ps: _*)
+      }
+    )
+
+  def nonemptyPattern: Parser[Pattern] =
+      rep1sep(singlePattern, ",".?) ^^ {
+        case Seq(p) => p
+        case ps     => PCluster(ps: _*)
+      }
+
+  def errorPattern: Parser[Pattern] =
+      "E" ~> singlePattern.? ^^ { p => PError(p getOrElse TNone) }
+
+  def somePattern: Parser[Pattern] =
+    ( "?" ^^ { _ => PAny }
+    | valuePattern
+    | complexPattern
+    | arrayPattern
+    | expandoPattern
+    | clusterPattern
+    | choicePattern
+    | someType
+    )
+
+  def singlePattern: Parser[Pattern] = noneType | somePattern
+
+  def valuePattern: Parser[Pattern] =
+      "v" ~> units.? ^^ { u => PValue(u) }
+
+  def complexPattern: Parser[Pattern] =
+      "c" ~> units.? ^^ { u => PComplex(u) }
+
+  def arrayPattern: Parser[Pattern] =
+      "*" ~> number.? ~ singlePattern ^^ { case d ~ t => PArr(t, d getOrElse 1) }
+
+  def expandoPattern: Parser[Pattern] =
+      "(" ~> somePattern <~ "...)" ^^ { p => PExpando(p) }
+
+  def clusterPattern: Parser[Pattern] =
+      "(" ~> repsep(somePattern, ",".?) <~ ")" ^^ { ps => PCluster(ps: _*) }
+
+  def choicePattern: Parser[Pattern] =
+      "<" ~> repsep(nonemptyPattern, "|") <~ ">" ^^ { ps => PChoice(ps: _*) }
+
+
+  def unitStr: Parser[Seq[(String, Ratio)]] =
+      firstTerm ~ (divTerm | mulTerm).* ^^ {
+        case first ~ rest => first :: rest
+      }
+
+  def firstTerm = "1".? ~> divTerm | term
+
+  def mulTerm = "*" ~> term
+  def divTerm = "/" ~> term ^^ { case (name, exp) => (name, -exp) }
+
+  def term: Parser[(String, Ratio)] =
+      termName ~ exponent.? ^^ {
+        case name ~ None      => (name, Ratio(1))
+        case name ~ Some(exp) => (name, exp)
+      }
+
+  def termName = """[A-Za-z'"]+""".r
+
+  def exponent: Parser[Ratio] =
+      "^" ~> "-".? ~ number ~ ("/" ~> number).? ^^ {
+        case None    ~ n ~ None    => Ratio( n)
+        case None    ~ n ~ Some(d) => Ratio( n, d)
+        case Some(_) ~ n ~ None    => Ratio(-n)
+        case Some(_) ~ n ~ Some(d) => Ratio(-n, d)
+      }
 }
 
-object TypeDescriptor {
-  def apply(tag: String) = new TypeDescriptor(tag)
-  def apply(typ: Type) = new TypeDescriptor(typ.toString)
-}
 
-
-sealed trait Type {
+sealed trait Pattern extends Serializable { self: Pattern =>
   def accepts(tag: String): Boolean = accepts(Type(tag))
-  def accepts(typ: Type): Boolean
+  def accepts(pat: Pattern): Boolean
 
-  def expanded: List[Type] = List(this) // TODO: get rid of type expansion once APIs support TChoice
-  
-  /**
-   * Returns a compact string describing this type object.
-   * This string representation is used in flattening and is also
-   * suitable for passing to the Data constructor to create a new
-   * LabRAD data object.
-   */
-  def toString: String
+  def apply(typ: Type): Option[Type]
 
-  /**
-   * Indicates whether this is an abstract type, that is,
-   * one that can not actually be instantiated as a data object.
-   * Abstract types are still useful for pattern-matching accepted types.
-   */
-  def isAbstract: Boolean
-  
-  /**
-   * Indicates whether this type object represents data whose byte length is fixed.
-   * @return
-   */
+  private def combinations[T](seqs: Seq[Seq[T]]): Seq[Seq[T]] = seqs match {
+    case Seq() => Seq(Seq())
+    case Seq(heads, rest @ _*) =>
+      val tails = combinations(rest)
+      for (head <- heads; tail <- tails) yield head +: tail
+  }
+
+  // TODO: remove pattern expansion once clients support patterns
+  def expand: Seq[Pattern] = self match {
+    case PChoice(ps @ _*) => ps.flatMap(_.expand)
+    case PCluster(ps @ _*) => combinations(ps.map(_.expand)).map(PCluster(_: _*))
+    case PExpando(p) => Seq(PAny)
+    case PArr(p, depth) => p.expand.map(PArr(_, depth))
+    case p => Seq(p)
+  }
+}
+
+
+object Pattern {
+  def apply(s: String): Pattern = Parsers.parsePattern(s)
+
+  def reduce(pats: Pattern*): Pattern = {
+    def flattenChoices(p: Pattern): Seq[Pattern] = p match {
+      case PChoice(ps @ _*) => ps.flatMap(flattenChoices)
+      case p => Seq(p)
+    }
+
+    val pat = PChoice(pats: _*)
+    val buf = mutable.Buffer.empty[Pattern]
+    for (p <- flattenChoices(pat)) if (!buf.exists(_ accepts p)) buf += p
+    buf.toSeq match {
+      case Seq(p) => p
+      case ps => PChoice(ps: _*)
+    }
+  }
+}
+
+
+/** implementation of important Pattern methods for concrete types */
+trait ConcreteType { self: Type =>
+  def accepts(typ: Pattern) = typ == self
+
+  def apply(typ: Type): Option[Type] =
+    if (typ == self) Some(self) else None
+}
+
+
+sealed trait Type extends Pattern {
+  /** Indicates whether data of this type has fixed byte length */
   def fixedWidth: Boolean
 
-  /**
-   * Gives the width of the byte string for data of this type.  Note that if this is
-   * not a fixed-width type, then some of the bytes here are pointers to variable-length
-   * sections.
-   * @return
-   */
+  /** Byte width for data of this type */
   def dataWidth: Int
 }
 
 object Type {
-  // types used in parsing and unparsing packets
-  val HEADER = Type("(ww)iww")
-  val PACKET = Type("(ww)iws")
-  val RECORD = Type("wss")
-
-  private class Buffer(var s: String) {
-    def get(i: Int = 1): String = {
-      val temp = s.substring(0, i)
-      s = s.substring(i)
-      temp
-    }
-    def getChar = get().charAt(0)
-
-    def peek(i: Int = 1) = s.substring(0, i)
-    def peekChar = s.charAt(0)
-
-    def skip(i: Int = 1) { s = s.substring(i) }
-    def skipWhitespace { s = s.replaceFirst("[,\\s]*", "") }
-
-    def isEmpty = length == 0
-    def length = s.length
-    override def toString = s
-  }
-
-  def apply(tag: String): Type = {
-    val tb = new Buffer(stripComments(tag))
-    val buf = Seq.newBuilder[Type]
-    while (!tb.isEmpty) buf += parseSingleType(tb)
-    buf.result match {
-      case Seq() => TEmpty
-      case Seq(t) => t
-      case subTypes => TCluster(subTypes: _*)
-    }
-  }
-
-  private def stripComments(tag: String): String =
-    tag.split(":")(0) // strip off any trailing comments
-       .replaceAll("\\{[^\\{\\}]*\\}", "") // remove anything in brackets
-
-  private def parseSingleType(tb: Buffer): Type = {
-    tb.skipWhitespace
-    tb.length match {
-      case 0 => TEmpty
-      case _ =>
-        val t: Type = tb.getChar match {
-          case '_' => TEmpty
-          case '?' => TAny
-          case 'b' => TBool
-          case 'i' => parseInt(tb)
-          case 'w' => parseUInt(tb)
-          case 's' => TStr
-          case 't' => TTime
-          case 'v' => TValue(parseUnits(tb))
-          case 'c' => TComplex(parseUnits(tb))
-          case '(' => parseCluster(tb)
-          case '<' => parseChoice(tb)
-          case '*' => parseArray(tb)
-          case 'E' => parseError(tb)
-          case char => error("Unknown character in type tag: " + char)
-        }
-        tb.skipWhitespace
-        t
-    }
-  }
-
-  private def parseInt(tb: Buffer): Type = {
-    val bitWidth = parseNum(tb) getOrElse 32
-    TInteger
-  }
-  
-  private def parseUInt(tb: Buffer): Type = {
-    val bitWidth = parseNum(tb) getOrElse 32
-    TWord
-  }
-  
-  private def parseNum(tb: Buffer): Option[Int] = {
-    var n = 0
-    var digits = 0
-    while (!tb.isEmpty && tb.peekChar.isDigit) {
-      n = 10*n + tb.get().toInt
-      digits += 1
-    }
-    digits match {
-      case 0 => None
-      case _ => Some(n)
-    }
-  }
-  
-  private def parseCluster(tb: Buffer): Type = {
-    val subTypes = Seq.newBuilder[Type]
-    while (!tb.isEmpty) {
-      if (tb.peekChar == ')') {
-        tb.getChar
-        return TCluster(subTypes.result: _*)
-      } else if (tb.length >= 4 && tb.peek(4) == "...)") {
-        tb.get(4)
-        subTypes.result match {
-          case Seq(t) => return TExpando(t)
-          case _ => error("Expando cluster requires one element type.")
-        }
-      }
-      subTypes += parseSingleType(tb)
-    }
-    error("No closing ) found.")
-  }
-
-  private def parseChoice(tb: Buffer): Type = {
-    var currentType = Seq.newBuilder[Type]
-    val subTypes = Seq.newBuilder[Type]
-    while (!tb.isEmpty) {
-      tb.peekChar match {
-        case '|' =>
-          tb.getChar
-          subTypes += {
-            currentType.result match {
-              case Seq() => error("Choice elements cannot be empty clusters")
-              case Seq(t) => t
-              case types => TCluster(types: _*)
-            }
-          }
-          currentType = Seq.newBuilder[Type]
-        case '>' =>
-          tb.getChar
-          subTypes += {
-            currentType.result match {
-              case Seq() => error("Choice elements cannot be empty clusters")
-              case Seq(t) => t
-              case types => TCluster(types: _*)
-            }
-          }
-          subTypes.result match {
-            case Seq() => error("Choice must contain at least one type.")
-            case subTypes => return TChoice(subTypes: _*)
-          }
-        case _ =>
-          currentType += parseSingleType(tb)
-      }
-    }
-    error("No closing '>' found.")
-  }
-  
-  private def parseArray(tb: Buffer): Type = {
-    tb.skipWhitespace
-    var depth = 0
-    var nDigits = 0
-    while (tb.peekChar.isDigit) {
-      depth = depth * 10 + tb.get().toInt
-      nDigits += 1
-    }
-    if (depth == 0) {
-      if (nDigits > 0) error("List depth must be non-zero.")
-      depth = 1
-    }
-    tb.skipWhitespace
-    val elem = parseSingleType(tb)
-    TArr(elem, depth)
-  }
-
-  private def parseError(tb: Buffer): Type =
-    TError(parseSingleType(tb))
-
-  private def parseUnits(tb: Buffer): String = {
-    tb.skipWhitespace
-    val units = new StringBuffer
-    if (tb.isEmpty || (tb.peekChar != '[')) return null
-    tb.getChar // drop '['
-    while (!tb.isEmpty) {
-      val c = tb.getChar
-      if (c == ']') return units.toString
-      units.append(c)
-    }
-    error("No closing ] found.")
-  }
+  def apply(s: String): Type = Parsers.parseType(s)
 }
 
 
-case object TEmpty extends Type {
-  def accepts(typ: Type) = typ == TEmpty
 
-  def isAbstract = false
-  def fixedWidth = true
-  def dataWidth = 0
-  
-  override def toString = ""
-}
+case object PAny extends Pattern {
+  def accepts(typ: Pattern) = true
+  def apply(typ: Type): Option[Type] = Some(typ)
 
-
-case object TAny extends Type {
-  def accepts(typ: Type) = true
-
-  def isAbstract = true
-  def fixedWidth = false
-  def dataWidth = 0
-  
   override def toString = "?"
 }
 
 
-case class TChoice(choices: Type*) extends Type {
-  def accepts(typ: Type) = typ match {
-    case TChoice(types @ _*) => types forall (accepts _)
-    case typ => choices.exists(_ accepts typ)
+case class PChoice(choices: Pattern*) extends Pattern {
+  def accepts(pat: Pattern) = pat match {
+    case PChoice(ps @ _*) => ps forall { p => choices.exists(_ accepts p) }
+    case p => choices.exists(_ accepts p)
   }
-  
-  override def expanded = choices.flatMap(_.expanded).toList
-  
-  def isAbstract = true
-  def fixedWidth = false
-  def dataWidth = 0
-  
-  override def toString = "<" + choices.mkString("|") + ">"
+
+  def apply(typ: Type): Option[Type] = {
+    choices.view.map(_(typ)).collectFirst { case Some(t) => t }
+  }
+
+  override def toString = s"<${choices.mkString("|")}>"
 }
 
 
-case class TExpando(elem: Type) extends Type {
-  def accepts(typ: Type) = typ match {
-    case TCluster(elems @ _*) => elems.forall(elem accepts _)
+case class PExpando(pat: Pattern) extends Pattern {
+  def accepts(typ: Pattern) = typ match {
+    case PExpando(p) => pat accepts p
+    case PCluster(elems @ _*) => elems forall { pat accepts _ }
     case _ => false
   }
-  
-  override def expanded = List(TAny)
-  
-  def isAbstract = true
-  def fixedWidth = false
-  def dataWidth = 0
-  
-  override def toString = "(" + elem.toString + "...)"
+
+  def apply(typ: Type): Option[Type] = typ match {
+    case TCluster(elems @ _*) =>
+      val types = for (e <- elems) yield pat(e).getOrElse(return None)
+      Some(TCluster(types: _*))
+    case _ => None
+  }
+
+  override def toString = s"($pat...)"
 }
 
 
-case class TCluster(elems: Type*) extends Type {
-
-  lazy val isAbstract = elems exists (_.isAbstract)
-  lazy val dataWidth = elems map (_.dataWidth) sum
-  lazy val fixedWidth = elems forall (_.fixedWidth)
-  
-  val offsets = {
-    val widths = elems.map(_.dataWidth)
-    var prev = 0
-    for (w <- widths) yield {
-      val ofs = prev
-      prev += w
-      ofs
-    }
-  }
-
-  override lazy val toString = "(" + elems.map(_.toString).mkString + ")"
-
-  def accepts(typ: Type) = typ match {
-    case TCluster(others @ _*) if others.size == size =>
+class PCluster protected(val elems: Pattern*) extends Pattern {
+  def accepts(typ: Pattern) = typ match {
+    case PCluster(others @ _*) if others.size == elems.size =>
       (elems zip others) forall { case (elem, other) => elem accepts other }
     case _ => false
   }
 
-  override def expanded = {
-    def combinations[T](lists: List[List[T]]): List[List[T]] = lists match {
-      case Nil => List(Nil)
-      case heads :: rest =>
-        val tails = combinations(rest)
-        for (head <- heads; tail <- tails) yield head :: tail
-    }
-    
-    for (combo <- combinations(elems.map(_.expanded).toList))
-      yield TCluster(combo: _*)
+  def apply(typ: Type): Option[Type] = typ match {
+    case TCluster(es @ _*) if es.length == elems.length =>
+      val types = for ((elem, e) <- elems zip es) yield elem(e).getOrElse(return None)
+      Some(TCluster(types: _*))
+    case _ => None
   }
-  
+
+  override def toString = s"(${elems.mkString})"
+
+  override def equals(other: Any): Boolean = other match {
+    case p: PCluster => p.elems == elems
+    case _ => false
+  }
+
+  override def hashCode: Int = elems.hashCode
+}
+
+object PCluster {
+  def apply(elems: Pattern*) = new PCluster(elems: _*)
+
+  def unapplySeq(pat: Pattern): Option[Seq[Pattern]] = pat match {
+    case p: PCluster => Some(p.elems)
+    case _ => None
+  }
+}
+
+case class TCluster(override val elems: Type*) extends PCluster(elems: _*) with Type {
+  lazy val dataWidth = elems.map(_.dataWidth).sum
+  lazy val fixedWidth = elems.forall(_.fixedWidth)
+  lazy val offsets = elems.map(_.dataWidth).scan(0)(_ + _).dropRight(1)
+
   def size = elems.size
-  def subtype(i: Int) = elems(i)
   def apply(i: Int) = elems(i)
   def offset(i: Int) = offsets(i)
 }
 
-//object TCluster {
-//  def unapplySeq(c: TCluster): Option[Seq[Type]] = Some(c.elems)
-//}
 
+class PArr protected(val elem: Pattern, val depth: Int) extends Pattern {
+  require(depth > 0)
 
-case class TArr(elem: Type, depth: Int = 1) extends Type {
-  def isAbstract = elem.isAbstract
-  
-  override val toString = {
-    // FIXME this is a bit of a hack to get empty lists to flatten properly in some circumstances
-    val elemStr = if (elem == TEmpty) "_" else elem.toString
-    if (depth == 1) "*" + elemStr
-    else "*" + depth + elemStr
-  }
-  
-  def accepts(typ: Type) = typ match {
-    case TArr(e, d) if d == depth => elem accepts e
+  def accepts(typ: Pattern) = typ match {
+    case PArr(e, d) if d == depth => elem accepts e
     case _ => false
   }
 
-  override def expanded = for (e <- elem.expanded) yield TArr(e)
-  
+  def apply(typ: Type): Option[Type] = typ match {
+    case TArr(e, d) if d == depth => elem(e).map(TArr(_, d))
+    case _ => None
+  }
+
+  override val toString = depth match {
+    case 1 => "*" + elem.toString
+    case d => "*" + d + elem.toString
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case p: PArr => p.elem == elem && p.depth == depth
+    case _ => false
+  }
+
+  override def hashCode: Int = (elem, depth).hashCode
+}
+
+object PArr {
+  def apply(elem: Pattern, depth: Int = 1) = new PArr(elem, depth)
+
+  def unapply(pat: Pattern): Option[(Pattern, Int)] = pat match {
+    case p: PArr => Some((p.elem, p.depth))
+    case _ => None
+  }
+}
+
+case class TArr(override val elem: Type, override val depth: Int = 1) extends PArr(elem, depth) with Type {
+  override val toString = depth match {
+    case 1 => "*" + elem.toString
+    case d => "*" + d + elem.toString
+  }
+
   val fixedWidth = false
   val dataWidth = 4 * depth + 4
 
@@ -380,82 +352,118 @@ case class TArr(elem: Type, depth: Int = 1) extends Type {
 }
 
 
-case class TError(payload: Type) extends Type {
-  def accepts(typ: Type) = typ match {
-    case TError(p) => payload accepts p
+class PError protected(val payload: Pattern) extends Pattern {
+  def accepts(typ: Pattern) = typ match {
+    case PError(p) => payload accepts p
     case _ => false
   }
 
-  val isAbstract = payload.isAbstract
-  val fixedWidth = false
-  val dataWidth = 4 + 4 + payload.dataWidth
+  def apply(typ: Type): Option[Type] = typ match {
+    case TError(p) => payload(p).map(TError(_))
+    case _ => None
+  }
 
   override val toString = "E" + payload.toString
+
+  override def equals(other: Any): Boolean = other match {
+    case p: PError => p.payload == payload
+    case _ => false
+  }
+
+  override def hashCode: Int = payload.hashCode
+}
+
+object PError {
+  def apply(payload: Pattern = TNone) = new PError(payload)
+
+  def unapply(pat: Pattern): Option[Pattern] = pat match {
+    case p: PError => Some(p.payload)
+    case _ => None
+  }
+}
+
+case class TError(override val payload: Type) extends PError(payload) with Type {
+  val fixedWidth = false
+  val dataWidth = 4 + 4 + payload.dataWidth
 }
 
 
-case object TBool extends Type {
-  def accepts(typ: Type) = typ == TBool
+case object TNone extends Type with ConcreteType {
+  override val toString = "_"
+  val fixedWidth = true
+  val dataWidth = 0
+}
 
-  val isAbstract = false
+case object TBool extends Type with ConcreteType {
+  override val toString = "b"
   val fixedWidth = true
   val dataWidth = 1
-
-  override val toString = "b"
 }
 
-
-case object TInteger extends Type {
-  def accepts(typ: Type) = typ == TInteger
-
-  val isAbstract = false
-  val fixedWidth = true
-  val dataWidth = 4
-
+case object TInt extends Type with ConcreteType {
   override val toString = "i"
-}
-
-
-case object TWord extends Type {
-  def accepts(typ: Type) = typ == TWord
-
-  val isAbstract = false
   val fixedWidth = true
   val dataWidth = 4
-
-  override val toString = "w"
 }
 
-
-case object TStr extends Type {
-  def accepts(typ: Type) = typ == TStr
-
-  val isAbstract = false
-  val fixedWidth = false
-  val dataWidth = 4
-
-  override val toString = "s"
-}
-
-
-case object TTime extends Type {
-  def accepts(typ: Type) = typ == TTime
-
-  val isAbstract = false
+case object TInt8 extends Type with ConcreteType {
+  override val toString = "i8"
   val fixedWidth = true
-  val dataWidth = 16
-
-  override val toString = "t"
+  val dataWidth = 1
 }
 
+case object TInt16 extends Type with ConcreteType {
+  override val toString = "i16"
+  val fixedWidth = true
+  val dataWidth = 2
+}
 
-case class TValue(units: Option[String] = None) extends Type {
-  val isAbstract = false
+case object TInt64 extends Type with ConcreteType {
+  override val toString = "i64"
   val fixedWidth = true
   val dataWidth = 8
+}
 
-  def accepts(typ: Type) = typ match {
-    case TValue(u) => (units, u) match {
+case object TUInt extends Type with ConcreteType {
+  override val toString = "w"
+  val fixedWidth = true
+  val dataWidth = 4
+}
+
+case object TUInt8 extends Type with ConcreteType {
+  override val toString = "w8"
+  val fixedWidth = true
+  val dataWidth = 1
+}
+
+case object TUInt16 extends Type with ConcreteType {
+  override val toString = "w16"
+  val fixedWidth = true
+  val dataWidth = 2
+}
+
+case object TUInt64 extends Type with ConcreteType {
+  override val toString = "w64"
+  val fixedWidth = true
+  val dataWidth = 8
+}
+
+case object TStr extends Type with ConcreteType {
+  override val toString = "s"
+  val fixedWidth = false
+  val dataWidth = 4
+}
+
+case object TTime extends Type with ConcreteType {
+  override val toString = "t"
+  val fixedWidth = true
+  val dataWidth = 16
+}
+
+
+class PValue protected(val units: Option[String]) extends Pattern {
+  def accepts(typ: Pattern) = typ match {
+    case PValue(u) => (units, u) match {
       case (None, None) => true
       case (None, Some(u)) => true
       case (Some(units), None) => true
@@ -464,10 +472,41 @@ case class TValue(units: Option[String] = None) extends Type {
     case _ => false
   }
 
+  def apply(typ: Type): Option[Type] = typ match {
+    case TValue(unit) =>
+      units match {
+        case Some(u) => Some(TValue(u))
+        case None => Some(TValue(unit))
+      }
+    case _ => None
+  }
+
   override val toString = units match {
     case None => "v"
-    case Some(units) => "v[" + units + "]"
+    case Some(units) => s"v[$units]"
   }
+
+  override def equals(other: Any): Boolean = other match {
+    case p: PValue => p.units == units
+    case _ => false
+  }
+
+  override def hashCode: Int = units.hashCode
+}
+
+object PValue {
+  def apply(units: String) = new PValue(Option(units))
+  def apply(units: Option[String] = None) = new PValue(units)
+
+  def unapply(pat: Pattern): Option[Option[String]] = pat match {
+    case p: PValue => Some(p.units)
+    case _ => None
+  }
+}
+
+case class TValue(override val units: Option[String] = None) extends PValue(units) with Type {
+  val fixedWidth = true
+  val dataWidth = 8
 }
 
 object TValue {
@@ -475,13 +514,9 @@ object TValue {
 }
 
 
-case class TComplex(units: Option[String] = None) extends Type {
-  def isAbstract = false
-  def fixedWidth = true
-  def dataWidth = 16
-
-  def accepts(typ: Type) = typ match {
-    case TComplex(u) => (units, u) match {
+class PComplex protected(val units: Option[String]) extends Pattern {
+  def accepts(typ: Pattern) = typ match {
+    case PComplex(u) => (units, u) match {
       case (None, None) => true
       case (None, Some(u)) => true
       case (Some(units), None) => true
@@ -490,10 +525,41 @@ case class TComplex(units: Option[String] = None) extends Type {
     case _ => false
   }
 
-  override lazy val toString = units match {
-    case None => "c"
-    case Some(units) => "c[" + units + "]"
+  def apply(typ: Type): Option[Type] = typ match {
+    case TComplex(unit) =>
+      units match {
+        case Some(u) => Some(TComplex(u))
+        case None => Some(TComplex(unit))
+      }
+    case _ => None
   }
+
+  override val toString = units match {
+    case None => "c"
+    case Some(units) => s"c[$units]"
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case p: PComplex => p.units == units
+    case _ => false
+  }
+
+  override def hashCode: Int = units.hashCode
+}
+
+object PComplex {
+  def apply(units: String) = new PComplex(Option(units))
+  def apply(units: Option[String] = None) = new PComplex(units)
+
+  def unapply(pat: Pattern): Option[Option[String]] = pat match {
+    case p: PComplex => Some(p.units)
+    case _ => None
+  }
+}
+
+case class TComplex(override val units: Option[String] = None) extends PComplex(units) with Type {
+  def fixedWidth = true
+  def dataWidth = 16
 }
 
 object TComplex {

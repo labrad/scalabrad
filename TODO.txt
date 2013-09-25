@@ -1,59 +1,59 @@
 Scalabrad TODOs:
 
-grammars
-- units
-- types
-- stringified data
-
-define byte format (endianness) on the wire (?)
-
-
-data and type APIs
-- concrete types are those that can actually be instantiated on real data objects
-- abstract types can only be used to mark accepted types in methods (
-- given a list of abstract types and an incoming type, determine whether the type matches any of them
-  and then convert it to the appropriate type
-
-
-- allow to have settings on the server object, as well as per context
-- accept context and/or source as special annotated parameters, if desired, rather than setting with each request
-  - these special parameters will then be 'injected' by the framework, ala Guice
+Manager
+- define standard named messages
+  - context expired (use this instead of notify on context expiration methods)
+  - client connected/disconnected (analogous to server connected/disconnected)
+- use messages internally to communicate between proxies as well as connected clients/servers
+  - proxies keep track of contexts, for example, so they need to intercept context expiration messages
+- allow tracing requests through the system (e.g. zipkin integration)
 
 Server
-- setting definitions
-  - annotated methods (java style).
-    +: can automatically determine accepted types
-    +: can use interfaces instead of classes to separate interface/implementation
-    -: overrides are messy
-    -: need to handle default arguments
-  - dsl (scala style)
-    +: case syntax is nice
-    -: must separately document accepted types, and keep in sync
-  
-  - unpack arbitrarily complicated LabRAD types into structural Java types
-  - also do introspection on return types and provide methods to convert from java back to LabRAD
+- settings
+  - handle accepted type annotations for any type (not just double)
+  - allow settings on server object (not only context-dependent)
+  - allow for (require?) asynchronous setting handler dispatch
 - when an error happens inside a setting, include info in the returned message (which setting, etc.)
 - message handlers (per context or global)
   - allow message handlers to be created declaratively, using annotations to set dispatch policy, etc.
+  - unpack messages sent to message handlers, just like settings
 - handle context expiration messages
 
 Deployment
 - how to deploy Scalabrad to developers (just grab a jar, but what about sbt or maven?)
 - how to deploy apps for desktop (just double-click a jar)
-- how to deploy apps with jnlp or applets
+- how to deploy apps with jnlp
 
 Client
-- provide a means to clear the server/setting cache
-  - clear the cache automatically when a server disconnects
+- clear the server/setting cache when a server disconnects
+
+grammars
+- types
+  - have a way to indicate non-empty data
+  - have a way to indicate any units in patterns (separate from no units)
+- stringified data
+  - improve parser to handle large data (esp. long strings)
 
 Data
-- allow to get a subarray of a multidimensional array as a data object in its own right
-  - just like a normal data object except for setting array size.  Maybe just disallow this?
+- use akka ByteString? netty buffer?
 
 General
 - try to write things as interfaces, rather than concrete types.
-- easier way to get at the results of a packet call, rather than indexing into the result
-  for example, each addRecord call returns a Future[Data] that can be queried separately
+
+web
+- registry
+  - enable monitoring of changes made by other clients (update live)
+  - allow editing existing registry keys
+  - allow copying of keys/dirs
+  - add confirmation when deleting non-empty directories
+  - don't reload entire registry listing on each change
+- configure labrad (port, password, registry location) if running on localhost
+- nodes
+  - allow starting/stopping servers
+  - allow configuring nodes
+- typescipt? dart?
+- ip whitelist/blacklist (if still used)
+- error log (logging in general...)
 
 Examples
 - write some example clients and servers

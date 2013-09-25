@@ -1,82 +1,28 @@
 package org.labrad
 
-import scala.actors.Actor
-import scala.actors.Actor._
-import scala.collection._
-import scala.util.control.Breaks
+import org.labrad.data._
+import org.labrad.util.AsyncSemaphore
+import scala.concurrent.{ExecutionContext, Future}
 
-import java.io.{PrintWriter, StringWriter}
+class ContextMgr(factory: => ServerContext, bind: Any => RequestContext => Data) {
+  @volatile private var firstTime = true
+  @volatile private var server: ServerContext = _
+  @volatile private var handler: RequestContext => Data = _
+  private val semaphore = new AsyncSemaphore(1)
 
-import data._
-import errors.LabradException
-
-
-class ContextManager(context: Context, handle: (Long, ServerContext, Data) => Data, send: Packet => Unit) extends Actor {
-  var server: ServerContext = _
-  
-  case class Serve(request: Packet)
-  case object Expire
-  
-  def act() {
-    val breaks = new Breaks
-    import breaks.{break, breakable}
-    var shouldInit = true
-    
-    loop {
-      react {
-        case Serve(request) =>
-          val response = Seq.newBuilder[Record]          
-          breakable {
-            for (Record(id, data) <- request.records) {
-              val respData = try {
-                if (shouldInit) {
-                  server.init
-                  shouldInit = false
-                }
-                server.source = request.target
-                handle(id, server, data)
-              } catch {
-                case ex: LabradException => ex.toData
-                case ex: Throwable => errorFor(ex)
-              }
-              response += Record(id, respData)
-              if (respData.isError) break
-            }
-          }
-          
-          // send response
-          send(Packet(-request.id, request.target, request.context, response.result))
-          
-        case Expire =>
-          server.expire
-          sender ! ()
-          exit()
+  def serve(request: Packet)(implicit ctx: ExecutionContext): Future[Packet] = semaphore.map {
+    Server.handle(request) { req =>
+      if (firstTime) {
+        server = factory
+        server.init
+        handler = bind(server)
+        firstTime = false
       }
+      handler(req)
     }
   }
-  
-  // automatically start this actor
-  start
-  
-  def serveRequest(request: Packet) {
-    this ! Serve(request)
-  }
 
-  def expire {
-    this !? Expire
-  }
-  
-  def expireFuture = this !! Expire
-  
-  /**
-   * Turn a generic exception into an error record.
-   * @param ex
-   * @return
-   */
-  private def errorFor(ex: Throwable) = {
-    val sw = new StringWriter
-    ex.printStackTrace(new PrintWriter(sw))
-    Error(0, sw.toString)
+  def expire()(implicit ctx: ExecutionContext): Future[Unit] = semaphore.map {
+    if (server != null) server.expire
   }
 }
-

@@ -1,59 +1,78 @@
 package org.labrad
 
-import scala.collection._
-
-import data._
-
+import org.labrad.data._
+import scala.collection.mutable
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 trait Requester {
-  def callUnit[T](setting: String, data: Data = Data.EMPTY): () => Unit =
-    call(setting, data) { response => () }
-  
-  def call[T](setting: String, data: Data = Data.EMPTY)(unpacker: Data => T): () => T
+  def call(setting: String, data: Data*)(implicit ec: ExecutionContext): Future[Data]
 }
 
 
 abstract class ServerProxy(val name: String, val cxn: Connection) extends Requester {
-  override def call[T](setting: String, data: Data)(unpacker: Data => T): () => T = {
-    // need to do lookups
-    val future = cxn.send(name) { setting -> data }
-    () => unpacker(future()(0))
+  override def call(setting: String, args: Data*)(implicit ec: ExecutionContext): Future[Data] = {
+    val data = args match {
+      case Seq() => Data.NONE
+      case Seq(data) => data
+      case args => Cluster(args: _*)
+    }
+    cxn.send(name, setting -> data).map(_(0))
   }
-  
+
   def newContext = cxn.newContext
+}
+
+
+class GenericProxy(name: String, cxn: Connection) extends ServerProxy(name, cxn) {
+  def packet = new PacketProxy(this, Context(0, 0))
+  def packet(ctx: Context) = new PacketProxy(this, ctx)
 }
 
 
 class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
   private val records = mutable.Buffer.empty[(String, Data)]
-  private var future: () => Seq[Data] = _
-  
-  override def call[T](setting: String, data: Data)(unpacker: Data => T): () => T = {
+  private val promise = Promise[Seq[Data]]
+
+  override def call(setting: String, args: Data*)(implicit ec: ExecutionContext): Future[Data] = {
     val idx = records.size
+    val data = args match {
+      case Seq() => Data.NONE
+      case Seq(data) => data
+      case args => Cluster(args: _*)
+    }
     records += ((setting, data))
-    () => unpacker(future()(idx))
+    promise.future.map(_(idx))
   }
-  
-  def send: () => Unit = {
-    future = server.cxn.send(server.name, ctx)(records: _*)
-    () => { future(); () }
+
+  def send(implicit ec: ExecutionContext): Future[Unit] = {
+    promise.completeWith(server.cxn.send(server.name, ctx, records: _*))
+    promise.future.map(_ => ())
   }
 }
 
 
 trait ManagerServer extends Requester {
-  def servers = call("Servers") { data =>
-    for (Cluster(Word(id), Str(name)) <- data.getDataSeq) yield (id, name)
-  }
-  
-  def settings(server: String) = call("Settings", Str(server)) { data =>
-    for (Cluster(Word(id), Str(name)) <- data.getDataSeq) yield (id, name)
-  }
-  
-  def lookupServer(name: String) = call("Lookup", Str(name)) { case Word(id) => id }
-  
-  def dataToString(data: Data) = call("Data To String", data) { case Str(s) => s }
-  def stringToData(s: String) = call("String To Data", Str(s)) { data => data }
+  def servers(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
+    call("Servers").map {
+      _.getDataSeq.map { case Cluster(UInt(id), Str(name)) => (id, name) }
+    }
+
+  def settings(server: String)(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
+    call("Settings", Str(server)).map {
+      _.getDataSeq.map { case Cluster(UInt(id), Str(name)) => (id, name) }
+    }
+
+  def lookupServer(name: String)(implicit ec: ExecutionContext): Future[Long] =
+    call("Lookup", Str(name)).map { case UInt(id) => id }
+
+  def dataToString(data: Data)(implicit ec: ExecutionContext): Future[String] =
+    call("Data To String", data).map { case Str(s) => s }
+
+  def stringToData(s: String)(implicit ec: ExecutionContext): Future[Data] =
+    call("String To Data", Str(s))
+
+  def subscribeToNamedMessage(name: String, msgId: Long, active: Boolean)(implicit ec: ExecutionContext): Future[Unit] =
+    call("Subscribe to Named Message", Cluster(Str(name), UInt(msgId), Bool(active))).map(_ => ())
 }
 
 class ManagerServerProxy(name: String, cxn: Connection)

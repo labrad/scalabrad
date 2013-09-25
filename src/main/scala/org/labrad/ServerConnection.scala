@@ -1,315 +1,155 @@
-/*
- * Copyright 2008 Matthew Neeley
- *
- * This file is part of JLabrad.
- *
- * JLabrad is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * JLabrad is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with JLabrad.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 package org.labrad
 
-import java.lang.reflect.{Method, Modifier}
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.regex.Pattern
-
-import scala.actors.Actor
-import scala.actors.Actor._
+import org.labrad.annotations.IsServer
+import org.labrad.annotations.Matchers.NamedMessageHandler
+import org.labrad.data._
+import org.labrad.errors._
+import org.labrad.events._
+import org.labrad.util._
 import scala.collection._
-
-import scala.reflect.ScalaSignature
-import scala.tools.scalap._
-import scala.tools.scalap.scalax.rules.scalasig._
-
-import grizzled.slf4j.Logging
-
-import Constants._
-import annotations.{ServerInfo, Setting}
-import annotations.Matchers.NamedMessageHandler
-import data._
-import data.Conversions._
-import errors._
-import events._
-import util._
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
+import scala.reflect.ClassTag
+import scala.reflect.runtime.currentMirror
+import scala.reflect.runtime.universe._
+import scala.util.{Failure, Success}
 
 
-class ServerConnection(
-    val name: String,
-    val info: ServerInfo,
-    val server: Server,
-    val serverClass: Class[_ <: ServerContext]) extends Connection with Actor {
+class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
+  val name: String,
+  val doc: String,
+  val server: Server[T],
+  val host: String,
+  val port: Int,
+  val password: String
+) extends Connection with Logging {
 
-  val host = Util.getEnv("LABRADHOST", Constants.DEFAULT_HOST)
-  val port = Util.getEnvInt("LABRADPORT", Constants.DEFAULT_PORT)
-  val password = Util.getEnv("LABRADPASSWORD", Constants.DEFAULT_PASSWORD)
-  
-  // message handlers
-  private var nextMessageId = 1
-  def getMessageID = { val id = nextMessageId; nextMessageId += 1; id }
-  
-  case class Serve(request: Packet)
-  case class HandleMessage()
-  case object Shutdown
+  private val nextMessageId = new AtomicInteger(1)
+  def getMessageId = nextMessageId.getAndIncrement()
 
-  def act() {
-    loop {
-      react {
-        case Serve(request) =>
-          getContextManager(request.context).serveRequest(request)
-          
-        case Shutdown =>
-          // expire all contexts
-          contexts.values.map(_.expireFuture).map(_())
-    
-          // shutdown the server
-          server.shutdown
-    
-          // close our connection to LabRAD
-          close
-    
-          sender ! ()
-          exit()
-      }
-    }
-  }
-  
-  /**
-   * The main serve loop.  This function pulls requests from the incoming
-   * queue and serves them.  Note that this function does not return unless
-   * the server is interrupted.
-   */
-  def serve {
-    server.connection = this
+  def serve(implicit timeout: Duration = 30.seconds): Unit = {
+    server.cxn = this
     server.init
 
-    registerSettings
-    subscribeToNamedMessages
-
-    val id = getMessageID
-    sendAndWait("Manager") { "S: Notify on Context Expiration" -> (Word(id), Bool(false)) }
+    val msgId = getMessageId
     addMessageListener {
-      case Message(`id`, context, _, _) =>
+      case Message(`msgId`, context, _, _) =>
         contexts.remove(context).map(_.expire)
     }
 
-    sendAndWait("Manager") { "S: Start Serving" -> Data.EMPTY }
+    Await.result(
+      for {
+        _ <- registerSettings()
+        _ <- subscribeToNamedMessages()
+        _ <- send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
+        _ <- send("Manager", "S: Start Serving" -> Data.NONE)
+      } yield (),
+      timeout
+    )
     println("Now serving...")
-    
-    this.start
   }
 
-  override protected def handleRequest(packet: Packet) {
-    this ! Serve(packet)
-  }
-  
-  def triggerShutdown {
-    this !? Shutdown
+  override protected def handleRequest(packet: Packet): Unit = {
+    val cls = implicitly[ClassTag[T]].runtimeClass
+    val ctor = cls.getConstructors()(0)
+    val ctx = contexts.getOrElseUpdate(packet.context,
+      new ContextMgr(
+        ctor.newInstance(Array[java.lang.Object](this, server, packet.context): _*).asInstanceOf[T],
+        server => handler(server.asInstanceOf[T])
+      )
+    )
+    ctx.serve(packet).onComplete {
+      case Success(response) => sendPacket(response)
+      case Failure(e) => // should not happen
+    }
   }
 
-  
+  def triggerShutdown: Unit = {
+    val expirations = contexts.values.map(_.expire)
+    Await.result(Future.sequence(expirations), 60.seconds)
+    server.shutdown
+    close
+  }
+
+
   // request serving
 
-  def sendResponse(packet: Packet) { writeQueue.add(packet) }
-
-  /**
-   * Map of contexts in which requests have been made and the managers for those contexts.
-   */
-  private val contexts = mutable.Map.empty[Context, ContextManager]
-
-  /**
-   * Get a context manager for the given context.  If this is the first
-   * time we have seen a particular context, a new manager will be created.
-   */
-  private def getContextManager(context: Context) = {
-    def handle(id: Long, server: ServerContext, data: Data) =
-      getHandler(id)(server, data)
-    contexts.getOrElseUpdate(context, new ContextManager(context, handle, sendResponse _))
-  }
-
-  /** FIXME this is a hack to allow contexts to communicate */
-  def getServerContext(context: Context) = getContextManager(context).server
-
-  /** Get the data required to log in to LabRAD as a server */
   protected def loginData =
-    (Word(PROTOCOL), Str(name), Str(info.doc.stripMargin), Str(""))
+    Cluster(UInt(Client.PROTOCOL_VERSION), Str(name), Str(doc.stripMargin), Str(""))
 
-  /** Get a handler for a particular setting ID */
-  def getHandler(id: Long) = dispatchTable(id)
-  
-  /**
-   * Map from setting IDs to methods on the ContextServer that handle
-   * those settings.  This table is constructed after logging in but
-   * before we begin serving.
-   */
-  val dispatchTable = ServerConnection.locateSettings(serverClass) // do this when the server is created
+  private val contexts = mutable.Map.empty[Context, ContextMgr]
+  private val (settings, handler): (Seq[SettingInfo], T => RequestContext => Data) = Reflect.makeHandler[T]
 
-  /** Register all settings for which we have handlers */
-  private def registerSettings {
-    val registrations = for (id <- dispatchTable.keys.toSeq.sorted) yield {
-      val handler = dispatchTable(id)
-      "S: Register Setting" -> handler.registrationInfo
-    }
-    sendAndWait("Manager")(registrations: _*)
+  private def registerSettings(): Future[Unit] = {
+    val registrations = settings.sortBy(_.id).map(s =>
+      Cluster(
+        UInt(s.id),
+        Str(s.name),
+        Str(s.doc),
+        Arr(s.accepts.expand.map(_.toString).map(Str(_))), // TODO: when manager supports patterns, no need for expand
+        Arr(s.returns.expand.map(_.toString).map(Str(_))),
+        Str(""))
+    )
+    send("Manager", registrations.map("S: Register Setting" -> _): _*).map(_ => ())
   }
-  
-  /** Subscribe to named messages */
-  private def subscribeToNamedMessages {
+
+  private def subscribeToNamedMessages(): Future[Unit] = {
     val subscriptions = for {
-      m <- server.getClass.getMethods
+      m <- server.getClass.getMethods.toSeq
       NamedMessageHandler(name) <- m.getDeclaredAnnotations
-    } yield {
-      val id = getMessageID
-      addMessageListener {
-        case message @ Message(_, _, `id`, _) =>
-          try {
-            m.invoke(server, message)
-          } catch {
-            case e: Exception => e.printStackTrace // TODO meaningful exception handling
-          }
-      }
-      "Subscribe to Named Message" -> Cluster(Str(name), Word(id), Bool(true))
+    } yield
+      onNamedMessage(name) { m.invoke(server, _) }
+    Future.sequence(subscriptions).map(_ => ())
+  }
+
+  private def onNamedMessage(name: String)(f: Message => Unit): Future[Unit] = {
+    val id = getMessageId
+    addMessageListener {
+      case message @ Message(_, _, `id`, _) =>
+        try {
+          f(message)
+        } catch {
+          case e: Exception => log.error(s"exception in named message handler '${name}'", e)
+        }
     }
-    sendAndWait("Manager")(subscriptions: _*)
+    send("Manager", "Subscribe to Named Message" -> Cluster(Str(name), UInt(id), Bool(true))).map(_ => ())
   }
 }
 
 object ServerConnection extends Logging {
-  
   /** Create a new server connection that will use a particular context server object. */
-  def apply[T <: ServerContext](server: Server, contextClass: Class[T]) = {
-    val (name, inf) = checkAnnotation(server)
-    new ServerConnection(name, inf, server, contextClass)
+  def apply[T <: ServerContext : ClassTag : TypeTag](server: Server[T], host: String, port: Int, password: String) = {
+    val (name, doc) = checkAnnotation(server)
+    new ServerConnection[T](name, doc, server, host, port, password)
   }
-  
-  private def checkAnnotation(server: Server) = {
+
+  private def checkAnnotation[T <: ServerContext](server: Server[T]): (String, String) = {
     val cls = server.getClass
-    if (!cls.isAnnotationPresent(classOf[ServerInfo]))
-      throw new Exception("Server class '%s' needs @ServerInfo annotation.".format(cls.getName))
-    val info = cls.getAnnotation(classOf[ServerInfo])
+    if (!cls.isAnnotationPresent(classOf[IsServer]))
+      sys.error(s"Server class '${cls.getName}' lacks @ServerInfo annotation.")
+    val info = cls.getAnnotation(classOf[IsServer])
     var name = info.name
-    
+    val doc = info.doc
+
     // interpolate environment vars
-    
+
     // find all environment vars in the string
     val p = Pattern.compile("%([^%]*)%")
     val m = p.matcher(name)
-    val keys = Seq.newBuilder[String]
-    while (m.find) keys += m.group(1)
-    
+    val keys = {
+      val keys = Seq.newBuilder[String]
+      while (m.find) keys += m.group(1)
+      keys.result
+    }
+
     // substitute environment variable into string
-    for (key <- keys.result) {
-      val value = Util.getEnv(key, null)
-      if (value != null) {
-        println(key + " -> " + value)
-        name = name.replaceAll("%" + key + "%", value)
-      }
+    for (key <- keys; value <- sys.env.get(key)) {
+      println(key + " -> " + value)
+      name = name.replaceAll("%" + key + "%", value)
     }
-    
-    (name, info)
-  }
-  
-  def locateSettings(clazz: Class[_]): Map[Long, SettingHandler] = {
-    // because of overloading, there may be multiple methods with the same name and different
-    // calling signatures, all of which need to get dispatched to by the same handler.
-    
-    val settingsMap = mutable.Map.empty[String, Setting]
-    val settingsById = mutable.Map.empty[Long, Method]
-    val settingsByName = mutable.Map.empty[String, Method]
-    
-    val settingNames = for {
-      m <- clazz.getMethods.toSeq
-      if m.isAnnotationPresent(classOf[Setting])
-      s = m.getAnnotation(classOf[Setting])
-    } yield {
-      // setting IDs and names must be unique
-      require(!settingsById.contains(s.id), "Multiple settings with id %d".format(s.id))
-      require(!settingsByName.contains(s.name), "Multiple settings with name '%s'".format(s.name))
-      settingsById(s.id) = m
-      settingsByName(s.name) = m
 
-      // only one overload of a method can have @Setting annotation 
-      val name = m.getName
-      require(!settingsMap.contains(name), "Multiple overloads '%s' have @Setting annotation".format(name))
-      settingsMap(name) = s
-      
-      name
-    }
-    
-    val methodMap = if (clazz.isAnnotationPresent(classOf[ScalaSignature])) {
-      // scala class
-      val scalaSig = ScalaSigParser.parse(clazz).get
-      val classSymbol = scalaSig.topLevelClasses.find(_.path == clazz.getName).get
-      val symbols = classSymbol.children.collect { case m: MethodSymbol => m }
-      
-      for (name <- settingNames) yield {
-        val setting = settingsMap(name)
-        val methods = clazz.getMethods.filter(_.getName == name).toSeq
-        
-        def methodNumParams(m: Method) = m.getGenericParameterTypes.size
-        
-        val nParams = methods map methodNumParams
-        assert(Set(nParams.toSeq: _*).size == nParams.size,
-               "overloaded settings must have different numbers of parameters")
-        
-        def symbolNumParams(ms: MethodSymbol) = ms.infoType match {
-          case NullaryMethodType(_) => 0
-          case mt: MethodType => mt.paramSymbols.size
-        }
-        val methodSymbols = symbols.filter(_.name == name).toSeq
-        val symbolMap = methodSymbols.map{ ms => symbolNumParams(ms) -> ms }.toMap
-        debug("java methods (" + methods.size + "): " + methods.mkString(", "))
-        debug("scala methods (" + methodSymbols.size + "): " + methodSymbols.mkString(", "))
-        require(methods.size == methodSymbols.size)
-        // TODO: make sure the ordering here is consistent
-        setting -> (for (m <- methods) yield (m, Some(symbolMap(methodNumParams(m)))))
-      }
-    } else {
-      // java class
-      for (name <- settingNames) yield {
-        val setting = settingsMap(name)
-        val methods = clazz.getMethods.filter(_.getName == name).toSeq
-        setting -> (for (m <- methods) yield (m, None))
-      }
-    }
-    
-    // build handler for each set of overloaded methods and add to the dispatch table
-    val dispatchTable = Map.empty[Long, SettingHandler] ++ (
-      for ((setting, overloads) <- methodMap) yield {
-        setting.id -> SettingHandler.forMethods(setting, overloads)
-      }
-    )
-    
-    dispatchTable
-    
-    /*
-    (obj: A) => new Handler {
-      def handle(id: Long, data: Data): Data = {
-        dispatchTable.get(id) match {
-          case Some(handler) =>
-            println(handler.setting)
-            println(handler.accepts.map(_.tag).mkString (", "))
-            println(handler.returns.map(_.tag).mkString(", "))
-            if (handler.accepts exists { _.accepts(data.t) })
-              handler(obj, data)
-            else
-              Error(2, "Type not accepted by setting: " + data.t + ". accepted: " + handler.accepts.map(_.tag).mkString(", "))
-          case None => Error(1, "Setting not found: " + id)
-        }
-      }
-    }
-    */
+    (name, doc)
   }
-}
-
-trait Handler {
-  def handle(id: Long, data: Data): Data
 }

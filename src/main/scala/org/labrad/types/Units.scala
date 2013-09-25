@@ -1,368 +1,150 @@
-package org.labrad
-package types
+package org.labrad.types
 
 import scala.collection.mutable
 import scala.math
 
+trait RatioIsFractional extends Fractional[Ratio] {
+  def plus(x: Ratio, y: Ratio) = Ratio(x.num * y.denom + y.num * x.denom, x.denom * y.denom)
+  def minus(x: Ratio, y: Ratio) = Ratio(x.num * y.denom - y.num * x.denom, x.denom * y.denom)
+  def times(x: Ratio, y: Ratio) = Ratio(x.num * y.num, x.denom * y.denom)
+  def div(x: Ratio, y: Ratio) = Ratio(x.num * y.denom, x.denom * y.num)
+  def negate(x: Ratio) = Ratio(-x.num, x.denom)
+  def fromInt(x: Int) = Ratio(x)
+  def toInt(x: Ratio): Int = (x.num / x.denom).toInt
+  def toLong(x: Ratio): Long = x.num.toLong / x.denom.toLong
+  def toFloat(x: Ratio) = x.num.toFloat / x.denom.toFloat
+  def toDouble(x: Ratio) = x.num.toDouble / x.denom.toDouble
+}
 
-class Ratio protected(val num: Int, val denom: Int = 1) {
+trait RatioIsOrdered extends Ordering[Ratio] {
+  def compare(a: Ratio, b: Ratio): Int = (a.num.toLong * b.denom) compare (b.num.toLong * a.denom)
+}
+
+class Ratio protected(val num: Long, val denom: Long = 1) extends Ordered[Ratio] {
+
+  def compare(that: Ratio): Int = (BigInt(num) * that.denom) compare (BigInt(that.num) * denom)
+
   def *(other: Ratio) = Ratio(num * other.num, denom * other.denom)
-  def *(other: Int) = Ratio(num * other, denom)
-  
+  def *(other: Long) = Ratio(num * other, denom)
+
   def /(other: Ratio) = Ratio(num * other.denom, denom * other.num)
-  def /(other: Int) = Ratio(num, denom * other)
-  
+  def /(other: Long) = Ratio(num, denom * other)
+
   def +(other: Ratio) = Ratio(num * other.denom + other.num * denom, denom * other.denom)
-  def +(other: Int) = Ratio(num + other * denom, denom)
-  
+  def +(other: Long) = Ratio(num + other * denom, denom)
+
   def -(other: Ratio) = Ratio(num * other.denom - other.num * denom, denom * other.denom)
-  def -(other: Int) = Ratio(num - other * denom, denom)
-  
+  def -(other: Long) = Ratio(num - other * denom, denom)
+
+  def unary_- = Ratio(-num, denom)
+
   def toDouble = num.toDouble / denom.toDouble
-  
-  override def toString = denom match {
-    case 1 => num.toString
-    case _ => num + "/" + denom
-  }
-  
+
+  override def toString = if (denom == 1) s"$num" else s"$num/$denom"
+
   override def equals(other: Any) = other match {
     case Ratio(n, d) => n == num && d == denom
+    case n: Long => n == num && 1 == denom
     case n: Int => n == num && 1 == denom
+    case n: Short => n == num && 1 == denom
     case _ => false
   }
-  
-  override def hashCode() = (41 * (41 + num) + denom)
+
+  override def hashCode() = (41 * (41 + num) + denom).toInt
 }
 
 object Ratio {
-  def apply(num: Int, denom: Int = 1): Ratio = {
+  def apply(num: Long, denom: Long = 1): Ratio = {
     require(denom != 0)
     val s = math.signum(denom)
     val f = gcd(num, denom)
     new Ratio(s*num/f, s*denom/f)
   }
-  
-  def unapply(r: Ratio): Option[(Int, Int)] = Some((r.num, r.denom))
-  
-  def gcd(a: Int, b: Int): Int = {
+
+  def unapply(r: Ratio): Option[(Long, Long)] = Some((r.num, r.denom))
+
+  def gcd(a: Long, b: Long): Long = {
     if (a < 0) gcd(-a, b)
     else if (b < 0) gcd(a, -b)
     else if (b > a) gcd(b, a)
     else if (b == 0) a
     else gcd(b, a % b)
   }
+
+  implicit object RatioIsFractional extends RatioIsFractional with RatioIsOrdered
 }
 
 
 object Units {
-    
-  def convert(fromUnit: String, toUnit: String): Double => Double = {
+  /** create an object to convert number between the given units */
+  def optConvert(fromUnit: String, toUnit: String): Option[Double => Double] = {
+    None
+
     var from = parse(fromUnit)
     var to = parse(toUnit)
-    
-    if (from == to) return (x: Double) => x
+
+    if (from == to) return None
 
     val toSI = from match {
       case Seq((name, Ratio(1, 1))) =>
-        nonlinearUnits.get(name) match {
-          case Some(unit) =>
-            from = unit.SI
-            Some(unit.toSI)
-          case None => None
-        }
+        nonlinearUnits.get(name) map { u => from = u.SI; u.toSI }
       case _ => None
     }
-    
+
     val fromSI = to match {
       case Seq((name, Ratio(1, 1))) =>
-        nonlinearUnits.get(name) match {
-          case Some(unit) =>
-            to = unit.SI
-            Some(unit.fromSI)
-          case None => None
-        }
+        nonlinearUnits.get(name) map { u => to = u.SI; u.fromSI }
       case _ => None
     }
-    
-    val tokens = combineTokens(from, to)
-    val factor = getConversionFactor(tokens, fromUnit, toUnit)
-    
+
+    val terms = combineTerms(from, to)
+    val factor = getConversionFactor(terms, fromUnit, toUnit)
+
     (toSI, fromSI) match {
-      case (Some(toSI), Some(fromSI)) => (x: Double) => fromSI(factor * toSI(x))
-      case (Some(toSI), None        ) => (x: Double) =>       (factor * toSI(x))
-      case (None,       Some(fromSI)) => (x: Double) => fromSI(factor *     (x))
-      case (None,       None        ) => (x: Double) =>       (factor *     (x))
+      case (Some(toSI), Some(fromSI)) => Some(x => fromSI(factor * toSI(x)))
+      case (Some(toSI), None        ) => Some(x =>       (factor * toSI(x)))
+      case (None,       Some(fromSI)) => Some(x => fromSI(factor *     (x)))
+      case (None,       None        ) => Some(x =>       (factor *     (x)))
     }
   }
-  
-  /** Combine two lists of tokens, adding exponents for common tokens and removing any with exponent == 0 */
-  def combineTokens(from: Seq[Token], to: Seq[Token]): Seq[Token] = {
-    val exps = mutable.Map.empty[String, Ratio]
-    for ((name, exp) <- from) exps(name) = exps.get(name).getOrElse(Ratio(0)) + exp
-    for ((name, exp) <-   to) exps(name) = exps.get(name).getOrElse(Ratio(0)) - exp
-    for {
-      name <- exps.keys.toSeq.sorted
-      exp = exps(name) if exp.num != 0
-    } yield (name, exp)
-  }
-  
-  /** Get conversion factor based on the given token list */
-  def getConversionFactor(tokens: Seq[Token], from: String, to: String): Double = {
+
+  /** create an object to convert number between the given units */
+  def convert(from: String, to: String): Double => Double = optConvert(from, to).getOrElse((x) => x)
+
+  /** Combine two lists of terms, adding common exponents and removing terms with exponent 0 */
+  def combineTerms(from: Seq[Term], to: Seq[Term]): Seq[Term] =
+    (from ++ (to map { case (name, exp) => (name, -exp) }))
+      .groupBy(_._1) // by name
+      .mapValues(_.map(_._2)) // convert term list to exponent list
+      .mapValues(_.foldLeft(Ratio(0))(_ + _)) // sum exponents
+      .filterNot(_._2 == 0) // drop terms with exponent zero
+      .toSeq
+      .sorted
+
+  /** Get conversion factor based on the given term list */
+  def getConversionFactor(terms: Seq[Term], from: String, to: String): Double = {
     var factor = 1.0
     val sums = Array.fill(9)(Ratio(0))
-    for ((name, exp) <- tokens) {
+    for ((name, exp) <- terms) {
       val (fact, dims) = linearUnits(name)
       factor *= math.pow(fact, exp.toDouble)
       for (i <- 0 until 9)
         sums(i) += exp * dims(i)
     }
-    require(sums forall (_ == 0), "cannot convert %s to %s".format(from, to))
+    require(sums.forall(_ == 0), s"cannot convert units '$from' to '$to'")
     factor
   }
-  
-  
-  type Token = (String, Ratio)
-  
+
+  type Term = (String, Ratio)
+
   /** Parse a unit string into a list of tokens with rational exponents */
-  def parse(units: String): Seq[Token] = {
-    sealed trait ParseState
-    case object Start extends ParseState
-    case object NeedSplit extends ParseState
-    case object NeedUnit extends ParseState
-    case object InUnit extends ParseState
-    case object NeedSplitOrExp extends ParseState
-    case object NeedExpNumOrSign extends ParseState
-    case object NeedExpNum extends ParseState
-    case object InExpNum extends ParseState
-    case object InRealExp extends ParseState
-    case object NeedUnitOrExpDenom extends ParseState
-    case object NeedSplitOrExpDenom extends ParseState
-    case object InExpDenom extends ParseState
-    
-    object DIGIT {
-      def unapply(c: Char): Option[Int] = c match {
-        case '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9' => Some(c.toString.toInt)
-        case _ => None
-      }
-    }
-    
-    object CHAR {
-      def unapply(c: Char): Boolean = c match {
-        case 'A'|'B'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'J'|'K'|'L'|'M'|'N'|'O'|'P'|'Q'|'R'|'S'|'T'|'U'|'V'|'W'|'X'|'Y'|'Z'|
-             'a'|'b'|'c'|'d'|'e'|'f'|'g'|'h'|'i'|'j'|'k'|'l'|'m'|'n'|'o'|'p'|'q'|'r'|'s'|'t'|'u'|'v'|'w'|'x'|'y'|'z'|
-             '\''|'"' => true
-        case _ => false
-      }
-    }
-    
-    object SPACE {
-      def unapply(c: Char): Boolean = c match {
-        case ' '|'\t' => true
-        case _ => false
-      }
-    }
-    
-    def die = error("unit parsing error: " + units)
-    
-    var state: ParseState = Start
-    
-    val tokens = Seq.newBuilder[Token]
-    var curTok = ""
-    var curNum = 1
-    var curDenom = 1
-    var negExp = false
-    
-    for (c <- units) {
-      var addTok = false
-      state match {
-        case Start =>
-          c match {
-            case CHAR() =>
-              curTok = c.toString
-              curNum = 1
-              curDenom = 1
-              state = InUnit
-            case '1' =>
-              state = NeedSplit
-            case '*'|'/' =>
-              negExp = c == '/'
-              state = NeedUnit
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case NeedSplit =>
-          c match {
-            case '*'|'/' =>
-              if (!curTok.isEmpty) {
-                if (negExp) curNum *= -1
-                addTok = true
-              }
-              negExp = c == '/'
-              state = NeedUnit
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case NeedUnit =>
-          c match {
-            case CHAR() =>
-              curTok = c.toString
-              curNum = 1
-              curDenom = 1
-              state = InUnit
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case InUnit =>
-          c match {
-            case CHAR() =>
-              curTok += c
-            case SPACE() =>
-              state = NeedSplitOrExp
-            case '*'|'/' =>
-              if (negExp) curNum *= -1
-              addTok = true
-              negExp = c == '/'
-              state = NeedUnit
-            case '^' =>
-              state = NeedExpNumOrSign
-            case _ => die
-          }
-  
-        case NeedSplitOrExp =>
-          c match {
-            case '*'|'/' =>
-              if (!curTok.isEmpty) {
-                if (negExp) curNum *= -1
-                addTok = true
-              }
-              negExp = c == '/'
-              state = NeedUnit
-            case '^' =>
-              state = NeedExpNumOrSign
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case NeedExpNumOrSign =>
-          c match {
-            case '-' =>
-              negExp = !negExp
-              state = NeedExpNum
-            case DIGIT(d) =>
-              curNum = d
-              state = InExpNum
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case NeedExpNum =>
-          c match {
-            case DIGIT(d) =>
-              curNum = d
-              state = InExpNum
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case InExpNum =>
-          c match {
-            case DIGIT(d) =>
-              curNum = curNum * 10 + d
-            case '.' =>
-              state = InRealExp
-            case '/' =>
-              if (negExp) curNum *= -1
-              state = NeedUnitOrExpDenom
-            case '*' =>
-              if (negExp) curNum *= -1
-              negExp = false
-              addTok = true
-              state = NeedUnit
-            case SPACE() =>
-              if (negExp) curNum *= -1
-              negExp = false
-              state = NeedSplitOrExpDenom
-            case _ => die
-          }
-  
-        case InRealExp =>
-          c match {
-            case DIGIT(d) =>
-              curNum = curNum * 10 + d
-              curDenom = curDenom * 10
-            case SPACE() =>
-              state = NeedSplit
-            case '*'|'/' =>
-              if (negExp) curNum *= -1
-              addTok = true;
-              negExp = c == '/'
-              state = NeedUnit
-            case _ => die
-          }
-  
-        case NeedSplitOrExpDenom =>
-          c match {
-            case '*' =>
-              addTok = true
-              negExp = false
-              state = NeedUnit
-            case '/' =>
-              state = NeedUnitOrExpDenom
-            case SPACE() =>
-            case _ => die
-          }
-  
-        case NeedUnitOrExpDenom =>
-          c match {
-            case CHAR() =>
-              tokens += ((curTok, Ratio(curNum, curDenom)))
-              curTok = c.toString
-              curNum = 1
-              curDenom = 1
-              negExp = true
-              state = InUnit
-            case DIGIT(d) =>
-              curDenom = d
-              negExp = false
-              state = InExpDenom
-            case ' '|'\t' =>
-            case _ => die
-          }
-  
-        case InExpDenom =>
-          c match {
-            case DIGIT(d) =>
-              curDenom = curDenom * 10 + d
-            case '*'|'/' =>
-              addTok = true
-              negExp = c == '/'
-              state = NeedUnit
-            case SPACE() =>
-              state = NeedSplit
-            case _ => die
-          }
-      }
-      if (addTok) tokens += ((curTok, Ratio(curNum, curDenom)))
-    }
-    state match {
-      case NeedUnit | NeedUnitOrExpDenom | NeedExpNum => error("invalid unit string '" + units + "'")
-      case _ =>
-    }
-    if (!curTok.isEmpty) {
-      if (negExp) curNum *= -1;
-      tokens += ((curTok, Ratio(curNum, curDenom)))
-    }
-    tokens.result
-  }
-  
+  def parse(units: String): Seq[Term] = Parsers.parseUnit(units)
+
 
   // name    prefixable     factor   m  kg   s   A   K mol  cd rad  sr
   val baseUnits = Seq(
     ("m",       true,          1.0,  1,  0,  0,  0,  0,  0,  0,  0,  0),
-    ("g",       true,        0.001,  0,  1,  0,  0,  0,  0,  0,  0,  0),
+    ("g",       true,       1.0e-3,  0,  1,  0,  0,  0,  0,  0,  0,  0),
     ("s",       true,          1.0,  0,  0,  1,  0,  0,  0,  0,  0,  0),
     ("A",       true,          1.0,  0,  0,  0,  1,  0,  0,  0,  0,  0),
     ("K",       true,          1.0,  0,  0,  0,  0,  1,  0,  0,  0,  0),
@@ -382,9 +164,9 @@ object Units {
     ("Btu",     false,      1055.1,  2,  1, -2,  0,  0,  0,  0,  0,  0),
     ("cal",     true,       4.1868,  2,  1, -2,  0,  0,  0,  0,  0,  0),
     ("eV",      true,   1.6022e-19,  2,  1, -2,  0,  0,  0,  0,  0,  0),
-    ("erg",     true,         1e-7,  2,  1, -2,  0,  0,  0,  0,  0,  0),
+    ("erg",     true,       1.0e-7,  2,  1, -2,  0,  0,  0,  0,  0,  0),
     ("J",       true,          1.0,  2,  1, -2,  0,  0,  0,  0,  0,  0),
-    ("dyn",     true,      0.00001,  1,  1, -2,  0,  0,  0,  0,  0,  0),
+    ("dyn",     true,       1.0e-5,  1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("N",       true,          1.0,  1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("ozf",     false,     0.27801,  1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("lbf",     false,      4.4482,  1,  1, -2,  0,  0,  0,  0,  0,  0),
@@ -413,7 +195,7 @@ object Units {
     ("hp",      false,       745.7,  2,  1, -3,  0,  0,  0,  0,  0,  0),
     ("W",       true,          1.0,  2,  1, -3,  0,  0,  0,  0,  0,  0),
     ("atm",     false,    1.0133e5, -1,  1, -2,  0,  0,  0,  0,  0,  0),
-    ("bar",     true,          1e5, -1,  1, -2,  0,  0,  0,  0,  0,  0),
+    ("bar",     true,        1.0e5, -1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("Pa",      true,          1.0, -1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("torr",    true,       133.32, -1,  1, -2,  0,  0,  0,  0,  0,  0),
     ("mmHg",    false,      133.32, -1,  1, -2,  0,  0,  0,  0,  0,  0),
@@ -464,38 +246,14 @@ object Units {
     }
     builder.result
   }
-  
 
-  case class NLUnit(SI: Seq[Token], toSI: Double => Double, fromSI: Double => Double)
+
+  case class NLUnit(SI: Seq[Term], toSI: Double => Double, fromSI: Double => Double)
 
   def nonlinearUnits = Map(
-    "dBW" -> NLUnit(SI = parse("W"), toSI = convertdBWtoW, fromSI = convertWtodBW),
-    "dBm" -> NLUnit(SI = parse("W"), toSI = convertdBmtoW, fromSI = convertWtodBm),
-    "degF" -> NLUnit(SI = parse("K"), toSI = convertdegFtoK, fromSI = convertKtodegF),
-    "degC" -> NLUnit(SI = parse("K"), toSI = convertdegCtoK, fromSI = convertKtodegC)
+     "dBW" -> NLUnit(SI = parse("W"), toSI =  dBW => math.pow(10, dBW/10),        fromSI = W => 10*math.log10(W)),
+     "dBm" -> NLUnit(SI = parse("W"), toSI =  dBm => math.pow(10, dBm/10) / 1000, fromSI = W => 10*math.log10(W*1000)),
+    "degF" -> NLUnit(SI = parse("K"), toSI = degF => (degF + 459.67) / 1.8,       fromSI = K => K * 1.8 - 459.67),
+    "degC" -> NLUnit(SI = parse("K"), toSI = degC => degC + 273.15,               fromSI = K => K - 273.15)
   )
-  
-  def convertdBWtoW(dBW: Double): Double = dBW match {
-    case Double.PositiveInfinity => Double.PositiveInfinity
-    case Double.NegativeInfinity => 0
-    case _ => math.pow(10, dBW/10)
-  }
-  
-  def convertWtodBW(W: Double): Double =
-    if (W <= 0) Double.NaN else 10*math.log10(W)
-  
-  def convertdBmtoW(dBm: Double): Double = dBm match {
-    case Double.PositiveInfinity => Double.PositiveInfinity
-    case Double.NegativeInfinity => 0
-    case _ => math.pow(10, dBm/10) / 1000
-  }
-  
-  def convertWtodBm(W: Double): Double =
-    if (W <= 0) Double.NaN else 10*math.log10(W*1000)
-  
-  def convertdegFtoK(degF: Double) = (degF + 459.67) / 1.8
-  def convertKtodegF(K: Double) = K * 1.8 - 459.67
-  
-  def convertdegCtoK(degC: Double) = degC + 273.15
-  def convertKtodegC(K: Double) = K - 273.15
 }
