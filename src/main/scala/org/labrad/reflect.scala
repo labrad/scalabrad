@@ -41,7 +41,7 @@ object Reflect {
     for ((name, settings) <- infos.groupBy(_.name)) require(settings.length == 1, s"Multiple settings with name '$name' in type $t")
 
     val binder = (self: T) => {
-      val handlerMap = binders.mapValues(_(self))
+      val handlerMap = binders.map { case (id, binder) => id -> binder(self) }
       (req: RequestContext) =>
         handlerMap.get(req.id).map(_(req)).getOrElse(Error(1, s"Setting not found: ${req.id}"))
     }

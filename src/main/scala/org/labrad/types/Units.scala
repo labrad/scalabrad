@@ -115,9 +115,9 @@ object Units {
   def combineTerms(from: Seq[Term], to: Seq[Term]): Seq[Term] =
     (from ++ (to map { case (name, exp) => (name, -exp) }))
       .groupBy(_._1) // by name
-      .mapValues(_.map(_._2)) // convert term list to exponent list
-      .mapValues(_.foldLeft(Ratio(0))(_ + _)) // sum exponents
-      .filterNot(_._2 == 0) // drop terms with exponent zero
+      .map { case (name, terms) => name -> terms.map(_._2) } // convert term list to exponent list
+      .map { case (name, exps) => name -> exps.foldLeft(Ratio(0))(_ + _) } // sum exponents
+      .filter { case (name, exp) => exp != 0 } // drop terms with exponent zero
       .toSeq
       .sorted
 
