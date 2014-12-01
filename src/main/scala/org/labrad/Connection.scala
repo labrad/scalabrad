@@ -56,7 +56,7 @@ trait Connection {
   private var reader: Thread = _
   private var writer: Thread = _
 
-  def connect: Unit = {
+  def connect(): Unit = {
     socket = new Socket(host, port)
     socket.setTcpNoDelay(true)
     socket.setKeepAlive(true)
@@ -92,8 +92,8 @@ trait Connection {
     reader.setDaemon(true)
     writer.setDaemon(true)
 
-    reader.start
-    writer.start
+    reader.start()
+    writer.start()
 
     connected = true
     try {
@@ -136,7 +136,7 @@ trait Connection {
 
   protected def loginData: Data
 
-  def close: Unit = close(new IOException("Connection closed."))
+  def close(): Unit = close(new IOException("Connection closed."))
 
   private def close(cause: Throwable): Unit = synchronized {
     if (connected) {

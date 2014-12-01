@@ -9,22 +9,21 @@ import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Success, Failure}
 
 abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
-  var cxn: ServerConnection[_] = _
 
-  def init: Unit
-  def shutdown: Unit
+  def init(cxn: ServerConnection[T]): Unit
+  def shutdown(): Unit
 
   def main(args: Array[String]): Unit = {
     val cxn = ServerConnection[T](this, "localhost", 7682, "")
-    cxn.connect
+    cxn.connect()
     sys.ShutdownHookThread(cxn.triggerShutdown)
-    cxn.serve
+    cxn.serve()
   }
 }
 
 abstract class ServerContext(val cxn: Connection, val server: Server[_], val context: Context) {
-  def init: Unit
-  def expire: Unit
+  def init(): Unit
+  def expire(): Unit
 }
 
 object Server {

@@ -12,8 +12,8 @@ import scala.reflect.runtime.universe
 @IsServer(name = "Scala Test Server",
            doc = "Basic server to test Scalabrad API.")
 object TestSrv extends Server[TestCtx] {
-  def init: Unit = println("init() called on server.")
-  def shutdown: Unit = println("shutdown() called on server.")
+  def init(cxn: ServerConnection[TestCtx]): Unit = println("init() called on server.")
+  def shutdown(): Unit = println("shutdown() called on server.")
 }
 
 
@@ -21,12 +21,12 @@ class TestCtx(cxn: ServerConnection[TestCtx], server: Server[TestCtx], context: 
 extends ServerContext(cxn, server, context) {
   private val registry = mutable.Map.empty[String, Data]
 
-  def init: Unit = {
+  def init(): Unit = {
     registry("Test") = Str("blah")
     println("Context %s created.".format(context))
   }
 
-  def expire: Unit = {
+  def expire(): Unit = {
     println("Context %s expired".format(context))
   }
 

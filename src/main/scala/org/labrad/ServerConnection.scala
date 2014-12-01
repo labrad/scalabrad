@@ -29,14 +29,13 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   private val nextMessageId = new AtomicInteger(1)
   def getMessageId = nextMessageId.getAndIncrement()
 
-  def serve(implicit timeout: Duration = 30.seconds): Unit = {
-    server.cxn = this
-    server.init
+  def serve()(implicit timeout: Duration = 30.seconds): Unit = {
+    server.init(this)
 
     val msgId = getMessageId
     addMessageListener {
       case Message(`msgId`, context, _, _) =>
-        contexts.remove(context).map(_.expire)
+        contexts.remove(context).map { case (instance, ctxMgr) => ctxMgr.expire() }
     }
 
     Await.result(
@@ -54,23 +53,21 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   override protected def handleRequest(packet: Packet): Unit = {
     val cls = implicitly[ClassTag[T]].runtimeClass
     val ctor = cls.getConstructors()(0)
-    val ctx = contexts.getOrElseUpdate(packet.context,
-      new ContextMgr(
-        ctor.newInstance(Array[java.lang.Object](this, server, packet.context): _*).asInstanceOf[T],
-        server => handler(server.asInstanceOf[T])
-      )
-    )
+    val (_, ctx) = contexts.getOrElseUpdate(packet.context, {
+      val instance = ctor.newInstance(Array[java.lang.Object](this, server, packet.context): _*).asInstanceOf[T]
+      instance -> new ContextMgr(instance, server => handler(server.asInstanceOf[T]))
+    })
     ctx.serve(packet).onComplete {
       case Success(response) => sendPacket(response)
       case Failure(e) => // should not happen
     }
   }
 
-  def triggerShutdown: Unit = {
-    val expirations = contexts.values.map(_.expire)
+  def triggerShutdown(): Unit = {
+    val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
     Await.result(Future.sequence(expirations), 60.seconds)
-    server.shutdown
-    close
+    server.shutdown()
+    close()
   }
 
 
@@ -79,8 +76,10 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   protected def loginData =
     Cluster(UInt(Client.PROTOCOL_VERSION), Str(name), Str(doc.stripMargin), Str(""))
 
-  private val contexts = mutable.Map.empty[Context, ContextMgr]
+  private val contexts = mutable.Map.empty[Context, (T, ContextMgr)]
   private val (settings, handler): (Seq[SettingInfo], T => RequestContext => Data) = Reflect.makeHandler[T]
+
+  def get(context: Context): Option[T] = contexts.get(context).map(_._1)
 
   private def registerSettings(): Future[Unit] = {
     val registrations = settings.sortBy(_.id).map(s =>
