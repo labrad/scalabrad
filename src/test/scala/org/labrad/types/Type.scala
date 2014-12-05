@@ -25,12 +25,12 @@ class TypeTests extends FunSuite {
       "s?" -> PCluster(TStr, PAny),
       "(s?)" -> PCluster(TStr, PAny)
     )
-        
+
     for ((s, p) <- tests) {
       assert(Pattern(s) == p)
     }
   }
-  
+
   test("types should be parsable") {
     val tests = Seq(
       // basic types
@@ -48,11 +48,11 @@ class TypeTests extends FunSuite {
       "c[]" -> TComplex(""),
       "c[m/s]" -> TComplex("m/s")
     )
-        
+
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }
-  
+
   test("types can contain whitespace") {
     val tests = Seq(
       " b" -> TBool,
@@ -60,21 +60,20 @@ class TypeTests extends FunSuite {
       " b b \t b " -> TCluster(TBool, TBool, TBool),
       " * 3 v [m] " -> TArr(TValue("m"), 3)
     )
-        
+
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }
-  
+
   test("cluster elements can be separated by commas") {
     val tests = Seq(
       "s,s" -> TCluster(TStr, TStr),
       "(s,s)" -> TCluster(TStr, TStr)
     )
-    
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }
-  
+
   test("types can have a trailing comment") {
     val tests = Seq(
       // comments
@@ -83,32 +82,32 @@ class TypeTests extends FunSuite {
       "_: this has a trailing comment" -> TNone,
       "s: this has a trailing comment" -> TStr
     )
-        
+
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }
-  
+
   test("types can have embedded comments") {
     val tests = Seq(
       // comments
       "ss{embedded comment}is" -> TCluster(TStr, TStr, TInt, TStr),
       "{embedded comment}ssis" -> TCluster(TStr, TStr, TInt, TStr)
     )
-        
+
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }
-  
+
   test("top-level pattern alternatives can be separated by |") {
     assert(Pattern("s|t") == PChoice(TStr, TTime))
-    
+
     // handle empties
     assert(Pattern("s|_") == PChoice(TStr, TNone))
     assert(Pattern("_|s") == PChoice(TNone, TStr))
     intercept[Exception] { Pattern("|s") }
     intercept[Exception] { Pattern("s|") }
   }
-  
+
   test("matchers accept compatible types") {
     val acceptTests = Seq(
       "" -> "",
@@ -140,7 +139,7 @@ class TypeTests extends FunSuite {
       assert(Pattern(t1) accepts Pattern(t2))
     }
   }
-  
+
   test("matchers do not accept incompatible types") {
     val notAccepted = Seq(
       "" -> "i",

@@ -1300,7 +1300,7 @@ object Parsers extends RegexParsers {
     """\d+""".r ^^ { num => UInt(num.toLong) } // w8, w16, w64
 
   def string: Parser[Data] =
-    ("\""+"""([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*"""+"\"").r ^^ { s => Bytes(Translate.stringToBytes(s)) }
+    ("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").r ^^ { s => Bytes(Translate.stringToBytes(s)) }
     //("\""+"""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*"""+"\"").r
 
   def time: Parser[Data] =
@@ -1375,7 +1375,7 @@ object Parsers extends RegexParsers {
           TNone
         } else {
           val typ = elems(0).t
-          require(elems forall (_.t == typ))
+          require(elems forall (_.t == typ), s"all elements must be of type '$typ'")
           typ
         }
         (elems.toArray, typ, List(elems.size))
