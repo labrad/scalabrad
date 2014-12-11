@@ -10,7 +10,7 @@ class ManagerTest extends FunSuite with AsyncAssertions {
 
   import TestUtils._
 
-  def mgr(c: Client) = new ManagerServerProxy("Manager", c)
+  def mgr(c: Client) = new ManagerServerProxy(c)
 
   test("manager returns lists of servers and settings") {
     withManager { (host, port, password) =>

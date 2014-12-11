@@ -6,6 +6,7 @@ import org.scalatest.FunSuite
 import org.scalatest.concurrent.AsyncAssertions
 import scala.collection._
 import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
 import org.scalatest.time.SpanSugar._
 
 class RegistryTest extends FunSuite with AsyncAssertions {
@@ -97,6 +98,54 @@ class RegistryTest extends FunSuite with AsyncAssertions {
         await(c.send("Registry", "del" -> Str("a")))
         w.await
       }
+    }
+  }
+}
+
+object RegistryTest {
+
+  import TestUtils._
+
+  def main(args: Array[String]): Unit = {
+    val (host, port) = args match {
+      case Array(host) =>
+        host.split(":") match {
+          case Array(host, port) => host -> port.toInt
+          case Array(host) => host -> 7682
+        }
+
+      case Array() =>
+        "localhost" -> 7682
+    }
+
+    withClient(host, port, password = "") { c =>
+      val reg = new RegistryServerProxy(c)
+      val (dirs, keys) = await(reg.dir())
+      if (!dirs.contains("test")) {
+        await(reg.mkDir("test"))
+      }
+      await(reg.cd("test"))
+
+      def mkdir(level: Int = 0): Unit = {
+        if (level < 3) {
+          for (i <- 0 until 3) {
+            val dir = s"dir$i"
+            await(reg.mkDir(dir))
+            await(reg.cd(dir))
+            mkdir(level + 1)
+            await(reg.cd(".."))
+          }
+        }
+        for (i <- 0 until 10) {
+          val key = f"key$i%03d"
+          val tpe = Hydrant.randomType
+          val data = Hydrant.randomData(tpe)
+          await(reg.set(key, data))
+          val resp = await(reg.get(key))
+          assert(resp ~== data, s"${resp} (type=${resp.t}) is not equal to ${data} (type=${data.t})")
+        }
+      }
+      mkdir()
     }
   }
 }
