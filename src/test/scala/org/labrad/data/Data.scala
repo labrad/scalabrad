@@ -7,12 +7,12 @@ import org.scalatest.FunSuite
 
 class DataTests extends FunSuite {
   val rand = new Random
-    
+
   def testBothEndian(name: String)(func: ByteOrder => Unit) {
     for (byteOrder <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN))
       test(name + ":" + byteOrder) { func(byteOrder) }
   }
-  
+
   testBothEndian("integer") { implicit bo: ByteOrder =>
     val d = Data("i")
     for (n <- Seq(100, 0, 1, -1, Int.MaxValue, Int.MinValue)) {
@@ -27,7 +27,7 @@ class DataTests extends FunSuite {
     d.setString(s)
     assert(d.getString == s)
   }
-    
+
   testBothEndian("date") { implicit bo: ByteOrder =>
     val d = Data("t")
     for (count <- 0 until 100000) {
@@ -56,7 +56,7 @@ class DataTests extends FunSuite {
     val d = rand.nextGaussian
     val re = rand.nextGaussian
     val im = rand.nextGaussian
-    
+
     d1.setBool(b, 0)
     d1.setInt(i, 1)
     d1.setUInt(l, 2)
@@ -137,7 +137,7 @@ class DataTests extends FunSuite {
     val d4 = Data.fromBytes(flat3, Type("*3s"))
     assert(d3 == d4)
   }
-  
+
   test("data can be parsed from string representation") {
     val strs = Seq(
         "_",
@@ -170,7 +170,7 @@ class DataTests extends FunSuite {
         "[[[]]]",
         "[1, 2, 3]"
     )
-    
+
     strs foreach { s =>
       val d = Data.parse(s)
       val d2 = Data.parse(d.toString)
@@ -178,36 +178,36 @@ class DataTests extends FunSuite {
       //assert(d ~== d2)
     }
   }
-  
+
   test("allow empty list to be converted to any type") {
     val empty = Arr(Array.empty[Data])
     assert(empty.t == Type("*_"))
-    val c1 = empty.convertTo("*s")    
+    val c1 = empty.convertTo("*s")
     assert(c1.t == Type("*s"))
-    
+
     val empty2 = Arr(Array.empty[Data])
     assert(empty2.t == Type("*_"))
-    val c2 = empty2.convertTo("*?")    
+    val c2 = empty2.convertTo("*?")
     assert(c2.t == Type("*_"))
   }
 }
 
 
 class HydrantTests extends FunSuite {
-  
+
   def testHydrant(tag: String) = test(tag) {
     val t = Type(tag)
     val data = Hydrant.randomData(t)
-    
+
     for (order <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
       implicit val bo = order
-      
+
       val bytes = data.toBytes
       val unflattened = Data.fromBytes(bytes, data.t)
       assert(unflattened == data)
     }
   }
-  
+
   val types = Seq(
     "i",
     "w",
@@ -220,7 +220,7 @@ class HydrantTests extends FunSuite {
     "*(is)",
     "*2(i*s)"
   )
-  
+
   for (tag <- types)
     testHydrant(tag)
 }
