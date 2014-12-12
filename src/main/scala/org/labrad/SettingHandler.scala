@@ -214,12 +214,12 @@ object SettingHandler extends Logging {
     case TypeRef(_, Sym("Array"), Seq(t)) =>
       t match {
         case t if t =:= typeOf[Byte]    => (d: Data) => d.getBytes
-        case t if t =:= typeOf[Boolean] => (d: Data) => d.getBoolArray
-        case t if t =:= typeOf[Int]     => (d: Data) => d.getIntArray
-        case t if t =:= typeOf[Long]    => (d: Data) => d.getUIntArray
-        case t if t =:= typeOf[Double]  => (d: Data) => d.getValueArray
-        case t if t =:= typeOf[String]  => (d: Data) => d.getStringArray
-        case t if t =:= typeOf[Data]    => (d: Data) => d.getDataArray
+        case t if t =:= typeOf[Boolean] => (d: Data) => d.get[Array[Boolean]]
+        case t if t =:= typeOf[Int]     => (d: Data) => d.get[Array[Int]]
+        case t if t =:= typeOf[Long]    => (d: Data) => d.get[Array[Long]]
+        case t if t =:= typeOf[Double]  => (d: Data) => d.get[Array[Double]]
+        case t if t =:= typeOf[String]  => (d: Data) => d.get[Array[String]]
+        case t if t =:= typeOf[Data]    => (d: Data) => d.get[Array[Data]]
         case _ =>
           val f = unpacker(t)
           (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i))).toArray
@@ -228,11 +228,11 @@ object SettingHandler extends Logging {
     case TypeRef(_, Sym("Seq"), Seq(t)) =>
       t match {
         case t if t =:= typeOf[Byte]    => (d: Data) => d.getBytes.toSeq
-        case t if t =:= typeOf[Boolean] => (d: Data) => d.getBoolSeq
-        case t if t =:= typeOf[Int]     => (d: Data) => d.getIntSeq
-        case t if t =:= typeOf[Long]    => (d: Data) => d.getUIntSeq
-        case t if t =:= typeOf[String]  => (d: Data) => d.getStringSeq
-        case t if t =:= typeOf[Data]    => (d: Data) => d.getDataSeq
+        case t if t =:= typeOf[Boolean] => (d: Data) => d.get[Seq[Boolean]]
+        case t if t =:= typeOf[Int]     => (d: Data) => d.get[Seq[Int]]
+        case t if t =:= typeOf[Long]    => (d: Data) => d.get[Seq[Long]]
+        case t if t =:= typeOf[String]  => (d: Data) => d.get[Seq[String]]
+        case t if t =:= typeOf[Data]    => (d: Data) => d.get[Seq[Data]]
         case _ =>
           val f = unpacker(t)
           (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i)))

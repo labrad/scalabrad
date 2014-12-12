@@ -42,7 +42,7 @@ class DataTests extends FunSuite {
     val d = Data("*s")
     d.setArraySize(20)
     for (count <- 0 until 20)
-      d.setString("This is string " + count, count)
+      d(count).setString("This is string " + count)
     for (count <- 0 until 20)
       assert(d(count).getString == "This is string " + count)
   }
@@ -57,12 +57,12 @@ class DataTests extends FunSuite {
     val re = rand.nextGaussian
     val im = rand.nextGaussian
 
-    d1.setBool(b, 0)
-    d1.setInt(i, 1)
-    d1.setUInt(l, 2)
-    d1.setString(s, 3)
-    d1.setValue(d, 4)
-    d1.setComplex(re, im, 5)
+    d1(0).setBool(b)
+    d1(1).setInt(i)
+    d1(2).setUInt(l)
+    d1(3).setString(s)
+    d1(4).setValue(d)
+    d1(5).setComplex(re, im)
 
     assert(b == d1(0).getBool)
     assert(i == d1(1).getInt)
@@ -86,12 +86,12 @@ class DataTests extends FunSuite {
       val re = rand.nextGaussian
       val im = rand.nextGaussian
 
-      d1.setBool(b, count, 0)
-      d1.setInt(i, count, 1)
-      d1.setUInt(l, count, 2)
-      d1.setString(s, count, 3)
-      d1.setValue(d, count, 4)
-      d1.setComplex(re, im, count, 5)
+      d1(count, 0).setBool(b)
+      d1(count, 1).setInt(i)
+      d1(count, 2).setUInt(l)
+      d1(count, 3).setString(s)
+      d1(count, 4).setValue(d)
+      d1(count, 5).setComplex(re, im)
 
       assert(b == d1(count, 0).getBool)
       assert(i == d1(count, 1).getInt)

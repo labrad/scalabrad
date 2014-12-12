@@ -1,8 +1,6 @@
 package org.labrad
 package data
 
-import scala.language.implicitConversions
-
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, Serializable}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
@@ -13,30 +11,44 @@ import org.labrad.errors.{LabradException, NonIndexableTypeException}
 import org.labrad.types._
 import scala.annotation.tailrec
 import scala.collection.mutable.Buffer
-import scala.math
 import scala.reflect.ClassTag
 import scala.util.parsing.combinator.RegexParsers
 
-class ShapeTraversable(shape: Int*) {
-  def foreachShape(func: Array[Int] => Unit) {
-    val nDims = shape.size
-    val idx = Array.ofDim[Int](nDims)
-    def traverse(k: Int) {
-      if (k == nDims)
-        func(idx)
-      else
-        for (i <- 0 until shape(nDims)) {
-          idx(k) = i
-          traverse(k + 1)
-        }
-    }
-    traverse(0)
-  }
-}
+class ShapeIterator(shape: Array[Int]) extends Iterator[Array[Int]] {
+  private val nDims = shape.size
+  private val indices = Array.ofDim[Int](nDims)
+  indices(nDims - 1) = -1
 
-object ShapeTraversers {
-  implicit def arrayToShapeTraversable(shape: Array[Int]) = new ShapeTraversable(shape: _*)
-  implicit def seqToShapeTraversable(shape: Seq[Int]) = new ShapeTraversable(shape: _*)
+  private var _hasNext = shape.forall(_ > 0)
+
+  def hasNext: Boolean = _hasNext
+
+  def next: Array[Int] = {
+    // increment indices
+    var k = nDims - 1
+    while (k >= 0) {
+      indices(k) += 1
+      if (indices(k) == shape(k)) {
+        indices(k) = 0
+        k -= 1
+      } else {
+        k = -1 // done
+      }
+    }
+    // check if this is the last iteration
+    var last = true
+    k = nDims - 1
+    while (k >= 0) {
+      if (indices(k) == shape(k) - 1) {
+        k -= 1
+      } else {
+        last = false
+        k = -1 // done
+      }
+    }
+    _hasNext = !last
+    indices
+  }
 }
 
 case class Complex(real: Double, imag: Double)
@@ -72,153 +84,6 @@ object TimeStamp {
   def apply(dateTime: DateTime): TimeStamp = apply(dateTime.toDate)
 }
 
-trait IData { this: Data =>
-  def t: Type
-
-  def ~==(other: Any): Boolean
-
-  def toBytes(implicit byteOrder: ByteOrder): Array[Byte]
-
-  def apply(idx: Int*): Data
-
-  def set(other: Data)
-  def update(i: Int, other: Data) { this(i).set(other) }
-  def update(i: Int, j: Int, other: Data) { this(i, j).set(other) }
-  def update(i: Int, j: Int, k: Int, other: Data) { this(i, j, k).set(other) }
-  def update(i: Int, j: Int, k: Int, l: Int, other: Data) { this(i, j, k, l).set(other) }
-
-  // type checks
-  def isNone = t == TNone
-  def isBool = t == TBool
-  def isInt = t == TInt
-  def isUInt = t == TUInt
-  def isBytes = t == TStr
-  def isString = t == TStr
-  def isValue = t.isInstanceOf[TValue]
-  def isComplex = t.isInstanceOf[TComplex]
-  def isTime = t == TTime
-  def isArray = t.isInstanceOf[TArr]
-  def isCluster = t.isInstanceOf[TCluster]
-  def isError = t.isInstanceOf[TError]
-  def hasUnits = t match {
-    case TValue(Some(_)) | TComplex(Some(_)) => true
-    case TValue(None) | TComplex(None) => false
-    case _ => false
-  }
-
-  def arraySize: Int
-  def arrayShape: Array[Int]
-  def setArrayShape(shape: Int*): Data
-
-  def arraySize_=(size: Int) = setArrayShape(size)
-  def arrayShape_=(size: Int) = setArrayShape(size)
-  def arrayShape_=(shape: (Int, Int)) = setArrayShape(shape._1, shape._2)
-  def arrayShape_=(shape: (Int, Int, Int)) = setArrayShape(shape._1, shape._2, shape._3)
-  def arrayShape_=(shape: (Int, Int, Int, Int)) = setArrayShape(shape._1, shape._2, shape._3, shape._4)
-  def arrayShape_=(shape: Array[Int]) = setArrayShape(shape: _*)
-  def setArraySize(size: Int, idx: Int*): IData = { this(idx: _*).arraySize = size; this }
-
-  def clusterSize: Int = t match {
-    case TCluster(elems @ _*) => elems.size
-    case _ => sys.error("clusterSize is only defined for clusters")
-  }
-
-  // getters
-  def getBool: Boolean
-  def getInt: Int
-  def getUInt: Long
-  def getBytes: Array[Byte]
-  def getString: String = new String(getBytes, UTF_8)
-  def getValue: Double
-  def getComplex: Complex
-  def getReal: Double
-  def getImag: Double
-  def getTime: TimeStamp
-
-  // setters
-  def setBool(data: Boolean): Data
-  def setInt(data: Int): Data
-  def setUInt(data: Long): Data
-  def setBytes(data: Array[Byte]): Data
-  def setString(data: String): Data
-  def setValue(data: Double): Data
-  def setComplex(data: Complex): Data
-  def setComplex(re: Double, im: Double): Data
-  def setTime(timestamp: TimeStamp): Data
-  def setError(code: Int, message: String, payload: Data): Data
-
-  def setTime(date: Date): Data = setTime(TimeStamp(date))
-  def setTime(dateTime: DateTime): Data = setTime(TimeStamp(dateTime))
-
-  // array getters
-  def getArray[T: ClassTag](func: Data => T): Array[T] = t match {
-    case TArr(_, 1) => Array.tabulate(arraySize)(i => func(this(i)))
-    case _ => sys.error("must be a 1D array")
-  }
-  def getDataArray = getArray(data => data)
-  def getBoolArray = getArray(_.getBool)
-  def getIntArray = getArray(_.getInt)
-  def getUIntArray = getArray(_.getUInt)
-  def getStringArray = getArray(_.getString)
-  def getValueArray = getArray(_.getValue)
-
-  // seq getters
-  def getSeq[T: ClassTag](func: Data => T): Seq[T] = t match {
-    case TArr(_, 1) => Seq.tabulate(arraySize)(i => func(this(i)))
-    case _ => sys.error("must be a 1D array")
-  }
-  def getDataSeq = getSeq(data => data)
-  def getBoolSeq = getSeq(_.getBool)
-  def getIntSeq = getSeq(_.getInt)
-  def getUIntSeq = getSeq(_.getUInt)
-  def getStringSeq = getSeq(_.getString)
-  def getDoubleSeq = getSeq(_.getValue)
-  def getComplexSeq = getSeq(_.getComplex)
-
-  // seq setters
-  def setSeq[T](data: Seq[T])(implicit setter: Setter[T]): Data = t match {
-    case TArr(elem, 1) =>
-      if (data.size > 0 && !setter.t.accepts(elem))
-        sys.error("wrong element type")
-      else {
-        arraySize = data.size
-        for (i <- 0 until data.size)
-          setter.set(this(i), data(i))
-        this
-      }
-    case _ =>
-      sys.error("must be a 1D array")
-  }
-
-  def setBoolSeq(data: Seq[Boolean]) = setSeq(data)(Setters.boolSetter)
-  def setIntSeq(data: Seq[Int]) = setSeq(data)(Setters.intSetter)
-  def setUIntSeq(data: Seq[Long]) = setSeq(data)(Setters.uintSetter)
-  def setStringSeq(data: Seq[String]) = setSeq(data)(Setters.stringSetter)
-  def setDateSeq(data: Seq[Date]) = setSeq(data)(Setters.dateSetter)
-  def setDoubleSeq(data: Seq[Double]) = setSeq(data)(Setters.valueSetter)
-  def setComplexSeq(data: Seq[Complex]) = setSeq(data)(Setters.complexSetter)
-
-  // indexed setters
-  def setBool(b: Boolean, idx: Int*): Data = { this(idx: _*).setBool(b); this }
-  def setInt(i: Int, idx: Int*): Data = { this(idx: _*).setInt(i); this }
-  def setUInt(u: Long, idx: Int*): Data = { this(idx: _*).setUInt(u); this }
-  def setBytes(data: Array[Byte], idx: Int*): Data = { this(idx: _*).setBytes(data); this }
-  def setString(data: String, idx: Int*): Data = { this(idx: _*).setString(data); this }
-  def setValue(data: Double, idx: Int*): Data = { this(idx: _*).setValue(data); this }
-  def setComplex(data: Complex, idx: Int*): Data = { this(idx: _*).setComplex(data); this }
-  def setComplex(re: Double, im: Double, idx: Int*): Data = { this(idx: _*).setComplex(re, im); this }
-  def setTime(date: Date, idx: Int*): Data = { this(idx: _*).setTime(date); this }
-
-  // indexed seq setters
-  def setBoolSeq(data: Seq[Boolean], idx: Int*): Data = { this(idx: _*).setBoolSeq(data); this }
-  def setIntSeq(data: Seq[Int], idx: Int*): Data = { this(idx: _*).setIntSeq(data); this }
-  def setUIntSeq(data: Seq[Long], idx: Int*): Data = { this(idx: _*).setUIntSeq(data); this }
-  def setStringSeq(data: Seq[String], idx: Int*): Data = { this(idx: _*).setStringSeq(data); this }
-  def setDateSeq(data: Seq[Date], idx: Int*): Data = { this(idx: _*).setDateSeq(data); this }
-  def setDoubleSeq(data: Seq[Double], idx: Int*): Data = { this(idx: _*).setDoubleSeq(data); this }
-  def setComplexSeq(data: Seq[Complex], idx: Int*): Data = { this(idx: _*).setComplexSeq(data); this }
-}
-
 /**
  * The Data class encapsulates the data format used to communicate between
  * LabRAD servers and clients.  This data format is based on the
@@ -226,7 +91,7 @@ trait IData { this: Data =>
  * data has a Type object which is specified by a String type tag.
  */
 class Data protected(val t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]])(implicit byteOrder: ByteOrder)
-extends IData with Serializable with Cloneable {
+extends Serializable with Cloneable {
 
   import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
 
@@ -242,6 +107,9 @@ extends IData with Serializable with Cloneable {
     case _ => false
   }
 
+  /**
+   * Create a new Data object that reinterprets the current data with a new type.
+   */
   private def cast(newType: Type) = new Data(newType, buf, ofs, heap)
 
   def set(other: Data) { Data.copy(other, this) }
@@ -369,7 +237,7 @@ extends IData with Serializable with Cloneable {
       "(" + (0 until clusterSize).map(this(_)).mkString(",") + ")"
 
     case TError(_) =>
-      "Error(" + getErrorCode + ", " + getErrorMessage + ", " + getErrorPayload + ")"
+      s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
   }
 
   def convertTo(pattern: String): Data = convertTo(Pattern(pattern))
@@ -417,7 +285,7 @@ extends IData with Serializable with Cloneable {
 
         case (TArr(src, _), TArr(tgt, _)) =>
           makeConverter(src, tgt) map { func =>
-            data => data flatIterate { (elem, i) => func(elem) }
+            data => data.flatIterator.foreach { func }
           }
 
         case (TValue(Some(from)), TValue(Some(to))) =>
@@ -436,31 +304,47 @@ extends IData with Serializable with Cloneable {
           None
       }
 
+  // type checks
+  def isNone = t == TNone
+  def isBool = t == TBool
+  def isInt = t == TInt
+  def isUInt = t == TUInt
+  def isBytes = t == TStr
+  def isString = t == TStr
+  def isValue = t.isInstanceOf[TValue]
+  def isComplex = t.isInstanceOf[TComplex]
+  def isTime = t == TTime
+  def isArray = t.isInstanceOf[TArr]
+  def isCluster = t.isInstanceOf[TCluster]
+  def isError = t.isInstanceOf[TError]
+  def hasUnits = t match {
+    case TValue(Some(_)) | TComplex(Some(_)) => true
+    case TValue(None) | TComplex(None) => false
+    case _ => false
+  }
+
   /**
    * Get a Data subobject at the specified array of indices.  Note that
    * this returns a view rather than a copy, so any modifications to
    * the subobject will be reflected in the original data.
    */
-  def apply(idx: Int*) = {
+  def apply(idx: Int*): Data = {
     @tailrec
-    def find(t: Type, buf: Array[Byte], ofs: Int, idx: Seq[Int]): (Type, Array[Byte], Int) =
+    def find(t: Type, buf: Array[Byte], ofs: Int, idx: Seq[Int]): Data =
       if (idx.isEmpty)
-        (t, buf, ofs)
+        new Data(t, buf, ofs, heap)
       else
         t match {
           case TArr(elem, depth) =>
             if (idx.size < depth)
               sys.error("not enough indices for array")
             val arrBuf = heap(buf.getInt(ofs + 4 * depth))
-            val arrOfs = {
-              var temp = 0
-              var stride = 1
-              val shape = Seq.tabulate(depth)(i => buf.getInt(ofs + 4 * i))
-              for (dim <- (depth - 1) to 0 by -1) {
-                temp += elem.dataWidth * idx(dim) * stride
-                stride *= shape(dim)
-              }
-              temp
+            var arrOfs = 0
+            var stride = 1
+            val shape = Seq.tabulate(depth)(i => buf.getInt(ofs + 4 * i))
+            for (dim <- (depth - 1) to 0 by -1) {
+              arrOfs += elem.dataWidth * idx(dim) * stride
+              stride *= shape(dim)
             }
             find(elem, arrBuf, arrOfs, idx.drop(depth))
 
@@ -470,17 +354,17 @@ extends IData with Serializable with Cloneable {
           case _ =>
             sys.error("type " + t + " is not indexable")
         }
-    val (t, buf, ofs) = find(this.t, this.buf, this.ofs, idx)
-    new Data(t, buf, ofs, heap)
+    find(this.t, this.buf, this.ofs, idx)
   }
 
-  /** Apply the given function to every element in an ND array */
-  def flatIterate(func: (Data, Int) => Unit): Unit = t match {
+  /** Return an iterator that runs over all the elements in an N-dimensional array */
+  def flatIterator: Iterator[Data] = t match {
     case TArr(elem, depth) =>
       val size = arrayShape.product
       val arrBuf = heap(buf.getInt(ofs + 4 * depth))
-      for (i <- 0 until size)
-        func(new Data(elem, arrBuf, i * elem.dataWidth, heap), i)
+      Iterator.tabulate(size) { i =>
+        new Data(elem, arrBuf, i * elem.dataWidth, heap)
+      }
     case _ =>
       sys.error("can only flat iterate over arrays")
   }
@@ -496,37 +380,48 @@ extends IData with Serializable with Cloneable {
     case _ => sys.error("arrayShape is only defined for arrays")
   }
 
-  def setArrayShape(shape: Int*) = t match {
+  def setArrayShape(shape: Array[Int]): Data = t match {
     case TArr(elem, depth) =>
       require(shape.length == depth)
       val size = shape.product
       for (i <- 0 until depth)
         buf.setInt(ofs + 4*i, shape(i))
-      val arrBuf = Data.newByteArray(elem.dataWidth * size)
+      val newBuf = Data.newByteArray(elem.dataWidth * size)
       val heapIndex = buf.getInt(ofs + 4*depth)
       if (heapIndex == -1) {
         buf.setInt(ofs + 4*depth, heap.size)
-        heap += arrBuf
+        heap += newBuf
       } else {
         val oldBuf = heap(heapIndex)
-        Array.copy(oldBuf, 0, arrBuf, 0, math.min(oldBuf.size, arrBuf.size))
-        heap(heapIndex) = arrBuf
+        Array.copy(oldBuf, 0, newBuf, 0, oldBuf.size min newBuf.size)
+        heap(heapIndex) = newBuf
       }
       this
     case _ =>
       sys.error("arrayShape can only be set for arrays")
   }
+  def setArrayShape(shape: Int*): Data = setArrayShape(shape.toArray)
+
+  def setArraySize(size: Int): Data = setArrayShape(size)
+
+  def clusterSize: Int = t match {
+    case TCluster(elems @ _*) => elems.size
+    case _ => sys.error("clusterSize is only defined for clusters")
+  }
 
   // getters
-  def getBool = { require(isBool); buf.getBool(ofs) }
-  def getInt = { require(isInt); buf.getInt(ofs) }
-  def getUInt = { require(isUInt); buf.getUInt(ofs) }
-  def getBytes = { require(isBytes); heap(buf.getInt(ofs)) }
-  def getValue = { require(isValue); buf.getDouble(ofs) }
-  def getReal = { require(isComplex); buf.getDouble(ofs) }
-  def getImag = { require(isComplex); buf.getDouble(ofs + 8) }
-  def getComplex = { require(isComplex); Complex(buf.getDouble(ofs), buf.getDouble(ofs + 8)) }
-  def getTime = { require(isTime); TimeStamp(buf.getLong(ofs), buf.getLong(ofs + 8)) }
+  def getBool: Boolean = { require(isBool); buf.getBool(ofs) }
+  def getInt: Int = { require(isInt); buf.getInt(ofs) }
+  def getUInt: Long = { require(isUInt); buf.getUInt(ofs) }
+  def getBytes: Array[Byte] = { require(isBytes); heap(buf.getInt(ofs)) }
+  def getString: String = new String(getBytes, UTF_8)
+  def getValue: Double = { require(isValue); buf.getDouble(ofs) }
+  def getReal: Double = { require(isComplex); buf.getDouble(ofs) }
+  def getImag: Double = { require(isComplex); buf.getDouble(ofs + 8) }
+  def getComplex: Complex = { require(isComplex); Complex(buf.getDouble(ofs), buf.getDouble(ofs + 8)) }
+  def getTime: TimeStamp = { require(isTime); TimeStamp(buf.getLong(ofs), buf.getLong(ofs + 8)) }
+  def getSeconds: Long = { require(isTime); buf.getLong(ofs) }
+  def getFraction: Long = { require(isTime); buf.getLong(ofs + 8) }
 
   def getErrorCode = { require(isError); buf.getInt(ofs) }
   def getErrorMessage = { require(isError); new String(heap(buf.getInt(ofs + 4)), UTF_8) }
@@ -575,21 +470,23 @@ extends IData with Serializable with Cloneable {
     this
   }
 
-  def setComplex(c: Complex): Data = setComplex(c.real, c.imag)
-
   def setComplex(re: Double, im: Double): Data = {
     require(isComplex)
     buf.setDouble(ofs, re)
     buf.setDouble(ofs + 8, im)
     this
   }
+  def setComplex(c: Complex): Data = setComplex(c.real, c.imag)
 
-  def setTime(timestamp: TimeStamp): Data = {
+  def setTime(seconds: Long, fraction: Long): Data = {
     require(isTime)
-    buf.setLong(ofs, timestamp.seconds)
-    buf.setLong(ofs + 8, timestamp.fraction)
+    buf.setLong(ofs, seconds)
+    buf.setLong(ofs + 8, fraction)
     this
   }
+  def setTime(timestamp: TimeStamp): Data = setTime(timestamp.seconds, timestamp.fraction)
+  def setTime(date: Date): Data = setTime(TimeStamp(date))
+  def setTime(dateTime: DateTime): Data = setTime(TimeStamp(dateTime))
 
   def setError(code: Int, message: String, payload: Data = Data.NONE) = t match {
     case TError(payloadType) =>
@@ -600,6 +497,8 @@ extends IData with Serializable with Cloneable {
       this
     case _ => sys.error("Data type must be error")
   }
+
+  def get[T](implicit getter: Getter[T]): T = getter.get(this)
 }
 
 object Data {
@@ -611,50 +510,42 @@ object Data {
   def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): Data =
     new Data(t, newByteArray(t.dataWidth), 0, newHeap)
 
+  /**
+   * Parse data from string representation
+   */
   def parse(data: String): Data = Parsers.parseData(data)
 
-  def newByteArray(length: Int) = Array.fill[Byte](length)(0xFF.toByte)
-  def newHeap = Buffer.empty[Array[Byte]]
+  private[data] def newByteArray(length: Int): Array[Byte] = Array.fill[Byte](length)(0xFF.toByte)
+  private[data] def newHeap: Buffer[Array[Byte]] = Buffer.empty[Array[Byte]]
 
-  def copy(src: Data, dest: Data): Data = {
-    src match {
-      case DNone() => assert(dest.isNone)
-      case Bool(b) => dest.setBool(b)
-      case Integer(i) => dest.setInt(i)
-      case UInt(w) => dest.setUInt(w)
-      case Value(v, u) => dest.setValue(v) // TODO: units?
-      case Cplx(re, im, u) => dest.setComplex(re, im) // TODO: units?
-      case Time(t) => dest.setTime(t)
-      case Bytes(s) => dest.setBytes(s)
-      case NDArray(depth) =>
+  def copy(src: Data, dst: Data): Data = {
+    require(src.t == dst.t, s"source and destination types do not match. src=${src.t}, dst=${dst.t}")
+    src.t match {
+      case TNone =>
+      case TBool => dst.setBool(src.getBool)
+      case TInt => dst.setInt(src.getInt)
+      case TUInt => dst.setUInt(src.getUInt)
+      case TValue(_) => dst.setValue(src.getValue)
+      case TComplex(_) => dst.setComplex(src.getReal, src.getImag)
+      case TTime => dst.setTime(src.getTime)
+      case TStr => dst.setBytes(src.getBytes)
+
+      case TArr(elem, depth) =>
         val shape = src.arrayShape
-        dest.setArrayShape(shape: _*)
-        val indices = Array.ofDim[Int](shape.length)
-        def copyArr(k: Int) {
-          for (i <- 0 until shape(k)) {
-            indices(k) = i
-            if (k == shape.length - 1)
-              copy(src(indices: _*), dest(indices: _*))
-            else
-              copyArr(k + 1)
-          }
+        dst.setArrayShape(shape)
+        for ((srcElem, dstElem) <- src.flatIterator zip dst.flatIterator) {
+          copy(srcElem, dstElem)
         }
-        copyArr(0)
 
-      case Cluster(_*) =>
-        for (i <- 0 until src.clusterSize)
-          copy(src(i), dest(i))
+      case TCluster(elems @ _*) =>
+        for (i <- 0 until elems.size) {
+          copy(src(i), dst(i))
+        }
 
-      case Error(code, msg, payload) =>
-        dest.setError(code, msg, payload)
-
-      case _ =>
-        println(src)
-        println(src.t)
-        println(dest.t)
-        sys.error("Not implemented!")
+      case TError(_) =>
+        dst.setError(src.getErrorCode, src.getErrorMessage, src.getErrorPayload)
     }
-    dest
+    dst
   }
 
 
@@ -746,18 +637,8 @@ object Data {
     case NDArray(depth) => dst match {
       case NDArray(`depth`) =>
         val shape = src.arrayShape
-        (shape.toSeq == dst.arrayShape.toSeq) && {
-          val indices = Array.ofDim[Int](depth)
-          def arrEqual(k: Int): Boolean =
-            (0 until shape(k)) forall { i =>
-              indices(k) = i
-              if (k == shape.length - 1)
-                src(indices: _*) == dst(indices: _*)
-              else
-                arrEqual(k + 1)
-            }
-          arrEqual(0)
-        }
+        (shape.toSeq == dst.arrayShape.toSeq) &&
+          (src.flatIterator zip dst.flatIterator).forall { case (a, b) => a == b }
       case _ => false
     }
     case Cluster(elems @ _*) => dst match {
@@ -789,18 +670,8 @@ object Data {
     case NDArray(depth) => dst match {
       case NDArray(`depth`) =>
         val shape = src.arrayShape
-        shape.toSeq == dst.arrayShape.toSeq && {
-          val indices = Array.ofDim[Int](shape.length)
-          def arrApproxEqual(k: Int): Boolean =
-            (0 until shape(k)) forall { i =>
-              indices(k) = i
-              if (k == shape.length - 1)
-                src(indices: _*) ~== dst(indices: _*)
-              else
-                arrApproxEqual(k + 1)
-            }
-          arrApproxEqual(0)
-        }
+        shape.toSeq == dst.arrayShape.toSeq &&
+          (src.flatIterator zip dst.flatIterator).forall { case (a, b) => a ~== b }
       case _ => false
     }
     case Cluster(elems @ _*) => dst match {
@@ -824,7 +695,7 @@ object Cluster {
   def apply(elems: Data*) = {
     val data = Data(TCluster(elems.map(_.t): _*))
     for ((elem, i) <- elems.zipWithIndex)
-      data(i) = elem
+      data(i).set(elem)
     data
   }
   def unapplySeq(data: Data): Option[Seq[Data]] = data.t match {
@@ -834,71 +705,58 @@ object Cluster {
 }
 
 object Arr {
-  def apply(elems: Seq[Data]): Data = {
-    val elemType = if (elems.size == 0) TNone else elems(0).t
-    val data = Data(TArr(elemType))
-    data.arraySize = elems.size
-    for ((elem, i) <- elems.zipWithIndex)
-      data(i) = elem
+  private def make[T](a: Array[T], elemType: Type)(implicit setter: Setter[T]) = {
+    val data = Data(TArr(elemType, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    for (i <- 0 until m) {
+      setter.set(data(i), a(i))
+    }
     data
   }
-  def apply(elems: Array[Data]): Data = apply(elems.toSeq)
+
+  def apply(elems: Array[Data]): Data = {
+    val elemType = if (elems.size == 0) TNone else elems(0).t
+    make[Data](elems, elemType)
+  }
+  def apply(elems: Seq[Data]): Data = apply(elems.toArray)
   def apply(elem: Data, elems: Data*): Data = apply(elem +: elems)
 
-  def apply[T](elems: Seq[T])(implicit setter: Setter[T]): Data = {
-    val data = Data(TArr(setter.t))
-    data.setSeq(elems)
-    data
-  }
-  def apply[T](elems: Array[T])(implicit setter: Setter[T]): Data = apply(elems.toSeq)
-  def apply[T](elem: T, elems: T*)(implicit setter: Setter[T]): Data = apply(elem +: elems)
-
-  def apply(a: Array[Boolean]): Data = apply[Boolean](a)(Setters.boolSetter)
-  def apply(a: Array[Int]): Data = apply[Int](a)(Setters.intSetter)
-  def apply(a: Array[Long]): Data = apply[Long](a)(Setters.uintSetter)
-  def apply(a: Array[String]): Data = apply[String](a)(Setters.stringSetter)
-  def apply(a: Array[Double]): Data = apply[Double](a)(Setters.valueSetter)
-  def apply(a: Array[Double], units: String) = apply[Double](a)(Setters.valueSetter(units))
+  def apply(a: Array[Boolean]): Data = make[Boolean](a, TBool)
+  def apply(a: Array[Int]): Data = make[Int](a, TInt)
+  def apply(a: Array[Long]): Data = make[Long](a, TUInt)
+  def apply(a: Array[String]): Data = make[String](a, TStr)
+  def apply(a: Array[Double]): Data = make[Double](a, TValue())
+  def apply(a: Array[Double], units: String) = make[Double](a, TValue(units))
 
   def unapplySeq(data: Data): Option[Seq[Data]] =
-    if (data.isArray) Some(data.getDataArray)
+    if (data.isArray) Some(data.get[Array[Data]])
     else None
 }
 
 object Arr2 {
-  private def make[T](a: Array[Array[T]], elemType: Type, setter: (Data, T, Int, Int) => Unit) = {
+  private def make[T](a: Array[Array[T]], elemType: Type)(implicit setter: Setter[T]) = {
     val data = Data(TArr(elemType, 2))
     val (m, n) = (a.length, if (a.length > 0) a(0).length else 0)
     data.setArrayShape(m, n)
     for (i <- 0 until m) {
       assert(a(i).length == a(0).length, "array must be rectangular")
       for (j <- 0 until n)
-       setter(data, a(i)(j), i, j)
+        setter.set(data(i, j), a(i)(j))
     }
     data
   }
 
-  def apply(a: Array[Array[Boolean]]) =
-    make(a, TBool, (data, elem: Boolean, i, j) => data.setBool(elem, i, j))
-
-  def apply(a: Array[Array[Int]]) =
-    make(a, TInt, (data, elem: Int, i, j) => data.setInt(elem, i, j))
-
-  def apply(a: Array[Array[Long]]) =
-    make(a, TUInt, (data, elem: Long, i, j) => data.setUInt(elem, i, j))
-
-  def apply(a: Array[Array[Double]]) =
-    make(a, TValue(), (data, elem: Double, i, j) => data.setValue(elem, i, j))
-
-  def apply(a: Array[Array[Double]], units: String) =
-    make(a, TValue(units), (data, elem: Double, i, j) => data.setValue(elem, i, j))
-
-  def apply(a: Array[Array[String]]) =
-    make(a, TStr, (data, elem: String, i, j) => data.setString(elem, i, j))
+  def apply(a: Array[Array[Boolean]]) = make[Boolean](a, TBool)
+  def apply(a: Array[Array[Int]]) = make[Int](a, TInt)
+  def apply(a: Array[Array[Long]]) = make[Long](a, TUInt)
+  def apply(a: Array[Array[Double]]) = make[Double](a, TValue())
+  def apply(a: Array[Array[Double]], units: String) = make[Double](a, TValue(units))
+  def apply(a: Array[Array[String]]) = make[String](a, TStr)
 }
 
 object Arr3 {
-  private def make[T](a: Array[Array[Array[T]]], elemType: Type, setter: (Data, T, Int, Int, Int) => Unit) = {
+  private def make[T](a: Array[Array[Array[T]]], elemType: Type)(implicit setter: Setter[T]) = {
     val data = Data(TArr(elemType, 3))
     val (m, n, p) = (a.length,
                      if (a.length > 0) a(0).length else 0,
@@ -909,29 +767,18 @@ object Arr3 {
       for (j <- 0 until n) {
         assert(a(i)(j).length == a(0)(0).length, "array must be rectangular")
         for (k <- 0 until p)
-          setter(data, a(i)(j)(k), i, j, k)
+          setter.set(data(i, j, k), a(i)(j)(k))
       }
     }
     data
   }
 
-  def apply(a: Array[Array[Array[Boolean]]]) =
-    make(a, TBool, (data, elem: Boolean, i, j, k) => data.setBool(elem, i, j, k))
-
-  def apply(a: Array[Array[Array[Int]]]) =
-    make(a, TInt, (data, elem: Int, i, j, k) => data.setInt(elem, i, j, k))
-
-  def apply(a: Array[Array[Array[Long]]]) =
-    make(a, TUInt, (data, elem: Long, i, j, k) => data.setUInt(elem, i, j, k))
-
-  def apply(a: Array[Array[Array[Double]]]) =
-    make(a, TValue(), (data, elem: Double, i, j, k) => data.setValue(elem, i, j, k))
-
-  def apply(a: Array[Array[Array[Double]]], units: String) =
-    make(a, TValue(units), (data, elem: Double, i, j, k) => data.setValue(elem, i, j, k))
-
-  def apply(a: Array[Array[Array[String]]]) =
-    make(a, TStr, (data, elem: String, i, j, k) => data.setString(elem, i, j, k))
+  def apply(a: Array[Array[Array[Boolean]]]) = make[Boolean](a, TBool)
+  def apply(a: Array[Array[Array[Int]]]) = make[Int](a, TInt)
+  def apply(a: Array[Array[Array[Long]]]) = make[Long](a, TUInt)
+  def apply(a: Array[Array[Array[Double]]]) = make[Double](a, TValue())
+  def apply(a: Array[Array[Array[Double]]], units: String) = make[Double](a, TValue(units))
+  def apply(a: Array[Array[Array[String]]]) = make[String](a, TStr)
 }
 
 object NDArray {
@@ -1132,7 +979,9 @@ object Parsers extends RegexParsers {
   def array = arrND ^^ { case (elems, typ, shape) =>
     val data = Data(TArr(typ, shape.size))
     data.setArrayShape(shape: _*)
-    data.flatIterate((data, i) => data.set(elems(i)))
+    for ((data, elem) <- data.flatIterator zip elems.iterator) {
+      data.set(elem)
+    }
     data
   }
 
@@ -1163,9 +1012,9 @@ object Translate {
 
   private val translation = {
     // by default, use a two-digit hex escape code
-    val temp = Array.tabulate[String](256) { b => """\x%02x""".format(b) }
+    val lut = Array.tabulate[String](256) { b => """\x%02x""".format(b) }
 
-    def translate(from: Byte, to: String): Unit = { temp((from + 256) % 256) = to }
+    def translate(from: Byte, to: String): Unit = { lut((from + 256) % 256) = to }
 
     // printable ascii characters are not translated
     val ASCII_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 !@#$%^&*()-_=+|[]{}:;,.<>?/'"
@@ -1176,7 +1025,7 @@ object Translate {
     translate('\t', """\t""")
     translate('"',  """\"""")
 
-    temp
+    lut
   }
 
   def bytesToString(bytes: Array[Byte]): String =

@@ -55,12 +55,12 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
 trait ManagerServer extends Requester {
   def servers(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
     call("Servers").map {
-      _.getDataSeq.map { case Cluster(UInt(id), Str(name)) => (id, name) }
+      _.get[Seq[Data]].map { case Cluster(UInt(id), Str(name)) => (id, name) }
     }
 
   def settings(server: String)(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
     call("Settings", Str(server)).map {
-      _.getDataSeq.map { case Cluster(UInt(id), Str(name)) => (id, name) }
+      _.get[Seq[Data]].map { case Cluster(UInt(id), Str(name)) => (id, name) }
     }
 
   def lookupServer(name: String)(implicit ec: ExecutionContext): Future[Long] =
@@ -87,12 +87,12 @@ class ManagerServerPacket(server: ServerProxy, ctx: Context)
 
 trait RegistryServer extends Requester {
   def dir()(implicit ec: ExecutionContext): Future[(Seq[String], Seq[String])] =
-    call("dir").map { case Cluster(dirs, keys) => (dirs.getStringSeq, keys.getStringSeq) }
+    call("dir").map { case Cluster(dirs, keys) => (dirs.get[Seq[String]], keys.get[Seq[String]]) }
 
-  def cd(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Str(dir)).map { _.getStringSeq }
-  def cd(dir: Seq[String])(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_)))).map { _.getStringSeq }
+  def cd(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Str(dir)).map { _.get[Seq[String]] }
+  def cd(dir: Seq[String])(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_)))).map { _.get[Seq[String]] }
 
-  def mkDir(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("mkdir", Str(dir)).map { _.getStringSeq }
+  def mkDir(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("mkdir", Str(dir)).map { _.get[Seq[String]] }
   def rmDir(dir: String)(implicit ec: ExecutionContext): Future[Unit] = callUnit("rmdir", Str(dir))
 
   def get(key: String)(implicit ec: ExecutionContext): Future[Data] = call("get", Str(key))

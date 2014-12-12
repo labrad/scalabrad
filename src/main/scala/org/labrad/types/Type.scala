@@ -38,15 +38,15 @@ object Parsers extends RegexParsers {
   def someType: Parser[Type] =
     ( "b"   ^^ { _ => TBool }
     | "i"   ^^ { _ => TInt }
-    | "i8"  ^^ { _ => TInt8 }
-    | "i16" ^^ { _ => TInt16 }
-    | "i32" ^^ { _ => TInt }
-    | "i64" ^^ { _ => TInt64 }
+//    | "i8"  ^^ { _ => TInt8 }
+//    | "i16" ^^ { _ => TInt16 }
+//    | "i32" ^^ { _ => TInt }
+//    | "i64" ^^ { _ => TInt64 }
     | "w"   ^^ { _ => TUInt }
-    | "u8"  ^^ { _ => TUInt8 }
-    | "u16" ^^ { _ => TUInt16 }
-    | "u32" ^^ { _ => TUInt }
-    | "u64" ^^ { _ => TUInt64 }
+//    | "u8"  ^^ { _ => TUInt8 }
+//    | "u16" ^^ { _ => TUInt16 }
+//    | "u32" ^^ { _ => TUInt }
+//    | "u64" ^^ { _ => TUInt64 }
     | "s"   ^^ { _ => TStr }
     | "t"   ^^ { _ => TTime }
     | valueType
@@ -406,23 +406,23 @@ case object TInt extends Type with ConcreteType {
   val dataWidth = 4
 }
 
-case object TInt8 extends Type with ConcreteType {
-  override val toString = "i8"
-  val fixedWidth = true
-  val dataWidth = 1
-}
-
-case object TInt16 extends Type with ConcreteType {
-  override val toString = "i16"
-  val fixedWidth = true
-  val dataWidth = 2
-}
-
-case object TInt64 extends Type with ConcreteType {
-  override val toString = "i64"
-  val fixedWidth = true
-  val dataWidth = 8
-}
+//case object TInt8 extends Type with ConcreteType {
+//  override val toString = "i8"
+//  val fixedWidth = true
+//  val dataWidth = 1
+//}
+//
+//case object TInt16 extends Type with ConcreteType {
+//  override val toString = "i16"
+//  val fixedWidth = true
+//  val dataWidth = 2
+//}
+//
+//case object TInt64 extends Type with ConcreteType {
+//  override val toString = "i64"
+//  val fixedWidth = true
+//  val dataWidth = 8
+//}
 
 case object TUInt extends Type with ConcreteType {
   override val toString = "w"
@@ -430,23 +430,23 @@ case object TUInt extends Type with ConcreteType {
   val dataWidth = 4
 }
 
-case object TUInt8 extends Type with ConcreteType {
-  override val toString = "w8"
-  val fixedWidth = true
-  val dataWidth = 1
-}
-
-case object TUInt16 extends Type with ConcreteType {
-  override val toString = "w16"
-  val fixedWidth = true
-  val dataWidth = 2
-}
-
-case object TUInt64 extends Type with ConcreteType {
-  override val toString = "w64"
-  val fixedWidth = true
-  val dataWidth = 8
-}
+//case object TUInt8 extends Type with ConcreteType {
+//  override val toString = "w8"
+//  val fixedWidth = true
+//  val dataWidth = 1
+//}
+//
+//case object TUInt16 extends Type with ConcreteType {
+//  override val toString = "w16"
+//  val fixedWidth = true
+//  val dataWidth = 2
+//}
+//
+//case object TUInt64 extends Type with ConcreteType {
+//  override val toString = "w64"
+//  val fixedWidth = true
+//  val dataWidth = 8
+//}
 
 case object TStr extends Type with ConcreteType {
   override val toString = "s"

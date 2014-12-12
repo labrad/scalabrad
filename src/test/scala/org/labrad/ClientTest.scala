@@ -46,7 +46,7 @@ class ClientTests extends FunSuite /*with Logging*/ {
 
   testWithClient("retrieve list of servers from manager") { c =>
     val data = Await.result(c.send("Manager", "Servers" -> Data.NONE), 10.seconds)(0)
-    val servers = data.getDataSeq map { case Cluster(UInt(id), Str(name)) => (id, name) }
+    val servers = data.get[Seq[Data]] map { case Cluster(UInt(id), Str(name)) => (id, name) }
     assert(servers.contains((1, "Manager")))
     assert(servers.contains((2, "Registry")))
   }

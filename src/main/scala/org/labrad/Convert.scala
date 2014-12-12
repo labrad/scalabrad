@@ -51,7 +51,7 @@ object Convert {
   implicit class SeqFormat[A](fmt: DataFormat[A]) extends DataFormat[Seq[A]] {
     def read(data: Data): Seq[A] = {
       val b = Seq.newBuilder[A]
-      data.flatIterate { (d, _) => b += fmt.read(d) }
+      data.flatIterator.foreach { d => b += fmt.read(d) }
       b.result
     }
     def write(x: Seq[A]): Data = {
