@@ -72,86 +72,6 @@ object TimeStamp {
   def apply(dateTime: DateTime): TimeStamp = apply(dateTime.toDate)
 }
 
-trait IBool {
-  def get: Boolean
-  def set(b: Boolean)
-}
-
-trait IInt {
-  def get: Int
-}
-
-trait IUInt {
-  def get: Long
-}
-
-trait IValue {
-  def get: Double
-  def units: String
-}
-
-trait IComplex {
-  def real: Double
-  def imag: Double
-  def units: String
-}
-
-trait IBytes {
-  def get: Array[Byte]
-}
-
-trait IStr {
-  def get: String
-}
-
-trait IArr { // this: Data =>
-  def apply(idx: Int*): IData
-  def size: Int
-  def nDims: Int
-  def shape: Array[Int]
-
-  /*
-  def toSeq[T: ClassManifest](getter: IData => T): Seq[T] = t match {
-    case TArr(_, 1) => Seq.tabulate(size)(i => getter(this(i)))
-    case _ => sys.error("Must be an array")
-  }
-
-  def toBytes(implicit bo: ByteOrder): Array[Byte] = {
-    val os = EndianAwareOutputStream(new ByteArrayOutputStream)
-    for (dim <- shape)
-      os.writeUInt(dim)
-    val idx = Array.ofDim[Int](nDims)
-    def traverse(k: Int) {
-      if (k == nDims)
-        os.write(this(idx: _*).toBytes)
-      else
-        for (i <- 0 until shape(k)) {
-          idx(k) = i
-          traverse(k + 1)
-        }
-    }
-    traverse(0)
-    os.toByteArray
-  }
-  */
-}
-
-trait ICluster { // this: Data =>
-  def apply(idx: Int): IData
-  def size: Int
-
-  /*
-  override def toBytes(implicit byteOrder: ByteOrder): Array[Byte] =
-    (0 until size).flatMap(this(_).toBytes).toArray
-  */
-}
-
-trait IError {
-  def code: Int
-  def message: String
-  def payload: IData
-}
-
 trait IData { this: Data =>
   def t: Type
 
@@ -186,17 +106,6 @@ trait IData { this: Data =>
     case _ => false
   }
 
-  def asBool: IBool
-  def asInt: IInt
-  def asUInt: IUInt
-  def asValue: IValue
-  def asComplex: IComplex
-  def asBytes: IBytes
-  def asStr: IStr
-  def asArray: IArr
-  def asCluster: ICluster
-  def asError: IError
-
   def arraySize: Int
   def arrayShape: Array[Int]
   def setArrayShape(shape: Int*): Data
@@ -225,7 +134,6 @@ trait IData { this: Data =>
   def getReal: Double
   def getImag: Double
   def getTime: TimeStamp
-  def getError: IError
 
   // setters
   def setBool(data: Boolean): Data
@@ -321,7 +229,6 @@ class Data protected(val t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array
 extends IData with Serializable with Cloneable {
 
   import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
-  import ShapeTraversers._ // implicitly allow traversing over a shape array
 
   override def clone = Data.copy(this, Data(this.t))
 
@@ -610,140 +517,6 @@ extends IData with Serializable with Cloneable {
       sys.error("arrayShape can only be set for arrays")
   }
 
-  //
-  def asBool = t match {
-    case TBool =>
-      new IBool {
-        def get = buf.getBool(ofs)
-        def set(b: Boolean) {
-          buf.setBool(ofs, b)
-        }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to b")
-  }
-
-  def asInt = t match {
-    case TInt =>
-      new IInt {
-        def get = buf.getInt(ofs)
-        def set(i: Int) {
-          buf.setInt(ofs, i)
-        }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to i")
-  }
-
-  def asUInt = t match {
-    case TUInt =>
-      new IUInt {
-        def get = buf.getUInt(ofs)
-        def set(l: Long) {
-          buf.setUInt(ofs, l)
-        }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to w")
-  }
-
-  def asValue = t match {
-    case TValue(u) =>
-      new IValue {
-        def get = buf.getDouble(ofs)
-        def units = u.getOrElse("")
-        def set(d: Double) {
-          buf.setDouble(ofs, d)
-        }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to v")
-  }
-
-  def asComplex = t match {
-    case TComplex(u) =>
-      new IComplex {
-        def real = buf.getDouble(ofs)
-        def imag = buf.getDouble(ofs + 8)
-        def units = u.getOrElse("")
-        def set(re: Double, im: Double) {
-          buf.setDouble(ofs, re)
-          buf.setDouble(ofs + 8, im)
-        }
-        def set(c: Complex) {
-          set(c.real, c.imag) }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to c")
-  }
-
-  def asBytes = t match {
-    case TStr =>
-      new IBytes {
-        def get = heap(buf.getInt(ofs))
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to s")
-  }
-
-  def asStr = t match {
-    case TStr =>
-      new IStr {
-        def get = new String(heap(buf.getInt(ofs)))
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to s")
-  }
-
-  def asArray = t match {
-    case TArr(elem, d) =>
-      new IArr {
-        def size = shape.product
-        def nDims = d
-        def shape = Array.tabulate(d)(i => buf.getInt(ofs + 4 * i))
-        def apply(idx: Int*): IData = {
-          if (idx.size != d)
-            sys.error("incorrect number of indices for array")
-          val arrBuf = heap(buf.getInt(ofs + 4 * d))
-          val arrOfs = {
-            var temp = 0
-            var stride = 1
-            val shape = this.shape
-            for (dim <- (d - 1) to 0 by -1) {
-              temp += elem.dataWidth * idx(dim) * stride
-              stride *= shape(dim)
-            }
-            temp
-          }
-          new Data(elem, arrBuf, arrOfs, heap)
-        }
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to *")
-  }
-
-  def asCluster = t match {
-    case tc @ TCluster(elems @ _*) =>
-      new ICluster {
-        def size = elems.size
-        def apply(i: Int) =
-          new Data(elems(i), buf, ofs + tc.offset(i), heap)
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to ()")
-  }
-
-  def asError = t match {
-    case TError(p) =>
-      new IError {
-        def code = buf.getInt(ofs)
-        def message = new String(heap(buf.getInt(ofs + 4)), UTF_8)
-        def payload = new Data(p, buf, ofs + 8, heap)
-      }
-    case _ =>
-      sys.error(s"cannot convert $t to E")
-  }
-
   // getters
   def getBool = { require(isBool); buf.getBool(ofs) }
   def getInt = { require(isInt); buf.getInt(ofs) }
@@ -755,11 +528,6 @@ extends IData with Serializable with Cloneable {
   def getComplex = { require(isComplex); Complex(buf.getDouble(ofs), buf.getDouble(ofs + 8)) }
   def getTime = { require(isTime); TimeStamp(buf.getLong(ofs), buf.getLong(ofs + 8)) }
 
-  def getError = new IError {
-    def code = getErrorCode
-    def message = getErrorMessage
-    def payload = getErrorPayload
-  }
   def getErrorCode = { require(isError); buf.getInt(ofs) }
   def getErrorMessage = { require(isError); new String(heap(buf.getInt(ofs + 4)), UTF_8) }
   def getErrorPayload = t match {
@@ -838,7 +606,6 @@ object Data {
   val NONE = Data("")
 
   import RichByteArray._
-  import ShapeTraversers._
 
   def apply(tag: String): Data = apply(Type(tag))
   def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): Data =
