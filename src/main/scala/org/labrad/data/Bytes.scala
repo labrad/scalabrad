@@ -19,18 +19,21 @@ trait EndianAwareInputStream {
 object EndianAwareInputStream {
   def apply(is: InputStream)(implicit order: ByteOrder) = new EndianAwareInputStream {
     def byteOrder = order
-    def read = is.read.asInstanceOf[Byte]
-    def read(n: Int) = {
+    def read: Byte = is.read.asInstanceOf[Byte]
+    def read(n: Int): Array[Byte] = {
       val bytes = Array.ofDim[Byte](n)
+      read(bytes, 0, n)
+      bytes
+    }
+    def read(buf: Array[Byte], off: Int, len: Int) = {
       var soFar = 0
-      while (soFar < n) {
-        val k = is.read(bytes, soFar, n - soFar)
+      while (soFar < len) {
+        val k = is.read(buf, off + soFar, len - soFar)
         if (k < 0) throw new IOException
         soFar += k
       }
-      bytes
+      soFar
     }
-    def read(buf: Array[Byte], off: Int, len: Int) = is.read(buf, off, len)
     def readBool = ByteManip.readBool(is)
     def readInt = ByteManip.readInt(is)
     def readUInt = ByteManip.readUInt(is)
@@ -67,48 +70,8 @@ object EndianAwareOutputStream {
   }
 }
 
-trait EndianAwareByteArray {
-  def byteOrder: ByteOrder
-
-  def getBool(ofs: Int): Boolean
-  def setBool(ofs: Int, data: Boolean)
-
-  def getInt(ofs: Int): Int
-  def setInt(ofs: Int, data: Int)
-
-  def getUInt(ofs: Int): Long
-  def setUInt(ofs: Int, data: Long)
-
-  def getLong(ofs: Int): Long
-  def setLong(ofs: Int, data: Long)
-
-  def getDouble(ofs: Int): Double
-  def setDouble(ofs: Int, data: Double)
-}
-
-object EndianAwareByteArray {
-  def apply(arr: Array[Byte])(implicit order: ByteOrder) = new EndianAwareByteArray {
-    def byteOrder = order
-
-    def getBool(ofs: Int): Boolean = ByteManip.getBool(arr, ofs)
-    def setBool(ofs: Int, data: Boolean) = ByteManip.setBool(arr, ofs, data)
-
-    def getInt(ofs: Int): Int = ByteManip.getInt(arr, ofs)
-    def setInt(ofs: Int, data: Int) = ByteManip.setInt(arr, ofs, data)
-
-    def getUInt(ofs: Int): Long = ByteManip.getUInt(arr, ofs)
-    def setUInt(ofs: Int, data: Long) = ByteManip.setUInt(arr, ofs, data)
-
-    def getLong(ofs: Int): Long = ByteManip.getLong(arr, ofs)
-    def setLong(ofs: Int, data: Long) = ByteManip.setLong(arr, ofs, data)
-
-    def getDouble(ofs: Int): Double = ByteManip.getDouble(arr, ofs)
-    def setDouble(ofs: Int, data: Double) = ByteManip.setDouble(arr, ofs, data)
-  }
-}
-
 object RichByteArray {
-  implicit class RichByteArray(buf: Array[Byte]) {
+  implicit class RichByteArray(val buf: Array[Byte]) extends AnyVal {
     def getBool(ofs: Int): Boolean = ByteManip.getBool(buf, ofs)
     def getInt(ofs: Int)(implicit bo: ByteOrder): Int = ByteManip.getInt(buf, ofs)
     def getUInt(ofs: Int)(implicit bo: ByteOrder): Long = ByteManip.getUInt(buf, ofs)
