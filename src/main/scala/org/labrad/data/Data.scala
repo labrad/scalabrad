@@ -11,45 +11,7 @@ import org.labrad.errors.{LabradException, NonIndexableTypeException}
 import org.labrad.types._
 import scala.annotation.tailrec
 import scala.collection.mutable.Buffer
-import scala.reflect.ClassTag
 import scala.util.parsing.combinator.RegexParsers
-
-class ShapeIterator(shape: Array[Int]) extends Iterator[Array[Int]] {
-  private val nDims = shape.size
-  private val indices = Array.ofDim[Int](nDims)
-  indices(nDims - 1) = -1
-
-  private var _hasNext = shape.forall(_ > 0)
-
-  def hasNext: Boolean = _hasNext
-
-  def next: Array[Int] = {
-    // increment indices
-    var k = nDims - 1
-    while (k >= 0) {
-      indices(k) += 1
-      if (indices(k) == shape(k)) {
-        indices(k) = 0
-        k -= 1
-      } else {
-        k = -1 // done
-      }
-    }
-    // check if this is the last iteration
-    var last = true
-    k = nDims - 1
-    while (k >= 0) {
-      if (indices(k) == shape(k) - 1) {
-        k -= 1
-      } else {
-        last = false
-        k = -1 // done
-      }
-    }
-    _hasNext = !last
-    indices
-  }
-}
 
 case class Complex(real: Double, imag: Double)
 
@@ -111,8 +73,6 @@ extends Serializable with Cloneable {
    * Create a new Data object that reinterprets the current data with a new type.
    */
   private def cast(newType: Type) = new Data(newType, buf, ofs, heap)
-
-  def set(other: Data) { Data.copy(other, this) }
 
   def toBytes(implicit outputOrder: ByteOrder): Array[Byte] = {
     val bs = new ByteArrayOutputStream
@@ -430,7 +390,13 @@ extends Serializable with Cloneable {
     case _ => sys.error("errorPayload is only defined for errors")
   }
 
+  def get[T](implicit getter: Getter[T]): T = getter.get(this)
+
   // setters
+
+  def set(other: Data): Data = { Data.copy(other, this); this }
+  def set[T](value: T)(implicit setter: Setter[T]): Data = { setter.set(this, value); this }
+
   def setBool(b: Boolean): Data = {
     require(isBool)
     buf.setBool(ofs, b)
@@ -497,8 +463,6 @@ extends Serializable with Cloneable {
       this
     case _ => sys.error("Data type must be error")
   }
-
-  def get[T](implicit getter: Getter[T]): T = getter.get(this)
 }
 
 object Data {
@@ -601,85 +565,46 @@ object Data {
   }
 
   // equality testing
-  def isEqual(src: Data, dst: Data): Boolean = src match {
-    case DNone() => dst match {
-      case DNone() => true
-      case _ => false
+  def isEqual(a: Data, b: Data): Boolean = {
+    if (a.t != b.t) {
+      false
+    } else {
+      a.t match {
+        case TNone => true
+        case TBool => a.getBool == b.getBool
+        case TInt => a.getInt == b.getInt
+        case TUInt => a.getUInt == b.getUInt
+        case _: TValue => a.getValue == b.getValue
+        case _: TComplex => a.getReal == b.getReal && a.getImag == b.getImag
+        case TTime => a.getSeconds == b.getSeconds && a.getFraction == b.getFraction
+        case TStr => a.getBytes.toSeq == b.getBytes.toSeq
+        case _: TArr =>
+          a.arrayShape.toSeq == b.arrayShape.toSeq &&
+            (a.flatIterator zip b.flatIterator).forall { case (a, b) => a == b }
+        case _: TCluster =>
+          (0 until a.clusterSize).forall { i => a(i) == b(i) }
+        case _: TError =>
+          a.getErrorCode == b.getErrorCode && a.getErrorMessage == b.getErrorMessage && a.getErrorPayload == b.getErrorPayload
+      }
     }
-    case Bool(b) => dst match {
-      case Bool(`b`) => true
-      case _ => false
-    }
-    case Integer(i) => dst match {
-      case Integer(`i`) => true
-      case _ => false
-    }
-    case UInt(w) => dst match {
-      case UInt(`w`) => true
-      case _ => false
-    }
-    case Value(v, u) => dst match {
-      case Value(`v`, `u`) => true
-      case _ => false
-    }
-    case Cplx(re, im, u) => dst match {
-      case Cplx(`re`, `im`, `u`) => true
-      case _ => false
-    }
-    case Time(t) => dst match {
-      case Time(`t`) => true
-      case _ => false
-    }
-    case Str(s) => dst match {
-      case Str(`s`) => true
-      case _ => false
-    }
-    case NDArray(depth) => dst match {
-      case NDArray(`depth`) =>
-        val shape = src.arrayShape
-        (shape.toSeq == dst.arrayShape.toSeq) &&
-          (src.flatIterator zip dst.flatIterator).forall { case (a, b) => a == b }
-      case _ => false
-    }
-    case Cluster(elems @ _*) => dst match {
-      case Cluster(others @ _*) => elems == others
-      case _ => false
-    }
-    case Error(code, msg, payload) => dst match {
-      case Error(`code`, `msg`, `payload`) => true
-      case _ => false
-    }
-    case _ =>
-      sys.error("isEqual missing case for type " + src.t)
   }
 
-
-  def approxEqual(src: Data, dst: Data): Boolean = src match {
-    case Value(v1, u) => dst match {
-      case Value(v2, `u`) => approxEqual(v1, v2)
-      case _ => false
+  def approxEqual(a: Data, b: Data): Boolean = {
+    if (a.t != b.t) {
+      false
+    } else {
+      a.t match {
+        case _: TValue => approxEqual(a.getValue, b.getValue)
+        case _: TComplex => approxEqual(a.getReal, b.getReal) && approxEqual(a.getImag, b.getImag)
+        case TTime => math.abs(a.getTime.toDate.getTime - b.getTime.toDate.getTime) <= 1
+        case _: TArr =>
+          a.arrayShape.toSeq == b.arrayShape.toSeq &&
+            (a.flatIterator zip b.flatIterator).forall { case (a, b) => a ~== b }
+        case TCluster(_*) =>
+          (0 until a.clusterSize).forall { i => a(i) ~== b(i) }
+        case _ => a == b
+      }
     }
-    case Cplx(r1, i1, u) => dst match {
-      case Cplx(r2, i2, `u`) => approxEqual(r1, r2) && approxEqual(i1, i2)
-      case _ => false
-    }
-    case Time(t1) => dst match {
-      case Time(t2) => math.abs(t1.getTime - t2.getTime) <= 1
-      case _ => false
-    }
-    case NDArray(depth) => dst match {
-      case NDArray(`depth`) =>
-        val shape = src.arrayShape
-        shape.toSeq == dst.arrayShape.toSeq &&
-          (src.flatIterator zip dst.flatIterator).forall { case (a, b) => a ~== b }
-      case _ => false
-    }
-    case Cluster(elems @ _*) => dst match {
-      case Cluster(others @ _*) if others.size == elems.size =>
-        (elems zip others) forall { case (elem, other) => elem ~== other }
-      case _ => false
-    }
-    case _ => src == dst
   }
 
   private def approxEqual(a: Double, b: Double, tol: Double = 1e-9): Boolean = {

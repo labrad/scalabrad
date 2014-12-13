@@ -15,6 +15,43 @@ class Counter(min: Long, max: Long) {
   }
 }
 
+class ShapeIterator(shape: Array[Int]) extends Iterator[Array[Int]] {
+  private val nDims = shape.size
+  private val indices = Array.ofDim[Int](nDims)
+  indices(nDims - 1) = -1
+
+  private var _hasNext = shape.forall(_ > 0)
+
+  def hasNext: Boolean = _hasNext
+
+  def next: Array[Int] = {
+    // increment indices
+    var k = nDims - 1
+    while (k >= 0) {
+      indices(k) += 1
+      if (indices(k) == shape(k)) {
+        indices(k) = 0
+        k -= 1
+      } else {
+        k = -1 // done
+      }
+    }
+    // check if this is the last iteration
+    var last = true
+    k = nDims - 1
+    while (k >= 0) {
+      if (indices(k) == shape(k) - 1) {
+        k -= 1
+      } else {
+        last = false
+        k = -1 // done
+      }
+    }
+    _hasNext = !last
+    indices
+  }
+}
+
 object Util {
   def findAvailablePort(start: Int = 10000, stop: Int = 60000): Int = {
     for (port <- start to stop) {
