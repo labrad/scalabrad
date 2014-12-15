@@ -98,6 +98,9 @@ trait RegistryServer extends Requester {
   def get(key: String)(implicit ec: ExecutionContext): Future[Data] = call("get", Str(key))
   def set(key: String, value: Data)(implicit ec: ExecutionContext): Future[Unit] = callUnit("set", Str(key), value)
   def del(key: String)(implicit ec: ExecutionContext): Future[Unit] = callUnit("del", Str(key))
+
+  def notifyOnChange(id: Long, enable: Boolean)(implicit ec: ExecutionContext): Future[Unit] =
+    callUnit("Notify On Change", UInt(id), Bool(enable))
 }
 
 class RegistryServerProxy(cxn: Connection, name: String = "Registry")
