@@ -67,7 +67,7 @@ extends ServerActor with Logging {
 
   // used by contexts
   private[registry] def foreachContext(func: RegistryContext => Unit) = contexts.values.foreach { case (ctx, _) => func(ctx) }
-  private[registry] def sendMessage(packet: Packet): Unit = hub.message(packet.target, packet)
+  private[registry] def sendMessage(target: Long, packet: Packet): Unit = hub.message(target, packet.copy(target = id))
   private[registry] def getContext(context: Context): Option[RegistryContext] = contexts.get(context).map(_._1)
 }
 
@@ -237,9 +237,9 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   def notify(dir: File, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
     log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
     if (dir == curDir) {
-      changeListener foreach { case (target, id) =>
+      for ((target, id) <- changeListener) {
         val msg = Cluster(Str(name), Bool(isDir), Bool(addOrChange))
-        parent.sendMessage(Packet(0, target, context, Seq(Record(id, msg))))
+        parent.sendMessage(target, Packet(0, 0, context, Seq(Record(id, msg))))
       }
     }
   }
