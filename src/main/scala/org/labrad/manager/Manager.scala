@@ -59,6 +59,8 @@ class CentralNode(port: Int, password: String, registryRoot: File, remotePort: I
   val messager: Messager = ta.typedActorOf(TypedProps[Messager](new MessagerImpl(hub)), "messager")
   val auth = ta.typedActorOf(TypedProps[AuthService](new AuthServiceImpl(password)), "auth")
 
+  tracker.connectServer(Manager.ID, Manager.NAME)
+
   { // connect registry as server 2L
     val name = "Registry"
     val id = hub.allocateServerId(name)
