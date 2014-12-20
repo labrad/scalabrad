@@ -46,4 +46,60 @@ object Getter {
       data.flatIterator.map(elemGetter.get).toVector
     }
   }
+
+  implicit def tuple2Getter[T1, T2](implicit g1: Getter[T1], g2: Getter[T2]): Getter[(T1, T2)] = new Getter[(T1, T2)] {
+    def get(data: Data): (T1, T2) = {
+      require(data.clusterSize == 2)
+      (g1.get(data(0)), g2.get(data(1)))
+    }
+  }
+
+  implicit def tuple3Getter[T1, T2, T3](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3]): Getter[(T1, T2, T3)] = new Getter[(T1, T2, T3)] {
+    def get(data: Data): (T1, T2, T3) = {
+      require(data.clusterSize == 3)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)))
+    }
+  }
+
+  implicit def tuple4Getter[T1, T2, T3, T4](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4]): Getter[(T1, T2, T3, T4)] = new Getter[(T1, T2, T3, T4)] {
+    def get(data: Data): (T1, T2, T3, T4) = {
+      require(data.clusterSize == 4)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)))
+    }
+  }
+
+  implicit def tuple5Getter[T1, T2, T3, T4, T5](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4], g5: Getter[T5]): Getter[(T1, T2, T3, T4, T5)] = new Getter[(T1, T2, T3, T4, T5)] {
+    def get(data: Data): (T1, T2, T3, T4, T5) = {
+      require(data.clusterSize == 5)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)), g5.get(data(4)))
+    }
+  }
+
+  implicit def tuple6Getter[T1, T2, T3, T4, T5, T6](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4], g5: Getter[T5], g6: Getter[T6]): Getter[(T1, T2, T3, T4, T5, T6)] = new Getter[(T1, T2, T3, T4, T5, T6)] {
+    def get(data: Data): (T1, T2, T3, T4, T5, T6) = {
+      require(data.clusterSize == 6)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)), g5.get(data(4)), g6.get(data(5)))
+    }
+  }
+
+  implicit def tuple7Getter[T1, T2, T3, T4, T5, T6, T7](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4], g5: Getter[T5], g6: Getter[T6], g7: Getter[T7]): Getter[(T1, T2, T3, T4, T5, T6, T7)] = new Getter[(T1, T2, T3, T4, T5, T6, T7)] {
+    def get(data: Data): (T1, T2, T3, T4, T5, T6, T7) = {
+      require(data.clusterSize == 7)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)), g5.get(data(4)), g6.get(data(5)), g7.get(data(6)))
+    }
+  }
+
+  implicit def tuple8Getter[T1, T2, T3, T4, T5, T6, T7, T8](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4], g5: Getter[T5], g6: Getter[T6], g7: Getter[T7], g8: Getter[T8]): Getter[(T1, T2, T3, T4, T5, T6, T7, T8)] = new Getter[(T1, T2, T3, T4, T5, T6, T7, T8)] {
+    def get(data: Data): (T1, T2, T3, T4, T5, T6, T7, T8) = {
+      require(data.clusterSize == 8)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)), g5.get(data(4)), g6.get(data(5)), g7.get(data(6)), g8.get(data(7)))
+    }
+  }
+
+  implicit def tuple9Getter[T1, T2, T3, T4, T5, T6, T7, T8, T9](implicit g1: Getter[T1], g2: Getter[T2], g3: Getter[T3], g4: Getter[T4], g5: Getter[T5], g6: Getter[T6], g7: Getter[T7], g8: Getter[T8], g9: Getter[T9]): Getter[(T1, T2, T3, T4, T5, T6, T7, T8, T9)] = new Getter[(T1, T2, T3, T4, T5, T6, T7, T8, T9)] {
+    def get(data: Data): (T1, T2, T3, T4, T5, T6, T7, T8, T9) = {
+      require(data.clusterSize == 9)
+      (g1.get(data(0)), g2.get(data(1)), g3.get(data(2)), g4.get(data(3)), g5.get(data(4)), g6.get(data(5)), g7.get(data(6)), g8.get(data(7)), g9.get(data(8)))
+    }
+  }
 }

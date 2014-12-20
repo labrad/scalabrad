@@ -55,19 +55,19 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
 trait ManagerServer extends Requester {
   def servers(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
     call("Servers").map {
-      _.get[Seq[Data]].map { case Cluster(UInt(id), Str(name)) => (id, name) }
+      _.get[Seq[(Long, String)]]
     }
 
   def settings(server: String)(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
     call("Settings", Str(server)).map {
-      _.get[Seq[Data]].map { case Cluster(UInt(id), Str(name)) => (id, name) }
+      _.get[Seq[(Long, String)]]
     }
 
   def lookupServer(name: String)(implicit ec: ExecutionContext): Future[Long] =
-    call("Lookup", Str(name)).map { case UInt(id) => id }
+    call("Lookup", Str(name)).map { _.get[Long] }
 
   def dataToString(data: Data)(implicit ec: ExecutionContext): Future[String] =
-    call("Data To String", data).map { case Str(s) => s }
+    call("Data To String", data).map { _.get[String] }
 
   def stringToData(s: String)(implicit ec: ExecutionContext): Future[Data] =
     call("String To Data", Str(s))
@@ -87,7 +87,7 @@ class ManagerServerPacket(server: ServerProxy, ctx: Context)
 
 trait RegistryServer extends Requester {
   def dir()(implicit ec: ExecutionContext): Future[(Seq[String], Seq[String])] =
-    call("dir").map { case Cluster(dirs, keys) => (dirs.get[Seq[String]], keys.get[Seq[String]]) }
+    call("dir").map { _.get[(Seq[String], Seq[String])] }
 
   def cd(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Str(dir)).map { _.get[Seq[String]] }
   def cd(dir: Seq[String])(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_)))).map { _.get[Seq[String]] }
