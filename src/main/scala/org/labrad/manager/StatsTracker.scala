@@ -31,20 +31,30 @@ class StatsTrackerImpl extends StatsTracker {
   }
 
   private val statsMap = mutable.Map.empty[Long, ConnStatsMutable]
-  private def update(id: Long, f: ConnStatsMutable => Unit) { statsMap.get(id).map(f) }
+  private def update(id: Long, f: ConnStatsMutable => Unit): Unit = synchronized { statsMap.get(id).map(f) }
 
-  def connectClient(id: Long, name: String): Unit = { statsMap(id) = new ConnStatsMutable(id, name, isServer = false) }
-  def connectServer(id: Long, name: String): Unit = { statsMap(id) = new ConnStatsMutable(id, name, isServer = true) }
-  def disconnect(id: Long): Unit = { statsMap -= id }
+  def connectClient(id: Long, name: String): Unit = synchronized { statsMap(id) = new ConnStatsMutable(id, name, isServer = false) }
+  def connectServer(id: Long, name: String): Unit = synchronized { statsMap(id) = new ConnStatsMutable(id, name, isServer = true) }
+  def disconnect(id: Long): Unit = synchronized { statsMap -= id }
 
-  def serverReq(id: Long) = update(id, _.sReqs += 1)
-  def serverRep(id: Long) = update(id, _.sReps += 1)
-  def clientReq(id: Long) = update(id, _.cReqs += 1)
-  def clientRep(id: Long) = update(id, _.cReps += 1)
-  def msgSend(id: Long) = update(id, _.msgSent += 1)
-  def msgRecv(id: Long) = update(id, _.msgRecd += 1)
+  def serverReq(id: Long): Unit = update(id, _.sReqs += 1)
+  def serverRep(id: Long): Unit = update(id, _.sReps += 1)
+  def clientReq(id: Long): Unit = update(id, _.cReqs += 1)
+  def clientRep(id: Long): Unit = update(id, _.cReps += 1)
+  def msgSend(id: Long): Unit = update(id, _.msgSent += 1)
+  def msgRecv(id: Long): Unit = update(id, _.msgRecd += 1)
 
-  def stats = statsMap.values.map(_.immutable).toSeq.sortBy(_.id)
+  def stats = synchronized { statsMap.values.map(_.immutable) }.toSeq.sortBy(_.id)
 }
 
-case class ConnectionStats(id: Long, name: String, isServer: Boolean, sReqs: Long, sReps: Long, cReqs: Long, cReps: Long, msgSent: Long, msgRecd: Long)
+case class ConnectionStats(
+  id: Long,
+  name: String,
+  isServer: Boolean,
+  sReqs: Long,
+  sReps: Long,
+  cReqs: Long,
+  cReps: Long,
+  msgSent: Long,
+  msgRecd: Long
+)

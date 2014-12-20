@@ -1,6 +1,5 @@
 package org.labrad.registry
 
-import akka.util.Timeout
 import java.io.{ByteArrayOutputStream, File, FileInputStream, FileOutputStream}
 import java.nio.ByteOrder.BIG_ENDIAN
 import org.labrad.{Reflect, RequestContext, Server, ServerInfo}
@@ -9,10 +8,12 @@ import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.{Hub, ServerActor, StatsTracker}
 import org.labrad.types._
-import org.labrad.util.Logging
+import org.labrad.util.{AsyncSemaphore, Logging}
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 object Registry {
   val EXT = ".txt"
@@ -21,21 +22,26 @@ object Registry {
 class Registry(id: Long, name: String, rootDir: File, hub: Hub, tracker: StatsTracker)
 extends ServerActor with Logging {
 
+  // enforce doing one thing at a time using an async semaphore
+  private val semaphore = new AsyncSemaphore(1)
+
   // create the root directory if it does not already exist
   if (!rootDir.exists) rootDir.mkdir
 
   private var contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
 
-  private val doc = "the Registry"
+  private val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
   private val (settings, bind) = Reflect.makeHandler[RegistryContext]
 
   hub.setServerInfo(ServerInfo(id, name, doc, settings))
 
-  def expireContext(ctx: Context)(implicit timeout: Timeout): Future[Long] =
-    Future.successful(expire(if (contexts.contains(ctx)) Seq(ctx) else Seq()))
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = semaphore.map {
+    expire(if (contexts.contains(ctx)) Seq(ctx) else Seq())
+  }
 
-  def expireAll(high: Long)(implicit timeout: Timeout): Future[Long] =
-    Future.successful(expire(contexts.keys.filter(_.high == high).toSeq))
+  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = semaphore.map {
+    expire(contexts.keys.filter(_.high == high).toSeq)
+  }
 
   private def expire(ctxs: Seq[Context]): Long = ctxs match {
     case Seq() => 0L
@@ -51,7 +57,8 @@ extends ServerActor with Logging {
     tracker.msgRecv(id)
   }
 
-  def request(packet: Packet)(implicit timeout: Timeout): Future[Packet] = {
+  def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = semaphore.map {
+    // TODO: handle timeout
     tracker.serverReq(id)
     val response = Server.handle(packet) { case req @ RequestContext(source, ctx, id, data) =>
       val (_, handler) = contexts.getOrElseUpdate(ctx, {
@@ -62,7 +69,7 @@ extends ServerActor with Logging {
       handler(req)
     }
     tracker.serverRep(id)
-    Future.successful(response)
+    response
   }
 
   // used by contexts

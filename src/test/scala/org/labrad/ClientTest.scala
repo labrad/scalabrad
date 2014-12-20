@@ -13,40 +13,17 @@ import scala.concurrent.duration._
 
 class ClientTests extends FunSuite /*with Logging*/ {
 
-  def withManager[T](f: (String, Int, String) => T): T = {
-    val host = "localhost"
-    val port = scala.util.Random.nextInt(50000) + 10000 //Util.findAvailablePort()
-    val remotePort = scala.util.Random.nextInt(50000) + 10000 //Util.findAvailablePort()
-    val password = "testPassword12345!@#$%"
-
-    val registryRoot = File.createTempFile("labrad-registry", "")
-    registryRoot.delete()
-    registryRoot.mkdir()
-
-    val manager = new CentralNode(port, password, registryRoot, remotePort)
-    Thread.sleep(5000)
-    try {
-      f(host, port, password)
-    } finally {
-      manager.stop()
-    }
-  }
-
   def testWithClient(name: String)(func: Client => Unit) = test(name) {
-    withManager { (host, port, password) =>
-      val c = new Client(host = host, port = port, password = password)
-      c.connect
-      try {
+    TestUtils.withManager { (host, port, password) =>
+      TestUtils.withClient(host = host, port = port, password = password) { c =>
         func(c)
-      } finally {
-        c.close
       }
     }
   }
 
   testWithClient("retrieve list of servers from manager") { c =>
     val data = Await.result(c.send("Manager", "Servers" -> Data.NONE), 10.seconds)(0)
-    val servers = data.get[Seq[Data]] map { case Cluster(UInt(id), Str(name)) => (id, name) }
+    val servers = data.get[Seq[(Long, String)]]
     assert(servers.contains((1, "Manager")))
     assert(servers.contains((2, "Registry")))
   }

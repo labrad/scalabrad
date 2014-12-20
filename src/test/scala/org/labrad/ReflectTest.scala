@@ -1,6 +1,5 @@
 package org.labrad
 
-import akka.util.Timeout
 import java.util.Date
 import org.labrad.annotations.{Accept, Return, Setting}
 import org.labrad.data._
@@ -259,8 +258,8 @@ class ReflectTests extends FunSuite with Logging {
   }
 
   test("method mirror on ManagerImpl") {
-    import akka.actor.ActorRef
     import scala.concurrent.Future
+    import scala.concurrent.duration._
 
     val hub = new Hub {
       def allocateClientId(name: String): Long = 0
@@ -268,18 +267,16 @@ class ReflectTests extends FunSuite with Logging {
 
       def connectClient(id: Long, name: String, handler: ClientActor): Boolean = false
       def connectServer(id: Long, name: String, handler: ServerActor): Boolean = false
-      def connectClientRem(id: Long, name: String, handler: ActorRef): Boolean = false
-      def connectServerRem(id: Long, name: String, handler: ActorRef): Boolean = false
 
       def disconnect(id: Long): Unit = {}
       def close(id: Long): Unit = {}
 
       def message(id: Long, packet: Packet): Unit = {}
-      def request(id: Long, packet: Packet)(implicit timeout: Timeout): Future[Packet] = null
+      def request(id: Long, packet: Packet)(implicit timeout: Duration): Future[Packet] = null
 
-      def expireContext(ctx: Context)(implicit timeout: Timeout): Future[Long] = null
-      def expireContext(id: Long, ctx: Context)(implicit timeout: Timeout): Future[Long] = null
-      def expireAll(id: Long, high: Long)(implicit timeout: Timeout): Future[Long] = null
+      def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = null
+      def expireContext(id: Long, ctx: Context)(implicit timeout: Duration): Future[Long] = null
+      def expireAll(id: Long, high: Long)(implicit timeout: Duration): Future[Long] = null
 
       def setServerInfo(info: ServerInfo): Unit = {}
       def serversInfo: Seq[ServerInfo] = Seq(

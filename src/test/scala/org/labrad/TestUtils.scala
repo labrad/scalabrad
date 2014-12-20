@@ -19,14 +19,13 @@ object TestUtils extends {
   def withManager[T](f: (String, Int, String) => T): T = {
     val host = "localhost"
     val port = 10000 + Random.nextInt(50000) //Util.findAvailablePort()
-    val remotePort = 10000 + Random.nextInt(50000) //Util.findAvailablePort()
     val password = "testPassword12345!@#$%"
 
     val registryRoot = File.createTempFile("labrad-registry", "")
     registryRoot.delete()
     registryRoot.mkdir()
 
-    val manager = new CentralNode(port, password, registryRoot, remotePort)
+    val manager = new CentralNode(port, password, registryRoot)
     Thread.sleep(5000)
     try {
       f(host, port, password)
@@ -37,22 +36,22 @@ object TestUtils extends {
 
   def withClient(host: String, port: Int, password: String)(func: Client => Unit) = {
     val c = new Client(host = host, port = port, password = password)
-    c.connect
+    c.connect()
     try {
       func(c)
     } finally {
-      try c.close catch { case _: Throwable => }
+      try c.close() catch { case _: Throwable => }
     }
   }
 
   def withServer[T](host: String, port: Int, password: String)(body: => T) = {
     val s = ServerConnection(TestSrv, host, port, password)
-    s.connect
-    s.serve
+    s.connect()
+    s.serve()
     try {
       body
     } finally {
-      try s.triggerShutdown catch { case _: Throwable => }
+      try s.triggerShutdown() catch { case _: Throwable => }
     }
   }
 }

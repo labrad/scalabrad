@@ -1,6 +1,5 @@
 package org.labrad.manager
 
-import akka.util.Timeout
 import org.jboss.netty.channel._
 import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo }
 import org.labrad.annotations._
@@ -22,10 +21,10 @@ trait ClientActor {
 
 trait ServerActor extends ClientActor {
   def message(packet: Packet): Unit
-  def request(packet: Packet)(implicit timeout: Timeout): Future[Packet]
+  def request(packet: Packet)(implicit timeout: Duration): Future[Packet]
 
-  def expireContext(ctx: Context)(implicit timeout: Timeout): Future[Long]
-  def expireAll(high: Long)(implicit timeout: Timeout): Future[Long]
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long]
+  def expireAll(high: Long)(implicit timeout: Duration): Future[Long]
 
   def close(): Unit
 }
@@ -47,7 +46,7 @@ extends SimpleChannelHandler with ClientActor with ManagerSupport with Logging {
   }
 
   protected def handleRequest(packet: Packet): Unit = {
-    implicit val timeout = Timeout(10.minutes)
+    implicit val timeout = 10.minutes
     tracker.clientReq(id)
     (packet match {
       case Packet(_, 1, _, _) => handleManagerRequest(packet)
@@ -110,7 +109,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   private var contexts = Set.empty[Context]
   private var promises = Map.empty[Int, Promise[Packet]]
 
-  override def request(packet: Packet)(implicit timeout: Timeout): Future[Packet] = synchronized {
+  override def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = synchronized {
     tracker.serverReq(id)
     try {
       val converted = packet.records map { case Record(id, data) =>
@@ -189,7 +188,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     contextExpirationInfo = None
   }
 
-  def expireContext(ctx: Context)(implicit timeout: Timeout): Future[Long] = synchronized {
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = synchronized {
     val result = contextExpirationInfo match {
       case Some((settingId, _)) =>
         if (contexts contains ctx) {
@@ -205,7 +204,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     Future.successful(result)
   }
 
-  def expireAll(high: Long)(implicit timeout: Timeout): Future[Long] = synchronized {
+  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = synchronized {
     val result = contextExpirationInfo match {
       case Some((settingId, expireAll)) =>
         val expired = contexts.filter(_.high == high)
@@ -257,15 +256,15 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   // metadata lookup and help
 
-  @Setting(id=1, name="Servers", doc="")
+  @Setting(id=1, name="Servers", doc="Get a list of ids and names for all currently-connected servers.")
   def servers(r: RequestContext): Seq[(Long, String)] =
     (Manager.ID, Manager.NAME) +: hub.serversInfo.map(s => (s.id, s.name)).sorted
 
-  @Setting(id=2, name="Settings", doc="")
+  @Setting(id=2, name="Settings", doc="Get a list of ids and names of settings for the given server, specified by name or id.")
   def settings(r: RequestContext, serverId: Either[Long, String]): Seq[(Long, String)] =
     serverInfo(serverId).settings.map(s => (s.id, s.name)).sorted
 
-  @Setting(id=3, name="Lookup", doc="")
+  @Setting(id=3, name="Lookup", doc="Lookup server or setting ids by name. If a single argument is given, returns the server id.")
   def lookup(r: RequestContext, name: String): Long = serverInfo(Right(name)).id
   def lookup(r: RequestContext,
              serverId: Either[Long, String],
@@ -280,7 +279,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     (server.id, settingIds)
   }
 
-  @Setting(id=10, name="Help", doc="")
+  @Setting(id=10, name="Help", doc="Get help documentation for the given server or setting.")
   def help(r: RequestContext, serverId: Either[Long, String]): (String, String) = {
     val server = serverInfo(serverId)
     (server.doc, "") // TODO: get rid of notes field
@@ -301,30 +300,30 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   // contexts and messages
 
-  @Setting(id=50, name="Expire Context", doc="Expire the context in which this request was sent")
+  @Setting(id=50, name="Expire Context", doc="Expire the context in which this request was sent.")
   def expireContext(r: RequestContext)/*(server: Either[Long, String])*/: Unit =
     messager.broadcast("Expire Context", r.context.toData, sourceId=id)
     //Await.result(hub.expireContext(ctx), 1.minute)
 
-  @Setting(id=51, name="Expire All", doc="Expire all contexts matching the high context of this request")
+  @Setting(id=51, name="Expire All", doc="Expire all contexts matching the high context of this request.")
   def expireAll(r: RequestContext)/*(server: Either[Long, String])*/: Unit =
     messager.broadcast("Expire All", UInt(r.context.high), sourceId=id)
     //Await.result(hub.expireContext(ctx), 1.minute)
 
-  @Setting(id=60, name="Subscribe to Named Message", doc="")
+  @Setting(id=60, name="Subscribe to Named Message", doc="Register to receive messages identified by a particular name.")
   def subscribeToNamedMessage(r: RequestContext, name: String, msgId: Long, active: Boolean): Unit =
     if (active)
       messager.register(name, id, r.context, msgId)
     else
       messager.unregister(name, id, r.context, msgId)
 
-  @Setting(id=61, name="Send Named Message", doc="")
+  @Setting(id=61, name="Send Named Message", doc="Send a message with the given name, to be forward to all registered subscribers.")
   def sendNamedMessage(r: RequestContext, name: String, message: Data): Unit =
     messager.broadcast(name, message, id)
 
   // server settings (should stay local)
 
-  @Setting(id=100, name="S: Register Setting", doc="") // TODO: change types to *(s, s) instead of *s, *s
+  @Setting(id=100, name="S: Register Setting", doc="(Servers only) Register an available setting for this server.") // TODO: change types to *(s, s) instead of *s, *s
   def addSetting(r: RequestContext, id: Long, name: String, doc: String,
                  accepted: Seq[String], returned: Seq[String], notes: String): Unit = {
     def makePattern(ps: Seq[String]) = ps match {
@@ -336,17 +335,17 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     stub.addSetting(id, name, docStr, makePattern(accepted), makePattern(returned))
   }
 
-  @Setting(id=101, name="S: Unregister Setting", doc="")
+  @Setting(id=101, name="S: Unregister Setting", doc="(Servers only) Unregister an available setting for this server.")
   def delSetting(r: RequestContext, setting: Either[Long, String]): Unit =
     setting.fold(stub.delSetting, stub.delSetting)
 
-  @Setting(id=110, name="S: Notify on Context Expiration", doc="")
+  @Setting(id=110, name="S: Notify on Context Expiration", doc="(Servers only) Register to be notified when contexts which have been used to send requests to this server are expired.")
   def notifyOnContextExpiration(r: RequestContext, data: Option[(Long, Boolean)]): Unit = data match {
     case Some((msgId, expireAll)) => stub.startNotifications(r, msgId, expireAll)
     case None => stub.stopNotifications(r)
   }
 
-  @Setting(id=120, name="S: Start Serving", doc="")
+  @Setting(id=120, name="S: Start Serving", doc="(Servers only) Signal that the server is ready to receive requests. Before this point, the server will not appear in the list of active servers nor any metadata lookups.")
   def startServing(r: RequestContext): Unit = {
     stub.startServing
     messager.broadcast("Server Connect", Cluster(UInt(id), Str(name)), 1)
@@ -354,19 +353,19 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   // utility methods (should stay local)
 
-  @Setting(id=200, name="Data To String", doc="Convert data into its string representation")
+  @Setting(id=200, name="Data To String", doc="Convert data into its human-readable string representation.")
   def dataToString(r: RequestContext, data: Data): String = data.toString
 
-  @Setting(id=201, name="String To Data", doc="Parse a string into labrad data")
+  @Setting(id=201, name="String To Data", doc="Parse a string into labrad data.")
   def stringToData(r: RequestContext, str: String): Data = Data.parse(str)
 
-  @Setting(id=1010, name="Convert", doc="Convert the given data to a new type")
+  @Setting(id=1010, name="Convert", doc="Convert the given data to a new type.")
   def convert(r: RequestContext, data: Data, pattern: String): Data = Pattern(pattern)(data.t) match {
     case Some(t) => data.convertTo(t)
     case None => sys.error(s"cannot convert ${data.t} to $pattern")
   }
 
-  @Setting(id=10000, name="Connection Info", doc="Get information about connected servers and clients")
+  @Setting(id=10000, name="Connection Info", doc="Get information about connected servers and clients.")
   def connectionInfo(r: RequestContext): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] =
     tracker.stats.map { s =>
       val sReqs = s.sReqs - (if (s.id == Manager.ID) 1 else 0) // don't count this request for Manager
@@ -374,13 +373,13 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
       (s.id, s.name, s.isServer, sReqs, s.sReps, cReqs, s.cReps, s.msgSent, s.msgRecd)
     }
 
-  @Setting(id=14321, name="Close Connection", doc="Close a connection with the specified id")
+  @Setting(id=14321, name="Close Connection", doc="Close a connection with the specified id.")
   def closeConnection(r: RequestContext, id: Long): Unit =
     hub.close(id)
 
   // TODO: other control stuff here, e.g. shutting down connections and even the entire service?
 
-  @Setting(id=13579, name="Echo", doc="Echo back the sent data")
+  @Setting(id=13579, name="Echo", doc="Echo back the supplied data.")
   def echo(r: RequestContext, data: Data): Data = data
 }
 

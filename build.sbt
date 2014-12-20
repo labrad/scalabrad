@@ -32,6 +32,7 @@ libraryDependencies ++= Seq(
 )
 
 libraryDependencies ++= Seq(
+  "io.netty" % "netty" % "3.9.5.Final" withSources(),
   "joda-time" % "joda-time" % "2.1" withSources(),
   "org.joda" % "joda-convert" % "1.2" withSources(),
   "org.slf4j" % "slf4j-api" % "1.7.2"
@@ -42,19 +43,6 @@ publishArtifact in (Compile, packageDoc) := false
 
 // logging
 libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.0.6" withSources()
-
-
-// akka
-resolvers ++= Seq(
-  "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
-  "Typesafe Snapshots" at "http://repo.typesafe.com/typesafe/snapshots/"
-)
-
-libraryDependencies ++= Seq(
-  "com.typesafe.akka" %% "akka-actor" % "2.3.4" withSources(),
-  "com.typesafe.akka" %% "akka-remote" % "2.3.4" withSources(),
-  "com.typesafe.akka" %% "akka-slf4j" % "2.3.4" withSources()
-)
 
 
 // testing
