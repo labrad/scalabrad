@@ -17,8 +17,8 @@ trait Hub {
   def allocateClientId(name: String): Long
   def allocateServerId(name: String): Long
 
-  def connectClient(id: Long, name: String, handler: ClientActor): Boolean
-  def connectServer(id: Long, name: String, handler: ServerActor): Boolean
+  def connectClient(id: Long, name: String, handler: ClientActor): Unit
+  def connectServer(id: Long, name: String, handler: ServerActor): Unit
 
   def close(id: Long): Unit
   def disconnect(id: Long): Unit
@@ -84,55 +84,64 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     id
   }
 
-  def connectServer(id: Long, name: String, handler: ServerActor): Boolean = synchronized {
-    require(allocatedServerIds.contains(id), s"cannot connect server with unallocated id: $id")
-    require(allocatedServerIds(id) == name, s"id $id is not allocated to server $name")
-    require(!handlerMap.contains(id), s"server already connected: $name ($id)")
-    handlerMap(id) = handler
-    tracker.connectServer(id, name)
-    nServersConnected += 1
-    messager.broadcast("Connect", UInt(id), 1)
-    true
-  }
-
-  def connectClient(id: Long, name: String, handler: ClientActor): Boolean = synchronized {
-    require(allocatedClientIds.contains(id), s"cannot connect client with unallocated id: $id")
-    require(allocatedClientIds(id) == name, s"id $id is not allocated to client $name")
-    require(!handlerMap.contains(id), s"client already connected: $name ($id)")
-    handlerMap(id) = handler
-    tracker.connectClient(id, name)
-    nClientsConnected += 1
-    messager.broadcast("Connect", UInt(id), 1)
-    true
-  }
-
-  def close(id: Long): Unit = synchronized {
-    handlerMap.get(id).foreach(_.close)
-  }
-
-  def disconnect(id: Long): Unit = synchronized {
-    val (handler, isServer) = handlerMap.get(id) match {
-      case Some(handler: ServerActor) => (handler, true)
-      case Some(handler)              => (handler, false)
-      case None =>
-        log.warn(s"disconnect called on unknown id: $id")
-        return
+  def connectServer(id: Long, name: String, handler: ServerActor): Unit = {
+    synchronized {
+      require(allocatedServerIds.contains(id), s"cannot connect server with unallocated id: $id")
+      require(allocatedServerIds(id) == name, s"id $id is not allocated to server $name")
+      require(!handlerMap.contains(id), s"server already connected: $name ($id)")
+      handlerMap(id) = handler
+      tracker.connectServer(id, name)
+      nServersConnected += 1
     }
+    messager.broadcast("Connect", UInt(id), 1)
+  }
 
-    log.debug(s"disconnecting (id=$id): $handler")
+  def connectClient(id: Long, name: String, handler: ClientActor): Unit = {
+    synchronized {
+      require(allocatedClientIds.contains(id), s"cannot connect client with unallocated id: $id")
+      require(allocatedClientIds(id) == name, s"id $id is not allocated to client $name")
+      require(!handlerMap.contains(id), s"client already connected: $name ($id)")
+      handlerMap(id) = handler
+      tracker.connectClient(id, name)
+      nClientsConnected += 1
+    }
+    messager.broadcast("Connect", UInt(id), 1)
+  }
 
-    // remove from the handler map
-    handlerMap -= id
-    tracker.disconnect(id)
+  def close(id: Long): Unit = {
+    val handlerOpt = synchronized {
+      handlerMap.get(id)
+    }
+    handlerOpt.foreach(_.close())
+  }
 
-    // decrement counters and remove cached metadata
-    if (isServer) {
-      nServersConnected -= 1
-      serverInfoCache -= id
-    } else {
-      nClientsConnected -= 1
-      nClientsAllocated -= 1
-      allocatedClientIds -= id
+  def disconnect(id: Long): Unit = {
+    val (serverNameOpt) = synchronized {
+      val (handler, isServer) = handlerMap.get(id) match {
+        case Some(handler: ServerActor) => (handler, true)
+        case Some(handler)              => (handler, false)
+        case None =>
+          log.warn(s"disconnect called on unknown id: $id")
+          return
+      }
+
+      log.debug(s"disconnecting (id=$id): $handler")
+
+      // remove from the handler map
+      handlerMap -= id
+      tracker.disconnect(id)
+
+      // decrement counters and remove cached metadata
+      if (isServer) {
+        nServersConnected -= 1
+        serverInfoCache -= id
+      } else {
+        nClientsConnected -= 1
+        nClientsAllocated -= 1
+        allocatedClientIds -= id
+      }
+
+      if (isServer) allocatedServerIds.get(id) else None
     }
 
     // send expiration messages to all remaining servers (asynchronously)
@@ -142,22 +151,27 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     }
 
     // send server disconnect message
-    if (isServer) {
-      val name = allocatedServerIds(id)
+    for (name <- serverNameOpt) {
       messager.broadcast("Server Disconnect", Cluster(UInt(id), Str(name)), 1)
     }
     messager.broadcast("Disconnect", UInt(id), 1)
   }
 
-  def message(id: Long, packet: Packet): Unit = synchronized {
-    handlerMap.get(id) match {
+  def message(id: Long, packet: Packet): Unit = {
+    val handlerOpt = synchronized {
+      handlerMap.get(id)
+    }
+    handlerOpt match {
       case Some(handler) => handler.message(packet)
       case None => log.warn("Message sent to non-existent target: " + id)
     }
   }
 
-  def request(id: Long, packet: Packet)(implicit timeout: Duration): Future[Packet] = synchronized {
-    handlerMap.get(id) match {
+  def request(id: Long, packet: Packet)(implicit timeout: Duration): Future[Packet] = {
+    val handlerOpt = synchronized {
+      handlerMap.get(id)
+    }
+    handlerOpt match {
       case Some(s: ServerActor) => s.request(packet)
       case Some(_) => Hub.notAServer(id)
       case None => Hub.noSuchServer(id)

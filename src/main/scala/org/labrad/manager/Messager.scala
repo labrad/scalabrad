@@ -29,13 +29,17 @@ class MessagerImpl(hub: Hub) extends Messager with Logging {
     }
   }
 
-  def broadcast(msg: String, data: Data, src: Long): Unit = synchronized {
+  def broadcast(msg: String, data: Data, src: Long): Unit = {
     log.debug(s"sending named message '$msg': $data")
-    regs.get(msg) foreach { listeners =>
-      for ((target, ctx, id) <- listeners) {
-        log.debug(s"named message recipient: target=${target}, ctx=${ctx}, id=${id}")
-        hub.message(target, Packet(0, src, ctx, Seq(Record(id, data))))
-      }
+    val listenersOpt = synchronized {
+      regs.get(msg).map(_.toSet)
+    }
+    for {
+      listeners <- listenersOpt
+      (target, ctx, id) <- listeners
+    } {
+      log.debug(s"named message recipient: target=${target}, ctx=${ctx}, id=${id}")
+      hub.message(target, Packet(0, src, ctx, Seq(Record(id, data))))
     }
   }
 

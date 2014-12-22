@@ -265,8 +265,8 @@ class ReflectTests extends FunSuite with Logging {
       def allocateClientId(name: String): Long = 0
       def allocateServerId(name: String): Long = 0
 
-      def connectClient(id: Long, name: String, handler: ClientActor): Boolean = false
-      def connectServer(id: Long, name: String, handler: ServerActor): Boolean = false
+      def connectClient(id: Long, name: String, handler: ClientActor): Unit = {}
+      def connectServer(id: Long, name: String, handler: ServerActor): Unit = {}
 
       def disconnect(id: Long): Unit = {}
       def close(id: Long): Unit = {}

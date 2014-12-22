@@ -1,6 +1,5 @@
 package org.labrad.manager
 
-import com.typesafe.config.ConfigFactory
 import java.io.File
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
