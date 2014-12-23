@@ -60,7 +60,7 @@ extends SimpleChannelHandler with ClientActor with ManagerSupport with Logging {
         tracker.clientRep(id)
         channel.write(response)
       case Failure(ex) =>
-        log.error("error", ex) // this should not happen
+        log.error("error. this should not happen!", ex)
     }
   }
 
