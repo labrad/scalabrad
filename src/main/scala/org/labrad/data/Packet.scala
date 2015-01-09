@@ -4,7 +4,6 @@ import java.io.{ByteArrayInputStream, InputStream, IOException}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.BIG_ENDIAN
 import org.labrad.types.Type
-import org.labrad.util.Logging
 
 case class Packet(id: Int, target: Long, context: Context, records: Seq[Record]) {
   def toBytes(implicit bo: ByteOrder = BIG_ENDIAN) = {
@@ -14,7 +13,7 @@ case class Packet(id: Int, target: Long, context: Context, records: Seq[Record])
   }
 }
 
-object Packet extends Logging {
+object Packet {
   def forRequest(request: Request, requestNum: Int) = request match {
     case Request(target, context, records) => Packet(requestNum, target, context, records)
   }
