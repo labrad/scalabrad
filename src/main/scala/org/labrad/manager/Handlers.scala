@@ -366,12 +366,14 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=10000, name="Connection Info", doc="Get information about connected servers and clients.")
-  def connectionInfo(r: RequestContext): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] =
-    tracker.stats.map { s =>
+  def connectionInfo(r: RequestContext): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] = {
+    val serverIds = hub.serversInfo.map(_.id).toSet
+    for (s <- tracker.stats if !s.isServer || serverIds(s.id)) yield {
       val sReqs = s.sReqs - (if (s.id == Manager.ID) 1 else 0) // don't count this request for Manager
       val cReqs = s.cReqs - (if (s.id == id) 1 else 0) // don't count this request for client
       (s.id, s.name, s.isServer, sReqs, s.sReps, cReqs, s.cReps, s.msgSent, s.msgRecd)
     }
+  }
 
   @Setting(id=14321, name="Close Connection", doc="Close a connection with the specified id.")
   def closeConnection(r: RequestContext, id: Long): Unit =
