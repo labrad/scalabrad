@@ -54,14 +54,10 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
 
 trait ManagerServer extends Requester {
   def servers(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
-    call("Servers").map {
-      _.get[Seq[(Long, String)]]
-    }
+    call("Servers").map { _.get[Seq[(Long, String)]] }
 
   def settings(server: String)(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
-    call("Settings", Str(server)).map {
-      _.get[Seq[(Long, String)]]
-    }
+    call("Settings", Str(server)).map { _.get[Seq[(Long, String)]] }
 
   def lookupServer(name: String)(implicit ec: ExecutionContext): Future[Long] =
     call("Lookup", Str(name)).map { _.get[Long] }
@@ -73,7 +69,10 @@ trait ManagerServer extends Requester {
     call("String To Data", Str(s))
 
   def subscribeToNamedMessage(name: String, msgId: Long, active: Boolean)(implicit ec: ExecutionContext): Future[Unit] =
-    call("Subscribe to Named Message", Cluster(Str(name), UInt(msgId), Bool(active))).map(_ => ())
+    callUnit("Subscribe to Named Message", Cluster(Str(name), UInt(msgId), Bool(active)))
+
+  def connectionInfo()(implicit ec: ExecutionContext): Future[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] =
+    call("Connection Info").map { _.get[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] }
 }
 
 class ManagerServerProxy(cxn: Connection, name: String = "Manager")
