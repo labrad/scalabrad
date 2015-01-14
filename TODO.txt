@@ -37,9 +37,6 @@ grammars
 Data
 - use akka ByteString? netty buffer?
 
-General
-- try to write things as interfaces, rather than concrete types.
-
 web
 - registry
   - enable monitoring of changes made by other clients (update live)

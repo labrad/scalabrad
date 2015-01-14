@@ -4,7 +4,7 @@ name := "scalabrad"
 
 version := "0.2-SNAPSHOT"
 
-scalaVersion := "2.11.2"
+scalaVersion := "2.11.4"
 
 scalacOptions ++= Seq(
   "-deprecation",
@@ -21,7 +21,17 @@ resolvers += Resolver.sonatypeRepo("snapshots")
 
 resolvers += Resolver.sonatypeRepo("releases")
 
-//addCompilerPlugin("org.scala-lang.plugins" % "macro-paradise_2.11.1" % "2.0.0-SNAPSHOT")
+licenses += ("GPL-2.0", url("http://www.gnu.org/licenses/gpl-2.0.html"))
+
+seq(bintraySettings:_*)
+
+
+// use sbt-pack to create distributable package
+packSettings
+
+packMain := Map("labrad" -> "org.labrad.manager.Manager")
+
+packGenerateWindowsBatFile := true
 
 
 libraryDependencies ++= Seq(
