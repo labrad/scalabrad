@@ -26,7 +26,6 @@ licenses += ("GPL-2.0", url("http://www.gnu.org/licenses/gpl-2.0.html"))
 // dependencies
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  "org.scala-lang" % "scala-actors" % scalaVersion.value,
   "org.scala-lang.modules" %% "scala-swing" % "1.0.1",
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1",
   "io.netty" % "netty" % "3.9.5.Final" withSources(),
