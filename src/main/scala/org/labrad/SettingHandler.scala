@@ -114,7 +114,7 @@ object SettingHandler extends Logging {
             case (p, _, _) => p.accepts(r.data.t)
           }.map {
             case (p, 1, k) => Seq(r.data) ++ Seq.fill(k)(Data.NONE)
-            case (p, n, k) => Seq.tabulate(n)(r.data(_)) ++ Seq.fill(k)(Data.NONE)
+            case (p, n, k) => r.data.clusterIterator.toSeq ++ Seq.fill(k)(Data.NONE)
           }.getOrElse {
             sys.error(s"data of type ${r.data.t} not accepted")
           }
@@ -222,7 +222,7 @@ object SettingHandler extends Logging {
         case t if t =:= typeOf[Data]    => (d: Data) => d.get[Array[Data]]
         case _ =>
           val f = unpacker(t)
-          (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i))).toArray
+          (data: Data) => data.flatIterator.toArray
       }
 
     case TypeRef(_, Sym("Seq"), Seq(t)) =>
@@ -235,7 +235,7 @@ object SettingHandler extends Logging {
         case t if t =:= typeOf[Data]    => (d: Data) => d.get[Seq[Data]]
         case _ =>
           val f = unpacker(t)
-          (data: Data) => (for (i <- 0 until data.arraySize) yield f(data(i)))
+          (data: Data) => data.flatIterator.toSeq
       }
 
     case TypeRef(_, Sym("Option"), Seq(t)) =>

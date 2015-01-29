@@ -178,13 +178,14 @@ extends Serializable with Cloneable {
       val shape = arrayShape
       val idx = Array.ofDim[Int](depth)
       val sb = new StringBuilder
+      val it = flatIterator
       def buildString(k: Int) {
         sb += '['
         for (i <- 0 until shape(k)) {
           idx(k) = i
           if (i > 0) sb += ','
           if (k == shape.length - 1)
-            sb ++= this(idx: _*).toString
+            sb ++= it.next.toString
           else
             buildString(k + 1)
         }
@@ -194,7 +195,7 @@ extends Serializable with Cloneable {
       sb.toString
 
     case TCluster(_*) =>
-      "(" + (0 until clusterSize).map(this(_)).mkString(",") + ")"
+      "(" + clusterIterator.mkString(",") + ")"
 
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
@@ -235,13 +236,13 @@ extends Serializable with Cloneable {
     else
       (src, tgt) match {
         case (TCluster(srcs @ _*), TCluster(tgts @ _*)) =>
-          val funcs = (srcs zip tgts).zipWithIndex flatMap {
-            case ((src, tgt), i) => makeConverter(src, tgt) map (f => (f, i))
+          val funcs = (srcs zip tgts) flatMap {
+            case (src, tgt) => makeConverter(src, tgt)
           }
           if (funcs.isEmpty)
             None
           else
-            Some(data => for ((f, i) <- funcs) f(data(i)))
+            Some(data => for ((f, x) <- funcs.iterator zip data.clusterIterator) f(x))
 
         case (TArr(src, _), TArr(tgt, _)) =>
           makeConverter(src, tgt) map { func =>
@@ -369,6 +370,19 @@ extends Serializable with Cloneable {
     case _ => sys.error("clusterSize is only defined for clusters")
   }
 
+  def clusterIterator: Iterator[Data] = t match {
+    case t @ TCluster(elems @ _*) =>
+      val size = clusterSize
+      var ofs = this.ofs
+      elems.iterator.map { elem =>
+        val result = new Data(elem, buf, ofs, heap)
+        ofs += elem.dataWidth
+        result
+      }
+    case _ =>
+      sys.error("can only cluster iterate over clusters")
+  }
+
   // getters
   def getBool: Boolean = { require(isBool); buf.getBool(ofs) }
   def getInt: Int = { require(isInt); buf.getInt(ofs) }
@@ -457,9 +471,10 @@ extends Serializable with Cloneable {
   def setError(code: Int, message: String, payload: Data = Data.NONE) = t match {
     case TError(payloadType) =>
       val data = cast(TCluster(TInt, TStr, payloadType))
-      data(0).setInt(code)
-      data(1).setString(message)
-      data(2).set(payload)
+      val it = data.clusterIterator
+      it.next.setInt(code)
+      it.next.setString(message)
+      it.next.set(payload)
       this
     case _ => sys.error("Data type must be error")
   }
@@ -502,8 +517,8 @@ object Data {
         }
 
       case TCluster(elems @ _*) =>
-        for (i <- 0 until elems.size) {
-          copy(src(i), dst(i))
+        for ((s, d) <- src.clusterIterator zip dst.clusterIterator) {
+          copy(s, d)
         }
 
       case TError(_) =>
@@ -582,7 +597,8 @@ object Data {
           a.arrayShape.toSeq == b.arrayShape.toSeq &&
             (a.flatIterator zip b.flatIterator).forall { case (a, b) => a == b }
         case _: TCluster =>
-          (0 until a.clusterSize).forall { i => a(i) == b(i) }
+          a.clusterSize == b.clusterSize &&
+            (a.clusterIterator zip b.clusterIterator).forall { case (a, b) => a == b }
         case _: TError =>
           a.getErrorCode == b.getErrorCode && a.getErrorMessage == b.getErrorMessage && a.getErrorPayload == b.getErrorPayload
       }
@@ -601,7 +617,8 @@ object Data {
           a.arrayShape.toSeq == b.arrayShape.toSeq &&
             (a.flatIterator zip b.flatIterator).forall { case (a, b) => a ~== b }
         case TCluster(_*) =>
-          (0 until a.clusterSize).forall { i => a(i) ~== b(i) }
+          a.clusterSize == b.clusterSize &&
+            (a.clusterIterator zip b.clusterIterator).forall { case (a, b) => a ~== b }
         case _ => a == b
       }
     }
@@ -619,12 +636,14 @@ object Data {
 object Cluster {
   def apply(elems: Data*) = {
     val data = Data(TCluster(elems.map(_.t): _*))
-    for ((elem, i) <- elems.zipWithIndex)
-      data(i).set(elem)
+    val it = data.clusterIterator
+    for (elem <- elems) {
+      it.next.set(elem)
+    }
     data
   }
   def unapplySeq(data: Data): Option[Seq[Data]] = data.t match {
-    case TCluster(_*) => Some(Seq.tabulate(data.clusterSize)(data(_)))
+    case TCluster(_*) => Some(data.clusterIterator.toSeq)
     case _ => None
   }
 }
@@ -634,8 +653,9 @@ object Arr {
     val data = Data(TArr(elemType, 1))
     val m = a.length
     data.setArrayShape(m)
+    val it = data.flatIterator
     for (i <- 0 until m) {
-      setter.set(data(i), a(i))
+      it.next.set(a(i))
     }
     data
   }
@@ -664,10 +684,11 @@ object Arr2 {
     val data = Data(TArr(elemType, 2))
     val (m, n) = (a.length, if (a.length > 0) a(0).length else 0)
     data.setArrayShape(m, n)
+    val it = data.flatIterator
     for (i <- 0 until m) {
       assert(a(i).length == a(0).length, "array must be rectangular")
       for (j <- 0 until n)
-        setter.set(data(i, j), a(i)(j))
+        it.next.set(a(i)(j))
     }
     data
   }
@@ -687,12 +708,13 @@ object Arr3 {
                      if (a.length > 0) a(0).length else 0,
                      if (a.length > 0 && a(0).length > 0) a(0)(0).length else 0)
     data.setArrayShape(m, n, p)
+    val it = data.flatIterator
     for (i <- 0 until m) {
       assert(a(i).length == a(0).length, "array must be rectangular")
       for (j <- 0 until n) {
         assert(a(i)(j).length == a(0)(0).length, "array must be rectangular")
         for (k <- 0 until p)
-          setter.set(data(i, j, k), a(i)(j)(k))
+          it.next.set(a(i)(j)(k))
       }
     }
     data

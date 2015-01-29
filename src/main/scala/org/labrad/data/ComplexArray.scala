@@ -21,8 +21,9 @@ case class ComplexArray(re: Array[Double], im: Array[Double], units: Option[Stri
   def toData: Data = {
     val iq = Data(TArr(TComplex(units), 1))
     iq.setArraySize(length)
+    val it = iq.flatIterator
     for (i <- 0 until length)
-      iq(i).setComplex(re(i), im(i))
+      it.next.setComplex(re(i), im(i))
     iq
   }
 }
@@ -38,10 +39,11 @@ object ComplexArray {
       val len = vals.arraySize
       val re = Array.ofDim[Double](len)
       val im = Array.ofDim[Double](len)
+      val it = vals.flatIterator
       for (i <- 0 until len) {
-        val c = vals(i).getComplex
-        re(i) = c.real
-        im(i) = c.imag
+        val c = it.next
+        re(i) = c.getReal
+        im(i) = c.getImag
       }
       ComplexArray(re, im)
     case t =>

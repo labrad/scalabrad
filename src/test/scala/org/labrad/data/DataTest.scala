@@ -41,10 +41,12 @@ class DataTests extends FunSuite {
   testBothEndian("string list") { implicit bo: ByteOrder =>
     val d = Data("*s")
     d.setArraySize(20)
+    val it1 = d.flatIterator
     for (count <- 0 until 20)
-      d(count).setString("This is string " + count)
+      it1.next.setString("This is string " + count)
+    val it2 = d.flatIterator
     for (count <- 0 until 20)
-      assert(d(count).getString == "This is string " + count)
+      assert(it2.next.getString == "This is string " + count)
   }
 
   testBothEndian("simple cluster") { implicit bo: ByteOrder =>
@@ -57,19 +59,21 @@ class DataTests extends FunSuite {
     val re = rand.nextGaussian
     val im = rand.nextGaussian
 
-    d1(0).setBool(b)
-    d1(1).setInt(i)
-    d1(2).setUInt(l)
-    d1(3).setString(s)
-    d1(4).setValue(d)
-    d1(5).setComplex(re, im)
+    val it1 = d1.clusterIterator
+    it1.next.setBool(b)
+    it1.next.setInt(i)
+    it1.next.setUInt(l)
+    it1.next.setString(s)
+    it1.next.setValue(d)
+    it1.next.setComplex(re, im)
 
-    assert(b == d1(0).getBool)
-    assert(i == d1(1).getInt)
-    assert(l == d1(2).getUInt)
-    assert(s == d1(3).getString)
-    assert(d == d1(4).getValue)
-    val c = d1(5).getComplex
+    val elems = d1.clusterIterator.toSeq
+    assert(b == elems(0).getBool)
+    assert(i == elems(1).getInt)
+    assert(l == elems(2).getUInt)
+    assert(s == elems(3).getString)
+    assert(d == elems(4).getValue)
+    val c = elems(5).getComplex
     assert(re == c.real)
     assert(im == c.imag)
   }
@@ -77,6 +81,7 @@ class DataTests extends FunSuite {
   testBothEndian("list of cluster") { implicit bo: ByteOrder =>
     val d1 = Data("*(biwsv[m]c[m/s])")
     d1.setArraySize(20)
+    val arrIt = d1.flatIterator
     for (count <- 0 until 20) {
       val b = rand.nextBoolean
       val i = rand.nextInt
@@ -86,19 +91,22 @@ class DataTests extends FunSuite {
       val re = rand.nextGaussian
       val im = rand.nextGaussian
 
-      d1(count, 0).setBool(b)
-      d1(count, 1).setInt(i)
-      d1(count, 2).setUInt(l)
-      d1(count, 3).setString(s)
-      d1(count, 4).setValue(d)
-      d1(count, 5).setComplex(re, im)
+      val cluster = arrIt.next
+      val it = cluster.clusterIterator
+      it.next.setBool(b)
+      it.next.setInt(i)
+      it.next.setUInt(l)
+      it.next.setString(s)
+      it.next.setValue(d)
+      it.next.setComplex(re, im)
 
-      assert(b == d1(count, 0).getBool)
-      assert(i == d1(count, 1).getInt)
-      assert(l == d1(count, 2).getUInt)
-      assert(s == d1(count, 3).getString)
-      assert(d == d1(count, 4).getValue)
-      val c = d1(count, 5).getComplex
+      val elems = cluster.clusterIterator.toSeq
+      assert(b == elems(0).getBool)
+      assert(i == elems(1).getInt)
+      assert(l == elems(2).getUInt)
+      assert(s == elems(3).getString)
+      assert(d == elems(4).getValue)
+      val c = elems(5).getComplex
       assert(re == c.real)
       assert(im == c.imag)
     }
