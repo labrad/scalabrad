@@ -1,7 +1,9 @@
 package org.labrad.registry
 
 import java.io.{ByteArrayOutputStream, File, FileInputStream, FileOutputStream}
+import java.net.{URLDecoder, URLEncoder}
 import java.nio.ByteOrder.BIG_ENDIAN
+import java.nio.charset.StandardCharsets.UTF_8
 import org.labrad.{Reflect, RequestContext, Server, ServerInfo}
 import org.labrad.annotations._
 import org.labrad.data._
@@ -90,8 +92,8 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
            doc="Returns lists of the subdirs and keys in the current directory")
   def listDir(r: RequestContext): (Seq[String], Seq[String]) = {
     val files = curDir.listFiles
-    val dirs = for (f <- files if f.isDirectory; n = f.getName) yield n
-    val keys = for (f <- files if f.isFile; n = f.getName if n.endsWith(EXT)) yield n.dropRight(EXT.size)
+    val dirs = for (f <- files if f.isDirectory; n = f.getName) yield decode(n)
+    val keys = for (f <- files if f.isFile; n = f.getName if n.endsWith(EXT)) yield decode(n.dropRight(EXT.size))
     (dirs, keys)
   }
 
@@ -124,7 +126,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
       case ""   => if (i == 0) path = rootDir
       case "."  =>
       case ".." => if (path != rootDir) path = path.getParentFile
-      case dir  => path = new File(path, dir)
+      case dir  => path = new File(path, encode(dir))
     }
     if (!path.exists) {
       if (create)
@@ -140,7 +142,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
            name="mkdir",
            doc="Create a new subdirectory in the current directory with the given name")
   def mkDir(r: RequestContext, name: String): Seq[String] = {
-    val path = new File(curDir, name)
+    val path = new File(curDir, encode(name))
     if (!path.exists) path.mkdir()
     parent.foreachContext(_.notify(curDir, name, isDir=true, addOrChange=true))
     regPath(path)
@@ -150,7 +152,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
            name="rmdir",
            doc="Delete the given subdirectory from the current directory")
   def rmDir(r: RequestContext, name: String): Unit = {
-    val path = new File(curDir, name)
+    val path = new File(curDir, encode(name))
     if (!path.exists) sys.error(s"directory does not exist: $name")
     if (!path.isDirectory) sys.error(s"found file instead of directory: $name")
     path.delete()
@@ -272,7 +274,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
       if (path == rootDir)
         "" +: rest
       else
-        fun(path.getParentFile, path.getName +: rest)
+        fun(path.getParentFile, decode(path.getName) +: rest)
     fun(path, Nil)
   }
 
@@ -303,5 +305,13 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
       os.close
   }
 
-  private def keyFile(key: String) = new File(curDir, key + EXT)
+  private def keyFile(key: String) = new File(curDir, encode(key) + EXT)
+
+  private def encode(segment: String): String = {
+    URLEncoder.encode(segment, UTF_8.name)
+  }
+
+  private def decode(segment: String): String = {
+    URLDecoder.decode(segment, UTF_8.name)
+  }
 }

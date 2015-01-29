@@ -24,11 +24,37 @@ class RegistryTest extends FunSuite with AsyncAssertions {
             await(c.send("Registry", "set" -> Cluster(Str("a"), data)))
             val resp = await(c.send("Registry", "get" -> Str("a")))(0)
             await(c.send("Registry", "del" -> Str("a")))
-            assert(resp ~== data, s"${resp} (type=${resp.t}) is not equal to ${data} (type=${data.t})")
+            assert(resp == data, s"${resp} (type=${resp.t}) is not equal to ${data} (type=${data.t})")
           }
         } finally {
           await(c.send("Registry", "cd" -> Str(".."), "rmdir" -> Str("test")))
         }
+      }
+    }
+  }
+
+  test("registry can deal with unicode and strange characters in directory names") {
+    withManager { (host, port, password) =>
+      withClient(host, port, password) { c =>
+        val dir = "<\u03C0|\u03C1>??+*"
+        await(c.send("Registry", "mkdir" -> Str(dir)))
+        val (dirs, _) = await(c.send("Registry", "dir" -> Data.NONE))(0).get[(Seq[String], Seq[String])]
+        assert(dirs contains dir)
+        await(c.send("Registry", "cd" -> Str(dir)))
+      }
+    }
+  }
+
+  test("registry can deal with unicode and strange characters in key names") {
+    withManager { (host, port, password) =>
+      withClient(host, port, password) { c =>
+        val key = "<\u03C0|\u03C1>??+*"
+        val data = Str("Hello!")
+        await(c.send("Registry", "set" -> Cluster(Str(key), Str("Hello!"))))
+        val (_, keys) = await(c.send("Registry", "dir" -> Data.NONE))(0).get[(Seq[String], Seq[String])]
+        assert(keys contains key)
+        val result = await(c.send("Registry", "get" -> Str(key)))(0)
+        assert(result == data)
       }
     }
   }
