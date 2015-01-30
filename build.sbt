@@ -2,14 +2,13 @@ organization := "org.labrad"
 
 name := "scalabrad"
 
-version := "0.2.0-M1"
+version := "0.2.0-M2"
 
 scalaVersion := "2.11.4"
 
 scalacOptions ++= Seq(
   "-deprecation",
   "-feature"
-  // "-Ymacro-debug-lite"
 )
 
 EclipseKeys.withSource := true
