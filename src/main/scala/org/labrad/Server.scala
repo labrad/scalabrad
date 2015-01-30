@@ -14,7 +14,7 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
   def shutdown(): Unit
 
   def main(args: Array[String]): Unit = {
-    val cxn = ServerConnection[T](this, "localhost", 7682, "")
+    val cxn = ServerConnection[T](this, "localhost", 7682, Array())
     cxn.connect()
     sys.ShutdownHookThread(cxn.triggerShutdown)
     cxn.serve()

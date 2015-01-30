@@ -23,7 +23,7 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   val server: Server[T],
   val host: String,
   val port: Int,
-  val password: String
+  val password: Array[Char]
 ) extends Connection with Logging {
 
   private val nextMessageId = new AtomicInteger(1)
@@ -119,7 +119,7 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
 
 object ServerConnection extends Logging {
   /** Create a new server connection that will use a particular context server object. */
-  def apply[T <: ServerContext : ClassTag : TypeTag](server: Server[T], host: String, port: Int, password: String) = {
+  def apply[T <: ServerContext : ClassTag : TypeTag](server: Server[T], host: String, port: Int, password: Array[Char]) = {
     val (name, doc) = checkAnnotation(server)
     new ServerConnection[T](name, doc, server, host, port, password)
   }

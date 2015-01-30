@@ -144,7 +144,7 @@ object RegistryTest {
         "localhost" -> 7682
     }
 
-    withClient(host, port, password = "") { c =>
+    withClient(host, port, password = Array()) { c =>
       val reg = new RegistryServerProxy(c)
       val (dirs, keys) = await(reg.dir())
       if (!dirs.contains("test")) {

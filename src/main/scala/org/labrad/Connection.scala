@@ -3,6 +3,7 @@ package org.labrad
 import java.io.IOException
 import java.net.Socket
 import java.nio.ByteOrder
+import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
 import java.util.concurrent.{ExecutionException, Executors}
@@ -20,7 +21,7 @@ trait Connection {
   val name: String
   val host: String
   val port: Int
-  def password: String
+  def password: Array[Char]
 
   var id: Long = _
   var loginMessage: String = _
@@ -105,14 +106,14 @@ trait Connection {
     for (listener <- connectionListeners) listener.lift(true)
   }
 
-  private def doLogin(password: String): Unit = {
+  private def doLogin(password: Array[Char]): Unit = {
     try {
       // send first ping packet; response is password challenge
       val Bytes(challenge) = Await.result(send(Request(Manager.ID)), 10.seconds)(0)
 
       val md = MessageDigest.getInstance("MD5")
       md.update(challenge)
-      md.update(password.getBytes(UTF_8))
+      md.update(UTF_8.encode(CharBuffer.wrap(password)))
       val data = Bytes(md.digest)
 
       // send password response; response is welcome message

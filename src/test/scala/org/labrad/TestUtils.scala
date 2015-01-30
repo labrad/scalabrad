@@ -16,10 +16,10 @@ object TestUtils extends {
 
   def await[A](future: Future[A]): A = Await.result(future, 30.seconds)
 
-  def withManager[T](f: (String, Int, String) => T): T = {
+  def withManager[T](f: (String, Int, Array[Char]) => T): T = {
     val host = "localhost"
     val port = 10000 + Random.nextInt(50000) //Util.findAvailablePort()
-    val password = "testPassword12345!@#$%"
+    val password = "testPassword12345!@#$%".toCharArray
 
     val registryRoot = File.createTempFile("labrad-registry", "")
     registryRoot.delete()
@@ -34,7 +34,7 @@ object TestUtils extends {
     }
   }
 
-  def withClient(host: String, port: Int, password: String)(func: Client => Unit) = {
+  def withClient(host: String, port: Int, password: Array[Char])(func: Client => Unit) = {
     val c = new Client(host = host, port = port, password = password)
     c.connect()
     try {
@@ -44,7 +44,7 @@ object TestUtils extends {
     }
   }
 
-  def withServer[T](host: String, port: Int, password: String)(body: => T) = {
+  def withServer[T](host: String, port: Int, password: Array[Char])(body: => T) = {
     val s = ServerConnection(TestSrv, host, port, password)
     s.connect()
     s.serve()

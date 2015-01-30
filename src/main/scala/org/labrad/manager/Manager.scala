@@ -1,6 +1,7 @@
 package org.labrad.manager
 
 import java.io.File
+import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
 import org.labrad.annotations._
@@ -18,11 +19,11 @@ trait AuthService {
   def authenticate(challenge: Array[Byte], response: Array[Byte]): Boolean
 }
 
-class AuthServiceImpl(password: String) extends AuthService {
+class AuthServiceImpl(password: Array[Char]) extends AuthService {
   def authenticate(challenge: Array[Byte], response: Array[Byte]): Boolean = {
     val md = MessageDigest.getInstance("MD5")
     md.update(challenge)
-    md.update(password.getBytes(UTF_8))
+    md.update(UTF_8.encode(CharBuffer.wrap(password)))
     val expected = md.digest
     var same = expected.length == response.length
     for ((a, b) <- expected zip response) same = same & (a == b)
@@ -31,7 +32,7 @@ class AuthServiceImpl(password: String) extends AuthService {
 }
 
 
-class CentralNode(port: Int, password: String, registryRoot: File) extends Logging {
+class CentralNode(port: Int, password: Array[Char], registryRoot: File) extends Logging {
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
@@ -89,7 +90,7 @@ object Manager extends Logging {
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
     val registry = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new File(_)).getOrElse(sys.props("user.home") / ".labrad" / "registry")
 
-    val centralNode = new CentralNode(port, password, registry)
+    val centralNode = new CentralNode(port, password.toCharArray, registry)
 
     @tailrec def enterPressed(): Boolean =
       System.in.available > 0 && (System.in.read() == '\n'.toInt || enterPressed())
