@@ -89,7 +89,7 @@ trait RegistryServer extends Requester {
     call("dir").map { _.get[(Seq[String], Seq[String])] }
 
   def cd(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Str(dir)).map { _.get[Seq[String]] }
-  def cd(dir: Seq[String])(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_)))).map { _.get[Seq[String]] }
+  def cd(dir: Seq[String], create: Boolean = false)(implicit ec: ExecutionContext): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_))), Bool(create)).map { _.get[Seq[String]] }
 
   def mkDir(dir: String)(implicit ec: ExecutionContext): Future[Seq[String]] = call("mkdir", Str(dir)).map { _.get[Seq[String]] }
   def rmDir(dir: String)(implicit ec: ExecutionContext): Future[Unit] = callUnit("rmdir", Str(dir))
