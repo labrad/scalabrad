@@ -303,7 +303,7 @@ object SettingHandler extends Logging {
         case Some(p) => sys.error(s"cannot create packer for type $tpe with pattern $p")
       }
 
-    case tpe if tpe =:= typeOf[Date]    => { case x: Date => Data("t").setTime(x) }
+    case tpe if tpe =:= typeOf[Date]    => { case x: Date => val d = Data("t"); d.setTime(x); d }
     case tpe if tpe =:= typeOf[String]  => { case x: String => Str(x) }
     case tpe if tpe =:= typeOf[Data]    => { case x: Data => x }
 
