@@ -1,62 +1,56 @@
 package org.labrad.manager
 
-import java.net.InetSocketAddress
-import java.util.concurrent.Executors
-import org.jboss.netty.bootstrap.ServerBootstrap
-import org.jboss.netty.buffer.{ChannelBuffer, ChannelBuffers, HeapChannelBufferFactory}
-import org.jboss.netty.channel._
-import org.jboss.netty.channel.group._
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
-import org.labrad.{ByteOrderDecoder, PacketDecoder, PacketEncoder}
+import io.netty.bootstrap.ServerBootstrap
+import io.netty.channel._
+import io.netty.channel.nio.NioEventLoopGroup
+import io.netty.channel.socket.SocketChannel
+import io.netty.channel.socket.nio.NioServerSocketChannel
+import org.labrad.PacketCodec
 import org.labrad.util._
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
-import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext
 
 /**
  * listens for incoming labrad network connections
  */
 class Listener(auth: AuthService, hub: Hub, tracker: StatsTracker, messager: Messager, port: Int)(implicit ec: ExecutionContext)
 extends Logging {
-  private val factory = new NioServerSocketChannelFactory(
-    Executors.newCachedThreadPool,
-    Executors.newCachedThreadPool
-  )
 
-  private val channels = new DefaultChannelGroup("labrad")
-  private val groupHandler = new SimpleChannelHandler with Logging {
-    override def channelOpen(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit = {
-      channels.add(e.getChannel)
-    }
+  val bossGroup = new NioEventLoopGroup(1)
+  val workerGroup = new NioEventLoopGroup()
 
-    override def exceptionCaught(ctx: ChannelHandlerContext, e: ExceptionEvent): Unit = {
-      log.error("disconnecting due to unhandled error", e.getCause)
-      e.getChannel.close
-    }
+  val serverChannel = try {
+    val b = new ServerBootstrap();
+    b.group(bossGroup, workerGroup)
+     .channel(classOf[NioServerSocketChannel])
+     .childOption[java.lang.Boolean](ChannelOption.TCP_NODELAY, true)
+     .childOption[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
+     .childHandler(new ChannelInitializer[SocketChannel] {
+         override def initChannel(ch: SocketChannel): Unit = {
+           val p = ch.pipeline
+           p.addLast("packetCodec", new PacketCodec)
+           p.addLast("loginHandler", new LoginHandler(auth, hub, tracker, messager))
+         }
+     })
+
+    // Bind and start to accept incoming connections.
+    b.bind(port).sync().channel
+  } catch {
+    case e: Exception =>
+      workerGroup.shutdownGracefully()
+      bossGroup.shutdownGracefully()
+      throw e
   }
-
-  private val bootstrap = new ServerBootstrap(factory)
-  bootstrap.setOption("child.tcpNoDelay", true)
-  bootstrap.setOption("child.keepAlive", true)
-  bootstrap.setPipelineFactory(new ChannelPipelineFactory {
-    def getPipeline = {
-      val pipeline = Channels.pipeline
-      pipeline.addLast("groupHandler", groupHandler)
-      pipeline.addLast("byteOrderDecoder", ByteOrderDecoder)
-      pipeline.addLast("packetEncoder", PacketEncoder)
-      pipeline.addLast("packetDecoder", PacketDecoder)
-      pipeline.addLast("loginHandler", new LoginHandler(auth, hub, tracker, messager))
-      pipeline
-    }
-  })
-
-  private val server = bootstrap.bind(new InetSocketAddress(port))
-  channels.add(server)
 
   log.info(s"now accepting labrad connections on port $port")
 
   def stop() {
     log.warn("shutting down")
-    channels.close.awaitUninterruptibly
-    factory.releaseExternalResources
+    try {
+      serverChannel.close()
+      serverChannel.closeFuture.sync()
+    } finally {
+      workerGroup.shutdownGracefully()
+      bossGroup.shutdownGracefully()
+    }
   }
 }

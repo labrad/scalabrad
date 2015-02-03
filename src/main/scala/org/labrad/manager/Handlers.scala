@@ -1,6 +1,6 @@
 package org.labrad.manager
 
-import org.jboss.netty.channel._
+import io.netty.channel._
 import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo }
 import org.labrad.annotations._
 import org.labrad.data._
@@ -30,14 +30,14 @@ trait ServerActor extends ClientActor {
 }
 
 class ClientHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, name: String)(implicit ec: ExecutionContext)
-extends SimpleChannelHandler with ClientActor with ManagerSupport with Logging {
+extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport with Logging {
 
   // handle incoming packets
-  override def messageReceived(ctx: ChannelHandlerContext, e: MessageEvent): Unit = {
-    e.getMessage match {
-      case packet @ Packet(0, _, _, _)          => handleMessage(packet)
-      case packet @ Packet(r, _, _, _) if r > 0 => handleRequest(packet)
-      case packet @ Packet(r, _, _, _) if r < 0 => handleResponse(packet)
+  override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+    packet match {
+      case Packet(0, _, _, _)          => handleMessage(packet)
+      case Packet(r, _, _, _) if r > 0 => handleRequest(packet)
+      case Packet(r, _, _, _) if r < 0 => handleResponse(packet)
     }
   }
 
@@ -58,7 +58,7 @@ extends SimpleChannelHandler with ClientActor with ManagerSupport with Logging {
     } onComplete {
       case Success(response) =>
         tracker.clientRep(id)
-        channel.write(response)
+        channel.writeAndFlush(response)
       case Failure(ex) =>
         log.error("error. this should not happen!", ex)
     }
@@ -71,13 +71,22 @@ extends SimpleChannelHandler with ClientActor with ManagerSupport with Logging {
   // handle outgoing packets
   override def message(packet: Packet): Unit = {
     log.debug(s"sending message (target=$id): $packet")
-    channel.write(packet)
+    channel.writeAndFlush(packet)
   }
 
   override def close(): Unit = channel.close()
 
-  override def channelClosed(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit = {
+  override def channelUnregistered(ctx: ChannelHandlerContext): Unit = {
     hub.disconnect(id)
+  }
+
+  override def channelInactive(ctx: ChannelHandlerContext): Unit = {
+    hub.disconnect(id)
+  }
+
+  override def exceptionCaught(ctx: ChannelHandlerContext, ex: Throwable): Unit = {
+    log.error("exceptionCaught", ex)
+    ctx.close()
   }
 
   // handle manager calls locally
@@ -122,7 +131,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
       val promise = Promise[Packet]
       promises += -packet.id -> promise
       contexts += packet.context
-      channel.write(packet.copy(records = converted))
+      channel.writeAndFlush(packet.copy(records = converted))
       promise.future.onComplete { _ => tracker.serverRep(id) }
       promise.future
     } catch {
@@ -141,7 +150,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     }
   }
 
-  override def channelDisconnected(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit = synchronized {
+  override def channelInactive(ctx: ChannelHandlerContext): Unit = synchronized {
     for ((_, promise) <- promises)
       promise.failure(LabradException(8, "Server disconnected"))
 

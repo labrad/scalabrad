@@ -1,7 +1,7 @@
 package org.labrad.manager
 
-import org.jboss.netty.channel._
-import org.labrad.{ ContextDecoder, ContextEncoder }
+import io.netty.channel._
+import org.labrad.ContextCodec
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.types._
@@ -11,10 +11,10 @@ import scala.concurrent.duration._
 import scala.util.Random
 
 class LoginHandler(auth: AuthService, hub: Hub, tracker: StatsTracker, messager: Messager)(implicit ec: ExecutionContext)
-extends SimpleChannelHandler with Logging {
+extends SimpleChannelInboundHandler[Packet] with Logging {
 
-  override def messageReceived(ctx: ChannelHandlerContext, e: MessageEvent): Unit = {
-    val packet @ Packet(req, target, context, records) = e.getMessage
+  override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+    val Packet(req, target, context, records) = packet
     val resp = try {
       handle(ctx, packet)
     } catch {
@@ -25,8 +25,13 @@ extends SimpleChannelHandler with Logging {
         log.debug("error during login", ex)
         Error(1, ex.toString)
     }
-    val future = ctx.getChannel.write(Packet(-req, target, context, Seq(Record(0, resp))))
+    val future = ctx.channel.writeAndFlush(Packet(-req, target, context, Seq(Record(0, resp))))
     if (resp.isError) future.addListener(ChannelFutureListener.CLOSE)
+  }
+
+  override def exceptionCaught(ctx: ChannelHandlerContext, ex: Throwable): Unit = {
+    log.error("exceptionCaught", ex)
+    ctx.close()
   }
 
   private val challenge = Array.ofDim[Byte](256)
@@ -56,13 +61,13 @@ extends SimpleChannelHandler with Logging {
       val (handler, id) = data match {
         case Cluster(UInt(ver), Str(name)) =>
           val id = hub.allocateClientId(name)
-          val handler = new ClientHandler(hub, tracker, messager, ctx.getChannel, id, name)
+          val handler = new ClientHandler(hub, tracker, messager, ctx.channel, id, name)
           hub.connectClient(id, name, handler)
           (handler, id)
 
         case Cluster(UInt(ver), Str(name), Str(doc)) =>
           val id = hub.allocateServerId(name)
-          val handler = new ServerHandler(hub, tracker, messager, ctx.getChannel, id, name, doc)
+          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc)
           hub.connectServer(id, name, handler)
           (handler, id)
 
@@ -70,7 +75,7 @@ extends SimpleChannelHandler with Logging {
         case Cluster(UInt(ver), Str(name), Str(docOrig), Str(notes)) =>
           val doc = if (notes.isEmpty) docOrig else (docOrig + "\n\n" + notes)
           val id = hub.allocateServerId(name)
-          val handler = new ServerHandler(hub, tracker, messager, ctx.getChannel, id, name, doc)
+          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc)
           hub.connectServer(id, name, handler)
           (handler, id)
 
@@ -79,9 +84,8 @@ extends SimpleChannelHandler with Logging {
       }
 
       // logged in successfully; add new handler to channel pipeline
-      val pipeline = ctx.getPipeline
-      pipeline.addLast("contextDecoder", new ContextDecoder(id))
-      pipeline.addLast("contextEncoder", new ContextEncoder(id))
+      val pipeline = ctx.pipeline
+      pipeline.addLast("contextCodec", new ContextCodec(id))
       pipeline.addLast(handler.getClass.toString, handler)
       pipeline.remove(this)
 

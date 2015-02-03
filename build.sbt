@@ -27,7 +27,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "org.scala-lang.modules" %% "scala-swing" % "1.0.1",
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1",
-  "io.netty" % "netty" % "3.9.5.Final" withSources(),
+  "io.netty" % "netty-all" % "4.0.25.Final" withSources(),
   "joda-time" % "joda-time" % "2.1" withSources(),
   "org.joda" % "joda-convert" % "1.2" withSources(),
   "org.slf4j" % "slf4j-api" % "1.7.2",

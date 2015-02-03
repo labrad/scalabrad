@@ -1,7 +1,7 @@
 package org.labrad
 
 import org.labrad.data._
-import org.scalatest.FunSuite
+import org.scalatest.{FunSuite, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -34,6 +34,7 @@ class ManagerTest extends FunSuite with AsyncAssertions {
         val id = withServer(host, port, password) {
           await(mgr(c).lookupServer("Scala Test Server"))
         }
+        Thread.sleep(10000)
         val servers = await(mgr(c).servers)
         assert(!servers.exists { case (_, "Scala Test Server") => true; case _ => false })
         val id2 = withServer(host, port, password) {

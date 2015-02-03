@@ -1,6 +1,5 @@
 package org.labrad.manager
 
-import org.jboss.netty.channel._
 import org.labrad.ServerInfo
 import org.labrad.annotations._
 import org.labrad.data._
