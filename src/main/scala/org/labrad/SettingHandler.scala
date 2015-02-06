@@ -129,19 +129,30 @@ object SettingHandler extends Logging {
 
   /** infer the pattern and create an unpacker for a method parameter */
   def inferParamType(tpe: Type, annots: Seq[Annotation]): (Pattern, Data => Any) = {
-    val annotated = annotatedPattern(annots) { case Accept(tag) => tag }
+    val annotated = for {
+      a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Accept])
+      t <- a.param("value").map { case Constant(t: String) => t }
+    } yield Pattern(t)
     (patternFor(tpe, annotated), unpacker(tpe, annotated))
   }
 
   /** infer the pattern and create a repacker for a method return type */
   def inferReturnType(tpe: Type, annots: Seq[Annotation]): (Pattern, Any => Data) = {
-    val annotated = annotatedPattern(annots) { case Return(tag) => tag }
+    val annotated = for {
+      a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Return])
+      t <- a.param("value").map { case Constant(t: String) => t }
+    } yield Pattern(t)
     (patternFor(tpe, annotated), packer(tpe, annotated))
   }
 
-  /** try to extract a pattern from a sequence of annotations */
-  def annotatedPattern(annots: Seq[Annotation])(collector: PartialFunction[Annotation, String]) =
-    annots.collect(collector).headOption.map(Pattern(_))
+  implicit class RichAnnotation(a: Annotation) {
+    // extract a single parameter by name
+    def param(name: String): Option[Constant] = {
+      a.tree.children.tail.collectFirst {
+        case AssignOrNamedArg(Ident(TermName(`name`)), Literal(c)) => c
+      }
+    }
+  }
 
   /** create a function that will invoke the given method on the given object */
   private def invoke(self: Any, method: MethodSymbol): Seq[Any] => Any = {
@@ -173,7 +184,7 @@ object SettingHandler extends Logging {
     case tpe if tpe =:= typeOf[Double]  =>
       pat match {
         case None => Pattern("v")
-        case Some(p @ PValue(units)) => p
+        case Some(p: PValue) => p
         case Some(p) => sys.error(s"cannot infer type for $tpe with pattern $p")
       }
 

@@ -17,7 +17,7 @@ object Reflect {
     // build handler for each set of overloaded methods
     val handlers = for {
       (methodName, methods) <- overloads
-      annots = methods.map(settingAnnotation).flatten
+      annots = methods.flatMap(settingAnnotation)
       if annots.length > 0
     } yield {
       require(annots.length == 1, s"Multiple overloads of '$methodName' have @Setting annotation")

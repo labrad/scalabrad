@@ -113,7 +113,6 @@ class TypeTests extends FunSuite {
       "" -> "",
       "?" -> "",
       "?" -> "?",
-      "v[s]" -> "v",
       "v[s]" -> "v[s]",
       "*s" -> "*s",
       "*?" -> "*s",
@@ -136,7 +135,7 @@ class TypeTests extends FunSuite {
       "<i|w|s>" -> "<i|w>"
     )
     for ((t1, t2) <- acceptTests) {
-      assert(Pattern(t1) accepts Pattern(t2))
+      assert(Pattern(t1) accepts Pattern(t2), s"$t1 should have accepted $t2")
     }
   }
 
