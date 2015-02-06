@@ -14,7 +14,7 @@ class ContextMgr(factory: => ServerContext, bind: Any => RequestContext => Data)
     Server.handle(request) { req =>
       if (firstTime) {
         server = factory
-        server.init
+        server.init()
         handler = bind(server)
         firstTime = false
       }

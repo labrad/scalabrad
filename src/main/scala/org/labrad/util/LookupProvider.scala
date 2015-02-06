@@ -2,9 +2,10 @@ package org.labrad.util
 
 import org.labrad.Connection
 import org.labrad.data._
+import org.labrad.manager.Manager
 import scala.concurrent.{ExecutionContext, Future}
 
-class LookupProvider(connection: Connection) {
+class LookupProvider(send: Request => Future[Seq[Data]]) {
 
   private var serverCache = Map.empty[String, Long] // server name -> server id
   private var settingCache = Map.empty[(String, String), Long] // (server name, setting name) -> setting id
@@ -72,5 +73,5 @@ class LookupProvider(connection: Connection) {
     }
 
   private def doLookup(data: Data)(implicit ec: ExecutionContext): Future[Data] =
-    connection.send(Request(1L, records = Seq(Record(3L, data)))).map(_(0)) // Lookup setting has id 3L
+    send(Request(Manager.ID, records = Seq(Record(Manager.LOOKUP, data)))).map(_(0))
 }

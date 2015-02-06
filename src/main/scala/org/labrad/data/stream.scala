@@ -17,6 +17,6 @@ extends BufferedOutputStream(out) {
   // Write a packet to the output stream.
   def writePacket(packet: Packet) {
     out.write(packet.toBytes)
-    out.flush
+    out.flush()
   }
 }

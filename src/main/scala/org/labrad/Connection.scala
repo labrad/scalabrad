@@ -48,7 +48,7 @@ trait Connection {
   }
 
   protected val writeQueue: Channel[Packet] = new Channel[Packet]
-  protected val lookupProvider = new LookupProvider(this)
+  protected val lookupProvider = new LookupProvider(this.send)
   protected val requestDispatcher = new RequestDispatcher(sendPacket)
   protected val executor = Executors.newCachedThreadPool
   protected implicit val executionContext = ExecutionContext.fromExecutor(executor)
