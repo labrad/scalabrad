@@ -160,9 +160,9 @@ class DataBuilder(t: Type)(implicit byteOrder: ByteOrder = BIG_ENDIAN) { self =>
     buf.writeBytes(bytes)
   }
   def addTime(seconds: Long, fraction: Long): this.type = addSimple(TTime) { buf.writeLong(seconds); buf.writeLong(fraction) }
-  def addValue(x: Double): this.type = addSimple(TValue(None)) { buf.writeDouble(x) }
+  def addValue(x: Double): this.type = addSimple(TValue("")) { buf.writeDouble(x) }
   def addComplex(re: Double, im: Double): this.type = {
-    addSimple(TComplex(None)) { buf.writeDouble(re); buf.writeDouble(im) }
+    addSimple(TComplex("")) { buf.writeDouble(re); buf.writeDouble(im) }
   }
 
   def setSize(size: Int): this.type = this.setShape(Array(size))

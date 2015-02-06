@@ -10,7 +10,7 @@ import org.labrad.types._
  * in the array.  In addition, this class has convenience methods for converting
  * to and from LabRAD data.
  */
-case class ComplexArray(re: Array[Double], im: Array[Double], units: Option[String] = None) {
+case class ComplexArray(re: Array[Double], im: Array[Double], units: String = "") {
   require(re.length == im.length)
   def length = re.length
   def size = re.length
@@ -35,7 +35,7 @@ object ComplexArray {
    * @return
    */
   def apply(vals: Data): ComplexArray = vals.t match {
-    case TArr(TComplex(_), 1) =>
+    case TArr(TComplex(units), 1) =>
       val len = vals.arraySize
       val re = Array.ofDim[Double](len)
       val im = Array.ofDim[Double](len)
@@ -45,7 +45,7 @@ object ComplexArray {
         re(i) = c.getReal
         im(i) = c.getImag
       }
-      ComplexArray(re, im)
+      ComplexArray(re, im, units)
     case t =>
       sys.error(s"cannot convert type $t to *c")
   }

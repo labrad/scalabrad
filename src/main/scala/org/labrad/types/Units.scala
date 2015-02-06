@@ -109,7 +109,7 @@ object Units {
   }
 
   /** create an object to convert number between the given units */
-  def convert(from: String, to: String): Double => Double = optConvert(from, to).getOrElse((x) => x)
+  def convert(from: String, to: String): Double => Double = optConvert(from, to).getOrElse(x => x)
 
   /** Combine two lists of terms, adding common exponents and removing terms with exponent 0 */
   def combineTerms(from: Seq[Term], to: Seq[Term]): Seq[Term] =

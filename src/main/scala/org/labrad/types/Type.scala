@@ -58,10 +58,10 @@ object Parsers extends RegexParsers {
   def singleType: Parser[Type] = noneType | someType
 
   def valueType: Parser[Type] =
-      "v" ~> units.? ^^ { u => TValue(u) }
+      "v" ~> units.? ^^ { u => TValue(u.getOrElse("")) }
 
   def complexType: Parser[Type] =
-      "c" ~> units.? ^^ { u => TComplex(u) }
+      "c" ~> units.? ^^ { u => TComplex(u.getOrElse("")) }
 
   def units: Parser[String] = "[" ~> """[^\[\]]*""".r <~ "]"
 
@@ -107,10 +107,10 @@ object Parsers extends RegexParsers {
   def singlePattern: Parser[Pattern] = noneType | somePattern
 
   def valuePattern: Parser[Pattern] =
-      "v" ~> units.? ^^ { u => PValue(u) }
+      "v" ~> units.? ^^ { u => PValue(u.getOrElse("")) }
 
   def complexPattern: Parser[Pattern] =
-      "c" ~> units.? ^^ { u => PComplex(u) }
+      "c" ~> units.? ^^ { u => PComplex(u.getOrElse("")) }
 
   def arrayPattern: Parser[Pattern] =
       "*" ~> number.? ~ singlePattern ^^ { case d ~ t => PArr(t, d getOrElse 1) }
@@ -461,29 +461,20 @@ case object TTime extends Type with ConcreteType {
 }
 
 
-class PValue protected(val units: Option[String]) extends Pattern {
-  def accepts(typ: Pattern) = typ match {
-    case PValue(u) => (units, u) match {
-      case (None, None) => true
-      case (None, Some(u)) => true
-      case (Some(units), None) => true
-      case (Some(units), Some(u)) => units == u
-    }
+class PValue protected(val units: String) extends Pattern {
+  def accepts(typ: Pattern): Boolean = typ match {
+    case PValue(u) => units == "?" || units == u
     case _ => false
   }
 
   def apply(typ: Type): Option[Type] = typ match {
-    case TValue(unit) =>
-      units match {
-        case Some(u) => Some(TValue(u))
-        case None => Some(TValue(unit))
-      }
+    case t: TValue => Some(t)
     case _ => None
   }
 
   override val toString = units match {
-    case None => "v"
-    case Some(units) => s"v[$units]"
+    case "" => "v"
+    case units => s"v[$units]"
   }
 
   override def equals(other: Any): Boolean = other match {
@@ -495,48 +486,33 @@ class PValue protected(val units: Option[String]) extends Pattern {
 }
 
 object PValue {
-  def apply(units: String) = new PValue(Option(units))
-  def apply(units: Option[String] = None) = new PValue(units)
+  def apply(units: String = "") = new PValue(units)
 
-  def unapply(pat: Pattern): Option[Option[String]] = pat match {
+  def unapply(pat: Pattern): Option[String] = pat match {
     case p: PValue => Some(p.units)
     case _ => None
   }
 }
 
-case class TValue(override val units: Option[String] = None) extends PValue(units) with Type {
+case class TValue(override val units: String = "") extends PValue(units) with Type {
   val fixedWidth = true
   val dataWidth = 8
 }
 
-object TValue {
-  def apply(units: String) = new TValue(Option(units))
-}
-
-
-class PComplex protected(val units: Option[String]) extends Pattern {
+class PComplex protected(val units: String) extends Pattern {
   def accepts(typ: Pattern) = typ match {
-    case PComplex(u) => (units, u) match {
-      case (None, None) => true
-      case (None, Some(u)) => true
-      case (Some(units), None) => true
-      case (Some(units), Some(u)) => units == u
-    }
+    case PComplex(u) => units == "?" || units == u
     case _ => false
   }
 
   def apply(typ: Type): Option[Type] = typ match {
-    case TComplex(unit) =>
-      units match {
-        case Some(u) => Some(TComplex(u))
-        case None => Some(TComplex(unit))
-      }
+    case t: TComplex => Some(t)
     case _ => None
   }
 
   override val toString = units match {
-    case None => "c"
-    case Some(units) => s"c[$units]"
+    case "" => "c"
+    case units => s"c[$units]"
   }
 
   override def equals(other: Any): Boolean = other match {
@@ -548,20 +524,15 @@ class PComplex protected(val units: Option[String]) extends Pattern {
 }
 
 object PComplex {
-  def apply(units: String) = new PComplex(Option(units))
-  def apply(units: Option[String] = None) = new PComplex(units)
+  def apply(units: String = "") = new PComplex(units)
 
-  def unapply(pat: Pattern): Option[Option[String]] = pat match {
+  def unapply(pat: Pattern): Option[String] = pat match {
     case p: PComplex => Some(p.units)
     case _ => None
   }
 }
 
-case class TComplex(override val units: Option[String] = None) extends PComplex(units) with Type {
+case class TComplex(override val units: String = "") extends PComplex(units) with Type {
   def fixedWidth = true
   def dataWidth = 16
-}
-
-object TComplex {
-  def apply(units: String) = new TComplex(Option(units))
 }

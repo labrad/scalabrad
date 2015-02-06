@@ -87,15 +87,9 @@ object Hydrant {
     Time(new Date(time))
   }
 
-  def randomValue(units: Option[String]) = units match {
-    case None => Value(nextDouble, randomUnits)
-    case Some(units) => Value(nextDouble, units)
-  }
+  def randomValue(units: String) = Value(nextDouble, units)
 
-  def randomComplex(units: Option[String]) = units match {
-    case None => Cplx(nextDouble, nextDouble)
-    case Some(units) => Cplx(nextDouble, nextDouble, units)
-  }
+  def randomComplex(units: String) = Cplx(nextDouble, nextDouble, units)
 
   private def nextDouble = random.nextGaussian * 1e9
 

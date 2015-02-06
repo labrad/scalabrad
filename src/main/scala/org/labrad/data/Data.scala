@@ -100,16 +100,16 @@ trait Data {
 
     case TValue(u) =>
       getValue.toString + (u match {
-        case Some("") | None => ""
-        case Some(unit) => " " + unit
+        case "" => ""
+        case unit => " " + unit
       })
 
     case TComplex(u) =>
       val c = getComplex
       c.real.toString + (if (c.imag >= 0) "+" else "") +
       c.imag.toString + "i" + (u match {
-        case Some("") | None => ""
-        case Some(unit) => " " + unit
+        case "" => ""
+        case unit => " " + unit
       })
 
     case TTime => getTime.toDateTime.withZone(DateTimeZone.UTC).toString
@@ -160,8 +160,7 @@ trait Data {
   def isCluster = t.isInstanceOf[TCluster]
   def isError = t.isInstanceOf[TError]
   def hasUnits = t match {
-    case TValue(Some(_)) | TComplex(Some(_)) => true
-    case TValue(None) | TComplex(None) => false
+    case _: TValue | _: TComplex => true
     case _ => false
   }
 
@@ -1099,7 +1098,7 @@ object Data {
           val f = makeConverter(src, tgt)
           data => for (x <- data.flatIterator) f(x)
 
-        case (TValue(Some(from)), TValue(Some(to))) =>
+        case (TValue(from), TValue(to)) =>
           if (from == to) {
             data => ()
           } else {
@@ -1107,9 +1106,13 @@ object Data {
             data => data.setValue(func(data.getValue))
           }
 
-        case (TComplex(Some(from)), TComplex(Some(to))) =>
-          val func = Units.convert(from, to)
-          data => data.setComplex(func(data.getReal), func(data.getImag))
+        case (TComplex(from), TComplex(to)) =>
+          if (from == to) {
+            data => ()
+          } else {
+            val func = Units.convert(from, to)
+            data => data.setComplex(func(data.getReal), func(data.getImag))
+          }
 
         case _ =>
           data => ()
@@ -1306,7 +1309,7 @@ object Value {
     case Some(u) => apply(v, u)
   }
   def unapply(data: Data): Option[(Double, String)] = data.t match {
-    case TValue(units) => Some((data.getValue, units.getOrElse(null)))
+    case TValue(units) => Some((data.getValue, units))
     case _ => None
   }
 }
@@ -1319,7 +1322,7 @@ object Cplx {
     case Some(u) => apply(re, im, u)
   }
   def unapply(data: Data): Option[(Double, Double, String)] = data.t match {
-    case TComplex(units) => Some((data.getReal, data.getImag, units.getOrElse(null)))
+    case TComplex(units) => Some((data.getReal, data.getImag, units))
     case _ => None
   }
 }
