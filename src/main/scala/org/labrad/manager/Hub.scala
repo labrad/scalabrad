@@ -92,7 +92,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       tracker.connectServer(id, name)
       nServersConnected += 1
     }
-    messager.broadcast("Connect", UInt(id), 1)
+    messager.broadcast(Manager.Connect(id), sourceId = Manager.ID)
   }
 
   def connectClient(id: Long, name: String, handler: ClientActor): Unit = {
@@ -104,7 +104,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       tracker.connectClient(id, name)
       nClientsConnected += 1
     }
-    messager.broadcast("Connect", UInt(id), 1)
+    messager.broadcast(Manager.Connect(id), sourceId = Manager.ID)
   }
 
   def close(id: Long): Unit = {
@@ -144,16 +144,16 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     }
 
     // send expiration messages to all remaining servers (asynchronously)
-    messager.broadcast("Expire All", UInt(id), 1)
+    messager.broadcast(Manager.ExpireAll(id), sourceId = Manager.ID)
     Future.sequence(servers.map(_.expireAll(id)(10.seconds))) onFailure {
       case ex => //log.warn("error while sending context expiration messages", ex)
     }
 
     // send server disconnect message
     for (name <- serverNameOpt) {
-      messager.broadcast("Server Disconnect", Cluster(UInt(id), Str(name)), 1)
+      messager.broadcast(Manager.DisconnectServer(id, name), sourceId = Manager.ID)
     }
-    messager.broadcast("Disconnect", UInt(id), 1)
+    messager.broadcast(Manager.Disconnect(id), sourceId = Manager.ID)
   }
 
   def message(id: Long, packet: Packet): Unit = {

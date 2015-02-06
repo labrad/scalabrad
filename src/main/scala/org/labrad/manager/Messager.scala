@@ -4,11 +4,17 @@ import org.labrad.data._
 import org.labrad.util.Logging
 import scala.collection.mutable
 
+trait Message {
+  def name: String
+  def data: Data
+}
+
 trait Messager {
-  def register(msg: String, target: Long, ctx: Context, id: Long)
-  def unregister(msg: String, target: Long, ctx: Context, id: Long)
-  def broadcast(msg: String, data: Data, sourceId: Long)
-  def disconnect(id: Long)
+  def register(msg: String, target: Long, ctx: Context, id: Long): Unit
+  def unregister(msg: String, target: Long, ctx: Context, id: Long): Unit
+  def broadcast(msg: Message, sourceId: Long): Unit = broadcast(msg.name, msg.data, sourceId)
+  def broadcast(msg: String, data: Data, sourceId: Long): Unit
+  def disconnect(id: Long): Unit
 }
 
 class MessagerImpl(hub: Hub) extends Messager with Logging {

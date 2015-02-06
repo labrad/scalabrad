@@ -68,6 +68,38 @@ object Manager extends Logging {
   val SETTINGS = 2L
   val LOOKUP = 3L
 
+  // named messages
+  case class Connect(id: Long) extends Message {
+    def name: String = "Connect"
+    def data: Data = UInt(id)
+  }
+
+  case class Disconnect(id: Long) extends Message {
+    def name: String = "Disconnect"
+    def data: Data = UInt(id)
+  }
+
+  case class ConnectServer(id: Long, serverName: String) extends Message {
+    def name: String = "Server Connect"
+    def data: Data = Cluster(UInt(id), Str(serverName))
+  }
+
+  case class DisconnectServer(id: Long, serverName: String) extends Message {
+    def name: String = "Server Disconnect"
+    def data: Data = Cluster(UInt(id), Str(serverName))
+  }
+
+  case class ExpireAll(id: Long) extends Message {
+    def name: String = "Expire All"
+    def data: Data = UInt(id)
+  }
+
+  case class ExpireContext(ctx: Context) extends Message {
+    def name: String = "Expire Context"
+    def data: Data = ctx.toData
+  }
+
+  // helpers for dealing with paths
   implicit class PathString(path: String) {
     def / (file: String): File = new File(path, file)
   }

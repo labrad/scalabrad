@@ -310,25 +310,44 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   // contexts and messages
 
   @Setting(id=50, name="Expire Context", doc="Expire the context in which this request was sent.")
-  def expireContext(r: RequestContext)/*(server: Either[Long, String])*/: Unit =
-    messager.broadcast("Expire Context", r.context.toData, sourceId=id)
-    //Await.result(hub.expireContext(ctx), 1.minute)
+  def expireContext(r: RequestContext, server: Option[Long]): Unit = {
+    implicit val timeout = 1.minute
+
+    // send messages to servers that have seen the given context
+    val f = server match {
+      case Some(id) => hub.expireContext(id, r.context)
+      case None => hub.expireContext(r.context)
+    }
+    Await.result(f, timeout)
+
+    // send a named message to anyone who cares
+    messager.broadcast(Manager.ExpireContext(r.context), sourceId = id)
+  }
 
   @Setting(id=51, name="Expire All", doc="Expire all contexts matching the high context of this request.")
-  def expireAll(r: RequestContext)/*(server: Either[Long, String])*/: Unit =
-    messager.broadcast("Expire All", UInt(r.context.high), sourceId=id)
-    //Await.result(hub.expireContext(ctx), 1.minute)
+  def expireAll(r: RequestContext): Unit = {
+    implicit val timeout = 1.minute
+
+    // send messages to servers that have had requests with the given high context
+    Await.result(hub.expireContext(r.context), 1.minute)
+
+    // send a named message to anyone who cares
+    messager.broadcast(Manager.ExpireAll(r.context.high), sourceId = id)
+  }
 
   @Setting(id=60, name="Subscribe to Named Message", doc="Register to receive messages identified by a particular name.")
-  def subscribeToNamedMessage(r: RequestContext, name: String, msgId: Long, active: Boolean): Unit =
-    if (active)
+  def subscribeToNamedMessage(r: RequestContext, name: String, msgId: Long, active: Boolean): Unit = {
+    if (active) {
       messager.register(name, id, r.context, msgId)
-    else
+    } else {
       messager.unregister(name, id, r.context, msgId)
+    }
+  }
 
   @Setting(id=61, name="Send Named Message", doc="Send a message with the given name, to be forward to all registered subscribers.")
-  def sendNamedMessage(r: RequestContext, name: String, message: Data): Unit =
+  def sendNamedMessage(r: RequestContext, name: String, message: Data): Unit = {
     messager.broadcast(name, message, id)
+  }
 
   // server settings (should stay local)
 
@@ -345,8 +364,9 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=101, name="S: Unregister Setting", doc="(Servers only) Unregister an available setting for this server.")
-  def delSetting(r: RequestContext, setting: Either[Long, String]): Unit =
+  def delSetting(r: RequestContext, setting: Either[Long, String]): Unit = {
     setting.fold(stub.delSetting, stub.delSetting)
+  }
 
   @Setting(id=110, name="S: Notify on Context Expiration", doc="(Servers only) Register to be notified when contexts which have been used to send requests to this server are expired.")
   def notifyOnContextExpiration(r: RequestContext, data: Option[(Long, Boolean)]): Unit = data match {
@@ -357,7 +377,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   @Setting(id=120, name="S: Start Serving", doc="(Servers only) Signal that the server is ready to receive requests. Before this point, the server will not appear in the list of active servers nor any metadata lookups.")
   def startServing(r: RequestContext): Unit = {
     stub.startServing
-    messager.broadcast("Server Connect", Cluster(UInt(id), Str(name)), 1)
+    messager.broadcast(Manager.ConnectServer(id, name), sourceId = Manager.ID)
   }
 
   // utility methods (should stay local)

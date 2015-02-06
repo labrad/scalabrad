@@ -71,7 +71,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
           hub.connectServer(id, name, handler)
           (handler, id)
 
-        // TODO: remove this case
+        // TODO: remove this case (collapse doc and notes)
         case Cluster(UInt(ver), Str(name), Str(docOrig), Str(notes)) =>
           val doc = if (notes.isEmpty) docOrig else (docOrig + "\n\n" + notes)
           val id = hub.allocateServerId(name)
