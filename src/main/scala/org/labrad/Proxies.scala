@@ -10,23 +10,20 @@ trait Requester {
 }
 
 
-abstract class ServerProxy(val cxn: Connection, val name: String) extends Requester {
+abstract class ServerProxy(val cxn: Connection, val name: String, val context: Context) extends Requester { self =>
   override def call(setting: String, args: Data*)(implicit ec: ExecutionContext): Future[Data] = {
     val data = args match {
       case Seq() => Data.NONE
       case Seq(data) => data
       case args => Cluster(args: _*)
     }
-    cxn.send(name, setting -> data).map(_(0))
+    cxn.send(name, context, setting -> data).map(_(0))
   }
-
-  def newContext = cxn.newContext
 }
 
 
-class GenericProxy(cxn: Connection, name: String) extends ServerProxy(cxn, name) {
-  def packet = new PacketProxy(this, Context(0, 0))
-  def packet(ctx: Context) = new PacketProxy(this, ctx)
+class GenericProxy(cxn: Connection, name: String, context: Context) extends ServerProxy(cxn, name, context) {
+  def packet(ctx: Context = context) = new PacketProxy(this, ctx)
 }
 
 
@@ -41,7 +38,7 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
       case Seq(data) => data
       case args => Cluster(args: _*)
     }
-    records += ((setting, data))
+    records += setting -> data
     promise.future.map(_(idx))
   }
 
@@ -75,9 +72,9 @@ trait ManagerServer extends Requester {
     call("Connection Info").map { _.get[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] }
 }
 
-class ManagerServerProxy(cxn: Connection, name: String = "Manager")
-    extends ServerProxy(cxn, name) with ManagerServer {
-  def packet(ctx: Context) = new ManagerServerPacket(this, ctx)
+class ManagerServerProxy(cxn: Connection, name: String = "Manager", context: Context = Context(0, 0))
+    extends ServerProxy(cxn, name, context) with ManagerServer {
+  def packet(ctx: Context = context) = new ManagerServerPacket(this, ctx)
 }
 
 class ManagerServerPacket(server: ServerProxy, ctx: Context)
@@ -102,9 +99,9 @@ trait RegistryServer extends Requester {
     callUnit("Notify On Change", UInt(id), Bool(enable))
 }
 
-class RegistryServerProxy(cxn: Connection, name: String = "Registry")
-    extends ServerProxy(cxn, name) with RegistryServer {
-  def packet(ctx: Context) = new RegistryServerPacket(this, ctx)
+class RegistryServerProxy(cxn: Connection, name: String = "Registry", context: Context = Context(0, 0))
+    extends ServerProxy(cxn, name, context) with RegistryServer {
+  def packet(ctx: Context = context) = new RegistryServerPacket(this, ctx)
 }
 
 class RegistryServerPacket(server: ServerProxy, ctx: Context)
