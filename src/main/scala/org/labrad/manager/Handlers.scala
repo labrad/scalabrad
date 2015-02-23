@@ -266,17 +266,16 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   // metadata lookup and help
 
   @Setting(id=1, name="Servers", doc="Get a list of ids and names for all currently-connected servers.")
-  def servers(r: RequestContext): Seq[(Long, String)] =
+  def servers(): Seq[(Long, String)] =
     (Manager.ID, Manager.NAME) +: hub.serversInfo.map(s => (s.id, s.name)).sorted
 
   @Setting(id=2, name="Settings", doc="Get a list of ids and names of settings for the given server, specified by name or id.")
-  def settings(r: RequestContext, serverId: Either[Long, String]): Seq[(Long, String)] =
+  def settings(serverId: Either[Long, String]): Seq[(Long, String)] =
     serverInfo(serverId).settings.map(s => (s.id, s.name)).sorted
 
   @Setting(id=3, name="Lookup", doc="Lookup server or setting ids by name. If a single argument is given, returns the server id.")
-  def lookup(r: RequestContext, name: String): Long = serverInfo(Right(name)).id
-  def lookup(r: RequestContext,
-             serverId: Either[Long, String],
+  def lookup(name: String): Long = serverInfo(Right(name)).id
+  def lookup(serverId: Either[Long, String],
              settingNames: Either[String, Seq[String]]): (Long, Either[Long, Seq[Long]]) = {
     val server = serverInfo(serverId)
     def toId(name: String): Long =
@@ -289,11 +288,11 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=10, name="Help", doc="Get help documentation for the given server or setting.")
-  def help(r: RequestContext, serverId: Either[Long, String]): (String, String) = {
+  def help(serverId: Either[Long, String]): (String, String) = {
     val server = serverInfo(serverId)
     (server.doc, "") // TODO: get rid of notes field
   }
-  def help(r: RequestContext, serverId: Either[Long, String], settingId: Either[Long, String]): (String, Seq[String], Seq[String], String) = {
+  def help(serverId: Either[Long, String], settingId: Either[Long, String]): (String, Seq[String], Seq[String], String) = {
     val server = serverInfo(serverId)
     settingId.fold(server.setting, server.setting) match {
       case None =>
@@ -345,14 +344,14 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=61, name="Send Named Message", doc="Send a message with the given name, to be forward to all registered subscribers.")
-  def sendNamedMessage(r: RequestContext, name: String, message: Data): Unit = {
+  def sendNamedMessage(name: String, message: Data): Unit = {
     messager.broadcast(name, message, id)
   }
 
   // server settings (should stay local)
 
   @Setting(id=100, name="S: Register Setting", doc="(Servers only) Register an available setting for this server.") // TODO: change types to *(s, s) instead of *s, *s
-  def addSetting(r: RequestContext, id: Long, name: String, doc: String,
+  def addSetting(id: Long, name: String, doc: String,
                  accepted: Seq[String], returned: Seq[String], notes: String): Unit = {
     def makePattern(ps: Seq[String]) = ps match {
       case Seq()  => "?"
@@ -364,7 +363,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=101, name="S: Unregister Setting", doc="(Servers only) Unregister an available setting for this server.")
-  def delSetting(r: RequestContext, setting: Either[Long, String]): Unit = {
+  def delSetting(setting: Either[Long, String]): Unit = {
     setting.fold(stub.delSetting, stub.delSetting)
   }
 
@@ -375,7 +374,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=120, name="S: Start Serving", doc="(Servers only) Signal that the server is ready to receive requests. Before this point, the server will not appear in the list of active servers nor any metadata lookups.")
-  def startServing(r: RequestContext): Unit = {
+  def startServing(): Unit = {
     stub.startServing
     messager.broadcast(Manager.ConnectServer(id, name), sourceId = Manager.ID)
   }
@@ -383,19 +382,19 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   // utility methods (should stay local)
 
   @Setting(id=200, name="Data To String", doc="Convert data into its human-readable string representation.")
-  def dataToString(r: RequestContext, data: Data): String = data.toString
+  def dataToString(data: Data): String = data.toString
 
   @Setting(id=201, name="String To Data", doc="Parse a string into labrad data.")
-  def stringToData(r: RequestContext, str: String): Data = Data.parse(str)
+  def stringToData(str: String): Data = Data.parse(str)
 
   @Setting(id=1010, name="Convert", doc="Convert the given data to a new type.")
-  def convert(r: RequestContext, data: Data, pattern: String): Data = Pattern(pattern)(data.t) match {
+  def convert(data: Data, pattern: String): Data = Pattern(pattern)(data.t) match {
     case Some(t) => data.convertTo(t)
     case None => sys.error(s"cannot convert ${data.t} to $pattern")
   }
 
   @Setting(id=10000, name="Connection Info", doc="Get information about connected servers and clients.")
-  def connectionInfo(r: RequestContext): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] = {
+  def connectionInfo(): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] = {
     val serverIds = hub.serversInfo.map(_.id).toSet
     for (s <- tracker.stats if !s.isServer || serverIds(s.id)) yield {
       val sReqs = s.sReqs - (if (s.id == Manager.ID) 1 else 0) // don't count this request for Manager
@@ -405,13 +404,13 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   }
 
   @Setting(id=14321, name="Close Connection", doc="Close a connection with the specified id.")
-  def closeConnection(r: RequestContext, id: Long): Unit =
+  def closeConnection(id: Long): Unit =
     hub.close(id)
 
   // TODO: other control stuff here, e.g. shutting down connections and even the entire service?
 
   @Setting(id=13579, name="Echo", doc="Echo back the supplied data.")
-  def echo(r: RequestContext, data: Data): Data = data
+  def echo(data: Data): Data = data
 }
 
 object ManagerImpl {

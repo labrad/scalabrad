@@ -45,15 +45,18 @@ object SettingHandler extends Logging {
       case NullaryMethodType(ret) => (Nil, ret)
     }
 
-    require(types.length >= 1, s"cannot make handler for $m: expected at least 1 parameter")
-    require(types(0).typeSignature <:< typeOf[RequestContext], s"cannot make handler for $m: first parameter must be RequestContext")
+    // check if the first argument is a RequestContext
+    val includeRequestContext = types.nonEmpty && types(0).typeSignature <:< typeOf[RequestContext]
+    val unpackTypes = if (includeRequestContext) types.tail else types
+    val firstUnpackParam = if (includeRequestContext) 2 else 1
 
-    // a sequence of optional defaults for every parameter of the method
-    val defaults = for (i <- 2 to types.length) yield
+    // a sequence of optional defaults for every unpackable parameter of the method,
+    // skipping the first parameter if it is the raw RequestContext
+    val defaults = for (i <- firstUnpackParam to types.length) yield
       defaultMethods.find(_.name.decodedName.toString == m.name.decodedName.toString + "$default$" + i)
 
     // get patterns and unpackers for all method parameters
-    val (patterns, unpackers) = types.tail.map(t => inferParamType(t.typeSignature, t.annotations)).unzip
+    val (patterns, unpackers) = unpackTypes.map(t => inferParamType(t.typeSignature, t.annotations)).unzip
 
     // modify argument patterns to allow none if the argument has a default
     val defaultPatterns = for ((p, defaultOpt) <- patterns zip defaults) yield
@@ -104,11 +107,14 @@ object SettingHandler extends Logging {
         }
       }
 
-      // create a function to unpack incoming data to the appropriate number of parameters
-      val unpack = defaultUnpackers match {
-        case Seq()  => (r: RequestContext) => Seq(r)
-        case Seq(f) => (r: RequestContext) => Seq(r, f(r.data))
-        case fs     => (r: RequestContext) => {
+      // create a function to unpack incoming data to the appropriate number of parameters,
+      // and optionally include the RequestContext as a first argument
+      val unpack = (defaultUnpackers, includeRequestContext) match {
+        case (Seq(), true)   => (r: RequestContext) => Seq(r)
+        case (Seq(), false)  => (r: RequestContext) => Seq()
+        case (Seq(f), true)  => (r: RequestContext) => Seq(r, f(r.data))
+        case (Seq(f), false) => (r: RequestContext) => Seq(f(r.data))
+        case (fs, rc)        => (r: RequestContext) => {
           // extract data into args, adding empty for omitted args based on matching pattern
           val xs = acceptPats.find {
             case (p, _, _) => p.accepts(r.data.t)
@@ -118,7 +124,12 @@ object SettingHandler extends Logging {
           }.getOrElse {
             sys.error(s"data of type ${r.data.t} not accepted")
           }
-          r +: (fs zip xs).map { case (f, x) => f(x) }
+          val unpacked = (fs zip xs).map { case (f, x) => f(x) }
+          if (rc) {
+            r +: unpacked
+          } else {
+            unpacked
+          }
         }
       }
       guard(acceptPat, unpack andThen invoke(self, m) andThen repack)

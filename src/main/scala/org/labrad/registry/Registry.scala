@@ -90,7 +90,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=1,
            name="dir",
            doc="Returns lists of the subdirs and keys in the current directory")
-  def listDir(r: RequestContext): (Seq[String], Seq[String]) = {
+  def listDir(): (Seq[String], Seq[String]) = {
     val files = curDir.listFiles
     val dirs = for (f <- files if f.isDirectory; n = f.getName) yield decode(n)
     val keys = for (f <- files if f.isFile; n = f.getName if n.endsWith(EXT)) yield decode(n.dropRight(EXT.size))
@@ -100,17 +100,17 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=10,
            name="cd",
            doc="Change the current directory")
-  def changeDir(r: RequestContext): Seq[String] = changeDir(r, Left(""), false)
+  def changeDir(): Seq[String] = changeDir(Left(""), false)
   // FIXME: accepting numbers here is a kludge to allow the current registry editor to work
   //def changeDir(r: RequestContext, dir: Either[String, Seq[String]]): Data = changeDir(r, dir, false)
-  def changeDir(r: RequestContext, dir: Either[Either[String, Seq[String]], Long]): Seq[String] = {
+  def changeDir(dir: Either[Either[String, Seq[String]], Long]): Seq[String] = {
     val theDir = dir match {
       case Left(dir) => dir
       case Right(num) => Left(Array.fill(num.toInt)("..").mkString("/"))
     }
-    changeDir(r, theDir, false)
+    changeDir(theDir, false)
   }
-  def changeDir(r: RequestContext, dir: Either[String, Seq[String]], create: Boolean): Seq[String] = {
+  def changeDir(dir: Either[String, Seq[String]], create: Boolean): Seq[String] = {
     def split(s: String): Seq[String] = s match {
       case "" => Seq()
       case "/" => Seq("")
@@ -141,7 +141,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=15,
            name="mkdir",
            doc="Create a new subdirectory in the current directory with the given name")
-  def mkDir(r: RequestContext, name: String): Seq[String] = {
+  def mkDir(name: String): Seq[String] = {
     val path = new File(curDir, encode(name))
     if (!path.exists) path.mkdir()
     parent.foreachContext(_.notify(curDir, name, isDir=true, addOrChange=true))
@@ -151,7 +151,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=16,
            name="rmdir",
            doc="Delete the given subdirectory from the current directory")
-  def rmDir(r: RequestContext, name: String): Unit = {
+  def rmDir(name: String): Unit = {
     val path = new File(curDir, encode(name))
     if (!path.exists) sys.error(s"directory does not exist: $name")
     if (!path.isDirectory) sys.error(s"found file instead of directory: $name")
@@ -162,14 +162,14 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=20,
            name="get",
            doc="Get the content of the given key in the current directory")
-  def getValue(r: RequestContext, key: String): Data = getValue(r, key, false, Data.NONE)
-  def getValue(r: RequestContext, key: String, pat: String): Data = getValue(r, key, pat, false, Data.NONE)
-  def getValue(r: RequestContext, key: String, set: Boolean, default: Data): Data = getValue(r, key, "?", set, default)
-  def getValue(r: RequestContext, key: String, pat: String, set: Boolean, default: Data): Data = {
+  def getValue(key: String): Data = getValue(key, false, Data.NONE)
+  def getValue(key: String, pat: String): Data = getValue(key, pat, false, Data.NONE)
+  def getValue(key: String, set: Boolean, default: Data): Data = getValue(key, "?", set, default)
+  def getValue(key: String, pat: String, set: Boolean, default: Data): Data = {
     val path = keyFile(key)
     if (!path.exists) {
       if (set)
-        setValue(r, key, default)
+        setValue(key, default)
       else
         sys.error(s"key does not exist: $key")
     }
@@ -182,14 +182,14 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
 //  @Setting(id=21,
 //           name="getAsString",
 //           doc="Get the content of the given key in the current directory")
-//  def getValueStr(r: RequestContext, key: String): String = getValueStr(r, key, false, "")
-//  def getValueStr(r: RequestContext, key: String, pat: String): String = getValueStr(r, key, pat, false, "")
-//  def getValueStr(r: RequestContext, key: String, set: Boolean, default: String): String = getValueStr(r, key, "?", set, default)
-//  def getValueStr(r: RequestContext, key: String, pat: String, set: Boolean, default: String): String = {
+//  def getValueStr(key: String): String = getValueStr(key, false, "")
+//  def getValueStr(key: String, pat: String): String = getValueStr(key, pat, false, "")
+//  def getValueStr(key: String, set: Boolean, default: String): String = getValueStr(key, "?", set, default)
+//  def getValueStr(key: String, pat: String, set: Boolean, default: String): String = {
 //    val path = keyFile(key)
 //    if (!path.exists) {
 //      if (set)
-//        setValueStr(r, key, default)
+//        setValueStr(key, default)
 //      else
 //        sys.error("key does not exist: " + key)
 //    }
@@ -204,7 +204,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=30,
            name="set",
            doc="Set the content of the given key in the current directory to the given data")
-  def setValue(r: RequestContext, key: String, value: Data): Unit = {
+  def setValue(key: String, value: Data): Unit = {
     val path = keyFile(key)
     val data = Cluster(Str(value.t.toString), Bytes(value.toBytes))
     writeFile(path, data.toBytes)
@@ -224,7 +224,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=40,
            name="del",
            doc="Delete the given key from the current directory")
-  def delete(r: RequestContext, key: String): Unit = {
+  def delete(key: String): Unit = {
     val path = keyFile(key)
     if (!path.exists) sys.error(s"key does not exist: $key")
     if (path.isDirectory) sys.error(s"found directory instead of file: $key")
