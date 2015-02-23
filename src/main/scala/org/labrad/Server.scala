@@ -13,7 +13,7 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
   def init(cxn: ServerConnection[T]): Unit
   def shutdown(): Unit
 
-  def main(args: Array[String]): Unit = {
+  def run(args: Array[String]): Unit = {
     val cxn = ServerConnection[T](this, "localhost", 7682, Array())
     cxn.connect()
     sys.ShutdownHookThread(cxn.triggerShutdown)
