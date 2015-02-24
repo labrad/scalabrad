@@ -42,7 +42,7 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
     promise.future.map(_(idx))
   }
 
-  def send(implicit ec: ExecutionContext): Future[Unit] = {
+  def send()(implicit ec: ExecutionContext): Future[Unit] = {
     promise.completeWith(server.cxn.send(server.name, ctx, records: _*))
     promise.future.map(_ => ())
   }
@@ -50,7 +50,7 @@ class PacketProxy(server: ServerProxy, ctx: Context) extends Requester {
 
 
 trait ManagerServer extends Requester {
-  def servers(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
+  def servers()(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =
     call("Servers").map { _.get[Seq[(Long, String)]] }
 
   def settings(server: String)(implicit ec: ExecutionContext): Future[Seq[(Long, String)]] =

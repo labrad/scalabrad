@@ -63,7 +63,7 @@ object Migrate {
         println(s"fetching ${srcPath.mkString("/")}/$key")
         futures += key -> pkt.get(key)
       }
-      await(pkt.send)
+      await(pkt.send())
 
       val results = futures.result.map {
         case (key, f) => key -> await(f)
@@ -75,7 +75,7 @@ object Migrate {
         for (key <- keys) {
           dstPkt.set(key, results(key))
         }
-        await(dstPkt.send)
+        await(dstPkt.send())
       }
     }
     traverse(srcPath, dstPath)
