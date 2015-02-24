@@ -27,6 +27,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "org.scala-lang.modules" %% "scala-swing" % "1.0.1",
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1",
+  "org.clapper" %% "argot" % "1.0.3" withSources(),
   "io.netty" % "netty-all" % "4.0.25.Final" withSources(),
   "joda-time" % "joda-time" % "2.1" withSources(),
   "org.joda" % "joda-convert" % "1.2" withSources(),
@@ -50,6 +51,9 @@ bintraySettings
 // use sbt-pack to create distributable package
 packSettings
 
-packMain := Map("labrad" -> "org.labrad.manager.Manager")
+packMain := Map(
+  "labrad" -> "org.labrad.manager.Manager",
+  "labrad-migrate-registry" -> "org.labrad.registry.Migrate"
+)
 
 packGenerateWindowsBatFile := true
