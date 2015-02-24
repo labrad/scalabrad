@@ -158,39 +158,12 @@ trait Data {
     case _ => false
   }
 
-//  /**
-//   * Get a Data subobject at the specified array of indices.  Note that
-//   * this returns a view rather than a copy, so any modifications to
-//   * the subobject will be reflected in the original data.
-//   */
-//  def apply(idx: Int*): Data = {
-//    @tailrec
-//    def find(t: Type, buf: Array[Byte], ofs: Int, idx: Seq[Int]): Data =
-//      if (idx.isEmpty)
-//        new Data(t, buf, ofs, heap)
-//      else
-//        t match {
-//          case TArr(elem, depth) =>
-//            if (idx.size < depth)
-//              sys.error("not enough indices for array")
-//            val arrBuf = heap(buf.getInt(ofs + 4 * depth))
-//            var arrOfs = 0
-//            var stride = 1
-//            val shape = Seq.tabulate(depth)(i => buf.getInt(ofs + 4 * i))
-//            for (dim <- (depth - 1) to 0 by -1) {
-//              arrOfs += elem.dataWidth * idx(dim) * stride
-//              stride *= shape(dim)
-//            }
-//            find(elem, arrBuf, arrOfs, idx.drop(depth))
-//
-//          case t: TCluster =>
-//            find(t.elems(idx.head), buf, ofs + t.offsets(idx.head), idx.tail)
-//
-//          case _ =>
-//            sys.error("type " + t + " is not indexable")
-//        }
-//    find(this.t, this.buf, this.ofs, idx)
-//  }
+  /**
+   * Get a Data subobject at the specified array of indices.  Note that
+   * this returns a view rather than a copy, so any modifications to
+   * the subobject will be reflected in the original data.
+   */
+  def apply(idx: Int*): Data
 
   /** Return an iterator that runs over all the elements in an N-dimensional array */
   def flatIterator: Iterator[Data]
