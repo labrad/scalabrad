@@ -6,6 +6,8 @@ import java.net.{DatagramSocket, ServerSocket}
 class Counter(min: Long, max: Long) {
   require(max >= min)
   val length = (max - min + 1)
+  require(min + (length-1) == max, s"cannot create range from $min to $max")
+
   private var idx = 0L
 
   def next: Long = synchronized {
