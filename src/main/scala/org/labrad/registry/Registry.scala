@@ -100,24 +100,9 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
   @Setting(id=10,
            name="cd",
            doc="Change the current directory")
-  def changeDir(): Seq[String] = changeDir(Left(""), false)
-  // FIXME: accepting numbers here is a kludge to allow the current registry editor to work
-  //def changeDir(r: RequestContext, dir: Either[String, Seq[String]]): Data = changeDir(r, dir, false)
-  def changeDir(dir: Either[Either[String, Seq[String]], Long]): Seq[String] = {
-    val theDir = dir match {
-      case Left(dir) => dir
-      case Right(num) => Left(Array.fill(num.toInt)("..").mkString("/"))
-    }
-    changeDir(theDir, false)
-  }
-  def changeDir(dir: Either[String, Seq[String]], create: Boolean): Seq[String] = {
-    def split(s: String): Seq[String] = s match {
-      case "" => Seq()
-      case "/" => Seq("")
-      case s => s.split("/").toSeq
-    }
+  def changeDir(dir: Either[String, Seq[String]] = Left(""), create: Boolean = false): Seq[String] = {
     val dirs = dir match {
-      case Left(dir) => split(dir)
+      case Left(dir) => Seq(dir)
       case Right(dirs) => dirs
     }
 
@@ -136,6 +121,11 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
     }
     curDir = path
     regPath(curDir)
+  }
+
+  // FIXME: accepting numbers is a kludge to allow the delphi registry editor to work
+  def changeDir(dir: Long): Seq[String] = {
+    changeDir(Right(Seq.fill(dir.toInt)("..")))
   }
 
   @Setting(id=15,
@@ -278,7 +268,7 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
     fun(path, Nil)
   }
 
-  private def regPathStr(path: File): String = regPath(path).mkString("/")
+  private def regPathStr(path: File): String = regPath(path).map(encode).mkString("/")
 
   private def readFile(path: File): Array[Byte] = {
     val is = new FileInputStream(path)
@@ -307,8 +297,17 @@ class RegistryContext(context: Context, rootDir: File, parent: Registry) extends
 
   private def keyFile(key: String) = new File(curDir, encode(key) + EXT)
 
+  /**
+   * Encode arbitrary string in a format suitable for use as a filename.
+   *
+   * We use URLEncoder to encode special characters, which handles all the
+   * special characters prohibited by most OSs. We must also manually
+   * replace * by %2A as this is not replaced by the URLEncoder, but
+   * it is properly decoded by the URLDecoder, so no special handling
+   * is needed there.
+   */
   private def encode(segment: String): String = {
-    URLEncoder.encode(segment, UTF_8.name)
+    URLEncoder.encode(segment, UTF_8.name).replace("*", "%2A")
   }
 
   private def decode(segment: String): String = {

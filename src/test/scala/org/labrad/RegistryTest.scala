@@ -2,7 +2,7 @@ package org.labrad
 
 import org.labrad.annotations._
 import org.labrad.data._
-import org.scalatest.FunSuite
+import org.scalatest.{FunSuite, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import scala.collection._
 import scala.concurrent.{Await, Future}
@@ -33,10 +33,10 @@ class RegistryTest extends FunSuite with AsyncAssertions {
     }
   }
 
-  test("registry can deal with unicode and strange characters in directory names") {
+  test("registry can deal with unicode and strange characters in directory names", Tag("chars")) {
     withManager { (host, port, password) =>
       withClient(host, port, password) { c =>
-        val dir = "<\u03C0|\u03C1>??+*"
+        val dir = "<\u03C0|\u03C1>??+*\\/:|"
         await(c.send("Registry", "mkdir" -> Str(dir)))
         val (dirs, _) = await(c.send("Registry", "dir" -> Data.NONE))(0).get[(Seq[String], Seq[String])]
         assert(dirs contains dir)
@@ -45,10 +45,10 @@ class RegistryTest extends FunSuite with AsyncAssertions {
     }
   }
 
-  test("registry can deal with unicode and strange characters in key names") {
+  test("registry can deal with unicode and strange characters in key names", Tag("chars")) {
     withManager { (host, port, password) =>
       withClient(host, port, password) { c =>
-        val key = "<\u03C0|\u03C1>??+*"
+        val key = "<\u03C0|\u03C1>??+*\\/:|"
         val data = Str("Hello!")
         await(c.send("Registry", "set" -> Cluster(Str(key), Str("Hello!"))))
         val (_, keys) = await(c.send("Registry", "dir" -> Data.NONE))(0).get[(Seq[String], Seq[String])]
