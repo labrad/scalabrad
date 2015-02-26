@@ -122,6 +122,8 @@ object Manager extends Logging {
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
     val registry = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new File(_)).getOrElse(sys.props("user.home") / ".labrad" / "registry")
 
+    println(s"registry location: $registry")
+    
     val centralNode = new CentralNode(port, password.toCharArray, registry)
 
     @tailrec def enterPressed(): Boolean =

@@ -46,29 +46,28 @@ object Migrate {
 
     val srcReg = new RegistryServerProxy(srcCxn)
     val dstReg = new RegistryServerProxy(dstCxn)
-
+    
     def traverse(srcPath: Seq[String], dstPath: Seq[String]): Unit = {
       await(srcReg.cd(srcPath))
       val (dirs, keys) = await(srcReg.dir())
-      for (dir <- dirs) {
-        println(s"entering ${srcPath.mkString("/")}/$dir/")
-        traverse(srcPath :+ dir, dstPath :+ dir)
-      }
 
+      print(s"fetching ${srcPath.mkString("/")}/")
       val futures = Map.newBuilder[String, Future[Data]]
-
       val pkt = srcReg.packet()
       pkt.cd(srcPath)
-      for (key <- keys) {
-        println(s"fetching ${srcPath.mkString("/")}/$key")
+      for (key <- keys.sorted) {
         futures += key -> pkt.get(key)
       }
+
+      val t0 = System.nanoTime()
       await(pkt.send())
+      val t1 = System.nanoTime()
 
       val results = futures.result.map {
         case (key, f) => key -> await(f)
       }
 
+      val t2 = System.nanoTime()
       if (write) {
         val dstPkt = dstReg.packet()
         dstPkt.cd(dstPath, create = true)
@@ -77,8 +76,19 @@ object Migrate {
         }
         await(dstPkt.send())
       }
+      val t3 = System.nanoTime()
+      
+      println(s" (load: ${((t1-t0) / 1e6).toInt}, save: ${((t3-t2) / 1e6).toInt})")
+
+      for (dir <- dirs.sorted) {
+        traverse(srcPath :+ dir, dstPath :+ dir)
+      }
     }
+    
+    val tStart = System.nanoTime()
     traverse(srcPath, dstPath)
+    val tEnd = System.nanoTime()
+    println(s"total time: ${((tEnd - tStart) / 1e9).toInt} seconds")
 
     srcCxn.close()
     dstCxn.close()

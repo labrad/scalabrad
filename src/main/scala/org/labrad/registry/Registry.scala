@@ -28,7 +28,12 @@ extends ServerActor with Logging {
   private val semaphore = new AsyncSemaphore(1)
 
   // create the root directory if it does not already exist
-  if (!rootDir.exists) rootDir.mkdir
+  if (!rootDir.exists) {
+    val ok = rootDir.mkdirs()
+    if (!ok) sys.error(s"failed to create registry directory: $rootDir")
+  } else {
+    require(rootDir.isDirectory)
+  }
 
   private var contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
 
