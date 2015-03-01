@@ -5,6 +5,7 @@ import java.nio.ByteOrder
 import java.util.Date
 import org.labrad.data._
 import org.labrad.manager.CentralNode
+import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util.{Logging, Util}
 import org.scalatest.FunSuite
@@ -21,12 +22,15 @@ object TestUtils extends {
     val port = 10000 + Random.nextInt(50000) //Util.findAvailablePort()
     val password = "testPassword12345!@#$%".toCharArray
 
-    val registryRoot = File.createTempFile("labrad-registry", "")
-    registryRoot.delete()
-    registryRoot.mkdir()
+    val registryFile = File.createTempFile("labrad-registry", "")
 
-    val manager = new CentralNode(port, password, registryRoot)
-    Thread.sleep(5000)
+    val registryStore = SQLiteStore(registryFile)
+
+    //registryFile.delete()
+    //registryFile.mkdir()
+    //val registryStore = new FileStore(registryFile)
+
+    val manager = new CentralNode(port, password, registryStore)
     try {
       f(host, port, password)
     } finally {

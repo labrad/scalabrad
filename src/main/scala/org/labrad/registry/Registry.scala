@@ -1,9 +1,5 @@
 package org.labrad.registry
 
-import java.io.{ByteArrayOutputStream, File, FileInputStream, FileOutputStream}
-import java.net.{URLDecoder, URLEncoder}
-import java.nio.ByteOrder.BIG_ENDIAN
-import java.nio.charset.StandardCharsets.UTF_8
 import org.labrad.{Reflect, RequestContext, Server, ServerInfo}
 import org.labrad.annotations._
 import org.labrad.data._
@@ -11,35 +7,23 @@ import org.labrad.errors._
 import org.labrad.manager.{Hub, ServerActor, StatsTracker}
 import org.labrad.types._
 import org.labrad.util.{AsyncSemaphore, Logging}
-import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-object Registry {
-  val EXT = ".txt"
-}
-
-class Registry(id: Long, name: String, rootDir: File, hub: Hub, tracker: StatsTracker)
+class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
 extends ServerActor with Logging {
 
   // enforce doing one thing at a time using an async semaphore
   private val semaphore = new AsyncSemaphore(1)
 
-  // create the root directory if it does not already exist
-  if (!rootDir.exists) {
-    val ok = rootDir.mkdirs()
-    if (!ok) sys.error(s"failed to create registry directory: $rootDir")
-  } else {
-    require(rootDir.isDirectory)
-  }
-
-  private var contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
+  private val contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
 
   private val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
   private val (settings, bind) = Reflect.makeHandler[RegistryContext]
 
+  // send info about this server and its settings to the manager
   hub.setServerInfo(ServerInfo(id, name, doc, settings))
 
   def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = semaphore.map {
@@ -69,7 +53,7 @@ extends ServerActor with Logging {
     tracker.serverReq(id)
     val response = Server.handle(packet) { case req @ RequestContext(source, ctx, id, data) =>
       val (_, handler) = contexts.getOrElseUpdate(ctx, {
-        val regCtx = new RegistryContext(ctx, rootDir, this)
+        val regCtx = new RegistryContext(ctx)
         val handler = bind(regCtx)
         (regCtx, handler)
       })
@@ -79,243 +63,145 @@ extends ServerActor with Logging {
     response
   }
 
-  // used by contexts
-  private[registry] def foreachContext(func: RegistryContext => Unit) = contexts.values.foreach { case (ctx, _) => func(ctx) }
-  private[registry] def sendMessage(target: Long, packet: Packet): Unit = hub.message(target, packet.copy(target = id))
-  private[registry] def getContext(context: Context): Option[RegistryContext] = contexts.get(context).map(_._1)
-}
-
-class RegistryContext(context: Context, rootDir: File, parent: Registry) extends Logging {
-  import Registry._
-
-  implicit val byteOrder = BIG_ENDIAN
-
-  var curDir: File = rootDir
-
-  @Setting(id=1,
-           name="dir",
-           doc="Returns lists of the subdirs and keys in the current directory")
-  def listDir(): (Seq[String], Seq[String]) = {
-    val files = curDir.listFiles
-    val dirs = for (f <- files if f.isDirectory; n = f.getName) yield decode(n)
-    val keys = for (f <- files if f.isFile; n = f.getName if n.endsWith(EXT)) yield decode(n.dropRight(EXT.size))
-    (dirs, keys)
+  // send a notification to all contexts that have listeners registered
+  private def messageContexts(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean) = {
+    for ((ctx, _) <- contexts.values) {
+      ctx.message(dir, name, isDir, addOrChange)
+    }
   }
 
-  @Setting(id=10,
-           name="cd",
-           doc="Change the current directory")
-  def changeDir(dir: Either[String, Seq[String]] = Left(""), create: Boolean = false): Seq[String] = {
-    val dirs = dir match {
-      case Left(dir) => Seq(dir)
-      case Right(dirs) => dirs
+  // contains context-specific state and settings
+  class RegistryContext(context: Context) {
+
+    private var curDir = store.root
+    private var changeListener: Option[(Long, Long)] = None // TODO: allow a context to send notifications to more than one target
+
+    @Setting(id=1,
+             name="dir",
+             doc="Returns lists of the subdirs and keys in the current directory")
+    def listDir(): (Seq[String], Seq[String]) = {
+      store.dir(curDir)
     }
 
-    var path = curDir
-    for ((dir, i) <- dirs.zipWithIndex) dir match {
-      case ""   => if (i == 0) path = rootDir
-      case "."  =>
-      case ".." => if (path != rootDir) path = path.getParentFile
-      case dir  => path = new File(path, encode(dir))
+    @Setting(id=10,
+             name="cd",
+             doc="Change the current directory")
+    def changeDir(dir: Either[String, Seq[String]] = Left(""), create: Boolean = false): Seq[String] = {
+      val dirs = dir match {
+        case Left(dir) => Seq(dir)
+        case Right(dirs) => dirs
+      }
+
+      var newDir = curDir
+      for ((dir, i) <- dirs.zipWithIndex) dir match {
+        case ""   => if (i == 0) newDir = store.root
+        case "."  =>
+        case ".." => newDir = store.parent(newDir)
+        case dir  => newDir = _mkDir(newDir, dir, create = create)
+      }
+      curDir = newDir
+      store.pathTo(curDir)
     }
-    if (!path.exists) {
-      if (create)
-        path.mkdirs()
-      else
-        sys.error(s"directory does not exist: ${regPathStr(path)}")
+
+    // FIXME: accepting numbers is a kludge to allow the delphi registry editor to work
+    def changeDir(dir: Long): Seq[String] = {
+      changeDir(Right(Seq.fill(dir.toInt)("..")))
     }
-    curDir = path
-    regPath(curDir)
-  }
 
-  // FIXME: accepting numbers is a kludge to allow the delphi registry editor to work
-  def changeDir(dir: Long): Seq[String] = {
-    changeDir(Right(Seq.fill(dir.toInt)("..")))
-  }
-
-  @Setting(id=15,
-           name="mkdir",
-           doc="Create a new subdirectory in the current directory with the given name")
-  def mkDir(name: String): Seq[String] = {
-    val path = new File(curDir, encode(name))
-    if (!path.exists) path.mkdir()
-    parent.foreachContext(_.notify(curDir, name, isDir=true, addOrChange=true))
-    regPath(path)
-  }
-
-  @Setting(id=16,
-           name="rmdir",
-           doc="Delete the given subdirectory from the current directory")
-  def rmDir(name: String): Unit = {
-    val path = new File(curDir, encode(name))
-    if (!path.exists) sys.error(s"directory does not exist: $name")
-    if (!path.isDirectory) sys.error(s"found file instead of directory: $name")
-    path.delete()
-    parent.foreachContext(_.notify(curDir, name, isDir=true, addOrChange=false))
-  }
-
-  @Setting(id=20,
-           name="get",
-           doc="Get the content of the given key in the current directory")
-  def getValue(key: String): Data = getValue(key, false, Data.NONE)
-  def getValue(key: String, pat: String): Data = getValue(key, pat, false, Data.NONE)
-  def getValue(key: String, set: Boolean, default: Data): Data = getValue(key, "?", set, default)
-  def getValue(key: String, pat: String, set: Boolean, default: Data): Data = {
-    val path = keyFile(key)
-    if (!path.exists) {
-      if (set)
-        setValue(key, default)
-      else
-        sys.error(s"key does not exist: $key")
+    @Setting(id=15,
+             name="mkdir",
+             doc="Create a new subdirectory in the current directory with the given name")
+    def mkDir(name: String): Seq[String] = {
+      val dir = _mkDir(curDir, name, create = true)
+      store.pathTo(dir)
     }
-    val Cluster(Str(typ), Bytes(bytes)) = Data.fromBytes(readFile(path), Type("ss"))
-    val data = Data.fromBytes(bytes, Type(typ))
-    val pattern = Pattern(pat)
-    data.convertTo(pattern)
-  }
 
-//  @Setting(id=21,
-//           name="getAsString",
-//           doc="Get the content of the given key in the current directory")
-//  def getValueStr(key: String): String = getValueStr(key, false, "")
-//  def getValueStr(key: String, pat: String): String = getValueStr(key, pat, false, "")
-//  def getValueStr(key: String, set: Boolean, default: String): String = getValueStr(key, "?", set, default)
-//  def getValueStr(key: String, pat: String, set: Boolean, default: String): String = {
-//    val path = keyFile(key)
-//    if (!path.exists) {
-//      if (set)
-//        setValueStr(key, default)
-//      else
-//        sys.error("key does not exist: " + key)
-//    }
-//    val text = readFile(path)
-//    val data = Data.parse(text)
-//    val clone = data.clone
-//    val pattern = Pattern(pat)
-//    clone.convertTo(pattern)
-//    if (clone == data) text else clone.toString
-//  }
+    /**
+     * Make a directory and send a message to all interested listeners.
+     */
+    private def _mkDir(dir: store.Dir, name: String, create: Boolean): store.Dir = {
+      val (newDir, created) = store.child(dir, name, create)
+      if (created) {
+        messageContexts(dir, name, isDir=true, addOrChange=true)
+      }
+      newDir
+    }
 
-  @Setting(id=30,
-           name="set",
-           doc="Set the content of the given key in the current directory to the given data")
-  def setValue(key: String, value: Data): Unit = {
-    val path = keyFile(key)
-    val data = Cluster(Str(value.t.toString), Bytes(value.toBytes))
-    writeFile(path, data.toBytes)
-    parent.foreachContext(_.notify(curDir, key, isDir=false, addOrChange=true))
-  }
+    @Setting(id=16,
+             name="rmdir",
+             doc="Delete the given subdirectory from the current directory")
+    def rmDir(name: String): Unit = {
+      store.rmDir(curDir, name)
+      messageContexts(curDir, name, isDir=true, addOrChange=false)
+    }
 
-//  @Setting(id=31,
-//           name="setAsString",
-//           doc="Set the content of the given key in the current directory to the given data")
-//  def setValueStr(r: RequestContext, key: String, text: String): Unit = {
-//    val path = keyFile(key)
-//    val data = Data.parse(text) // make sure text parses
-//    writeFile(path, text)
-//    parent.foreachContext(_.notify(curDir, key, isDir=false, addOrChange=true))
-//  }
+    @Setting(id=20,
+             name="get",
+             doc="Get the content of the given key in the current directory")
+    def getValue(key: String): Data = _getValue(key)
+    def getValue(key: String, pat: String): Data = _getValue(key, pat)
+    def getValue(key: String, set: Boolean, default: Data): Data = _getValue(key, default = Some((set, default)))
+    def getValue(key: String, pat: String, set: Boolean, default: Data): Data = _getValue(key, pat, Some((set, default)))
 
-  @Setting(id=40,
-           name="del",
-           doc="Delete the given key from the current directory")
-  def delete(key: String): Unit = {
-    val path = keyFile(key)
-    if (!path.exists) sys.error(s"key does not exist: $key")
-    if (path.isDirectory) sys.error(s"found directory instead of file: $key")
-    path.delete
-    parent.foreachContext(_.notify(curDir, key, isDir=false, addOrChange=false))
-  }
+    def _getValue(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Data = {
+      val data = store.getValue(curDir, key, default)
+      val pattern = Pattern(pat)
+      data.convertTo(pattern)
+    }
 
-  @Setting(id=50,
-           name="Notify On Change",
-           doc="Requests notifications if the contents of the current directory change")
-  def notifyOnChange(r: RequestContext, id: Long, enable: Boolean): Unit = {
-    changeListener = if (enable) Some((r.source, id)) else None
-  }
+    @Setting(id=30,
+             name="set",
+             doc="Set the content of the given key in the current directory to the given data")
+    def setValue(key: String, value: Data): Unit = {
+      store.setValue(curDir, key, value)
+      messageContexts(curDir, key, isDir=false, addOrChange=true)
+    }
 
-  // TODO: allow a context to send notifications to more than one target
-  var changeListener: Option[(Long, Long)] = None
+    @Setting(id=40,
+             name="del",
+             doc="Delete the given key from the current directory")
+    def delete(key: String): Unit = {
+      store.delete(curDir, key)
+      messageContexts(curDir, key, isDir=false, addOrChange=false)
+    }
 
-  // message: (name, isDir, addOrChange)
-  def notify(dir: File, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
-    log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
-    if (dir == curDir) {
-      for ((target, id) <- changeListener) {
-        val msg = Cluster(Str(name), Bool(isDir), Bool(addOrChange))
-        parent.sendMessage(target, Packet(0, 0, context, Seq(Record(id, msg))))
+    @Setting(id=50,
+             name="Notify On Change",
+             doc="Requests notifications if the contents of the current directory change")
+    def notifyOnChange(r: RequestContext, id: Long, enable: Boolean): Unit = {
+      changeListener = if (enable) Some((r.source, id)) else None
+    }
+
+    @Setting(id=100,
+             name="Duplicate Context",
+             doc="Copy context state from the specified context into the current context (DEPRECATED)")
+    def duplicateContext(r: RequestContext, high: Long, low: Long): Unit = {
+      val xHigh = if (high == 0) r.source else high
+      contexts.get(Context(xHigh, low)) match {
+        case None => sys.error(s"context ($xHigh, $low) does not exist")
+        case Some((other, _)) =>
+          curDir = other.curDir
+          // XXX: Any other state to copy here?
+      }
+    }
+
+    /**
+     * Handle messages about added/changed/removed directories and keys
+     *
+     * If this context is currently in the same directory as the one for
+     * the message, and has a message listener registered, then we will
+     * send a message of the form (s{dirOrKeyName}, b{isDir}, b{addOrChange})
+     */
+    private[registry] def message(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+      if (dir == curDir) {
+        for ((target, msgId) <- changeListener) {
+          log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
+          val msg = Cluster(Str(name), Bool(isDir), Bool(addOrChange))
+          val pkt = Packet(0, target = id, context = context, records = Seq(Record(msgId, msg)))
+          hub.message(target, pkt)
+        }
       }
     }
   }
-
-
-  @Setting(id=100,
-           name="Duplicate Context",
-           doc="Copy context state from the specified context into the current context")
-  def duplicateContext(r: RequestContext, high: Long, low: Long): Unit = {
-    val xHigh = if (high == 0) r.source else high
-    parent.getContext(Context(xHigh, low)) match {
-      case None => sys.error(s"context ($xHigh, $low) does not exist")
-      case Some(other) =>
-        curDir = other.curDir
-        // XXX: Any other state to copy here?
-    }
-  }
-
-
-  private def regPath(path: File): Seq[String] = {
-    @tailrec
-    def fun(path: File, rest: Seq[String]): Seq[String] =
-      if (path == rootDir)
-        "" +: rest
-      else
-        fun(path.getParentFile, decode(path.getName) +: rest)
-    fun(path, Nil)
-  }
-
-  private def regPathStr(path: File): String = regPath(path).map(encode).mkString("/")
-
-  private def readFile(path: File): Array[Byte] = {
-    val is = new FileInputStream(path)
-    try {
-      val os = new ByteArrayOutputStream()
-      val buf = new Array[Byte](10000)
-      var done = false
-      while (!done) {
-        val read = is.read(buf)
-        if (read >= 0) os.write(buf, 0, read)
-        done = read < 0
-      }
-      os.toByteArray
-    } finally {
-      is.close
-    }
-  }
-
-  private def writeFile(path: File, contents: Array[Byte]) {
-    val os = new FileOutputStream(path)
-    try
-      os.write(contents)
-    finally
-      os.close
-  }
-
-  private def keyFile(key: String) = new File(curDir, encode(key) + EXT)
-
-  /**
-   * Encode arbitrary string in a format suitable for use as a filename.
-   *
-   * We use URLEncoder to encode special characters, which handles all the
-   * special characters prohibited by most OSs. We must also manually
-   * replace * by %2A as this is not replaced by the URLEncoder, but
-   * it is properly decoded by the URLDecoder, so no special handling
-   * is needed there.
-   */
-  private def encode(segment: String): String = {
-    URLEncoder.encode(segment, UTF_8.name).replace("*", "%2A")
-  }
-
-  private def decode(segment: String): String = {
-    URLDecoder.decode(segment, UTF_8.name)
-  }
 }
+

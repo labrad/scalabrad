@@ -2,14 +2,14 @@ package org.labrad
 
 import org.labrad.annotations._
 import org.labrad.data._
-import org.scalatest.{FunSuite, Tag}
+import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.AsyncAssertions
+import org.scalatest.time.SpanSugar._
 import scala.collection._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
-import org.scalatest.time.SpanSugar._
 
-class RegistryTest extends FunSuite with AsyncAssertions {
+class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   import TestUtils._
 
@@ -123,6 +123,51 @@ class RegistryTest extends FunSuite with AsyncAssertions {
         await(c.send("Registry", "Notify On Change" -> Cluster(UInt(msgId), Bool(true))))
         await(c.send("Registry", "del" -> Str("a")))
         w.await
+      }
+    }
+  }
+
+  test("deleting a registry directory containing a dir should fail") {
+    withManager { (host, port, password) =>
+      withClient(host, port, password) { c =>
+
+        val reg = new RegistryServerProxy(c)
+        await(reg.cd(Seq("a", "b"), true))
+
+        def dirs(): Seq[String] = {
+          val (ds, ks) = await(reg.dir())
+          ds
+        }
+
+        await(reg.cd(".."))
+        assert(dirs() contains "b")
+
+        await(reg.cd(".."))
+        assert(dirs() contains "a")
+
+        an[Exception] should be thrownBy {
+          await(reg.rmDir("a"))
+        }
+      }
+    }
+  }
+
+  test("deleting a registry directory containing a key should fail") {
+    withManager { (host, port, password) =>
+      withClient(host, port, password) { c =>
+
+        val reg = new RegistryServerProxy(c)
+        await(reg.cd(Seq("a"), true))
+        await(reg.set("blah", Str("test")))
+
+        val (_, keys) = await(reg.dir())
+        assert(keys contains "blah")
+
+        await(reg.cd(".."))
+
+        an[Exception] should be thrownBy {
+          await(reg.rmDir("a"))
+        }
       }
     }
   }

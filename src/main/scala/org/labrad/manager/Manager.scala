@@ -32,7 +32,7 @@ class AuthServiceImpl(password: Array[Char]) extends AuthService {
 }
 
 
-class CentralNode(port: Int, password: Array[Char], registryRoot: File) extends Logging {
+class CentralNode(port: Int, password: Array[Char], store: RegistryStore) extends Logging {
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
@@ -45,7 +45,7 @@ class CentralNode(port: Int, password: Array[Char], registryRoot: File) extends 
   { // Registry gets id 2L
     val name = "Registry"
     val id = hub.allocateServerId(name)
-    val server = new Registry(id, name, registryRoot, hub, tracker)
+    val server = new Registry(id, name, store, hub, tracker)
     hub.connectServer(id, name, server)
   }
 
@@ -120,11 +120,17 @@ object Manager extends Logging {
 
     val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
-    val registry = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new File(_)).getOrElse(sys.props("user.home") / ".labrad" / "registry")
+    val registry = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new File(_)).getOrElse(sys.props("user.home") / ".labrad" / "registry.sqlite")
 
     log.info(s"registry location: $registry")
+    val dir = registry.getAbsoluteFile.getParentFile
+    if (!dir.exists) {
+      val ok = dir.mkdirs()
+      if (!ok) sys.error(s"failed to create registry directory: $dir")
+    }
+    val store = SQLiteStore(registry)
 
-    val centralNode = new CentralNode(port, password.toCharArray, registry)
+    val centralNode = new CentralNode(port, password.toCharArray, store)
 
     @tailrec def enterPressed(): Boolean =
       System.in.available > 0 && (System.in.read() == '\n'.toInt || enterPressed())
