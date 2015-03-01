@@ -44,7 +44,7 @@ extends Logging {
   log.info(s"now accepting labrad connections on port $port")
 
   def stop() {
-    log.warn("shutting down")
+    log.info("shutting down")
     try {
       serverChannel.close()
       serverChannel.closeFuture.sync()

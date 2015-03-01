@@ -2,6 +2,7 @@ package org.labrad
 
 import org.labrad.annotations._
 import org.labrad.data._
+import org.labrad.util.Logging
 import org.scalatest.FunSuite
 import org.scalatest.concurrent.AsyncAssertions
 import scala.collection._
@@ -11,28 +12,24 @@ import scala.reflect.runtime.universe
 
 @IsServer(name = "Scala Test Server",
            doc = "Basic server to test Scalabrad API.")
-object TestSrv extends Server[TestCtx] {
-  def init(cxn: ServerConnection[TestCtx]): Unit = println("init() called on server.")
-  def shutdown(): Unit = println("shutdown() called on server.")
+object TestSrv extends Server[TestCtx] with Logging {
+  def init(cxn: ServerConnection[TestCtx]): Unit = log.info("init() called on server.")
+  def shutdown(): Unit = log.info("shutdown() called on server.")
 }
 
 
 class TestCtx(cxn: ServerConnection[TestCtx], server: Server[TestCtx], context: Context)
-extends ServerContext(cxn, server, context) {
+extends ServerContext(cxn, server, context) with Logging {
   private val registry = mutable.Map.empty[String, Data]
 
   def init(): Unit = {
     registry("Test") = Str("blah")
-    println("Context %s created.".format(context))
+    log.debug(s"Context $context created")
   }
 
   def expire(): Unit = {
-    println("Context %s expired".format(context))
+    log.debug(s"Context $context expired")
   }
-
-  private def log(setting: String, data: Data): Unit = println(s"$setting called [${data.t}]: $data")
-  private def log(setting: String): Unit = println(s"$setting called")
-  private def logAny(msg: String): Unit = println(msg)
 
   private def makeRequest(server: String, setting: String, data: Data = Data.NONE) =
     Await.result(cxn.send(server, context, setting -> data), 10.seconds)(0)
@@ -45,16 +42,16 @@ extends ServerContext(cxn, server, context) {
   @Setting(id = 1,
            name = "Echo",
            doc = "Echoes back any data sent to this setting.")
-  def echo(r: RequestContext, data: Data): Data = {
-    log("Echo", data)
+  def echo(data: Data): Data = {
+    log.debug(s"Echo: $data")
     data
   }
 
   @Setting(id = 2,
            name = "Delayed Echo",
            doc = "Echoes back data after a specified delay.")
-  def delayedEcho(r: RequestContext, @Accept("v[s]") delay: Double, payload: Data): Data = {
-    log("Delayed Echo (%g seconds): %s".format(delay, payload))
+  def delayedEcho(@Accept("v[s]") delay: Double, payload: Data): Data = {
+    log.debug(s"Delayed Echo ($delay seconds): $payload")
     Thread.sleep((delay*1000).toLong)
     payload
   }
@@ -62,8 +59,8 @@ extends ServerContext(cxn, server, context) {
   @Setting(id = 3,
            name = "Set",
            doc = "Sets a key value pair in the current context.")
-  def set(r: RequestContext, key: String, value: Data): Data = {
-    log("Set: %s = %s".format(key, value))
+  def set(key: String, value: Data): Data = {
+    log.debug(s"Set: $key = $value")
     registry(key) = value
     value
   }
@@ -71,35 +68,35 @@ extends ServerContext(cxn, server, context) {
   @Setting(id = 4,
            name = "Get",
            doc = "Gets a key from the current context.")
-  def get(r: RequestContext, key: String): Data = {
-    log("Get: %s".format(key))
+  def get(key: String): Data = {
+    log.debug(s"Get: $key")
     registry.get(key) match {
       case Some(value) => value
-      case None => sys.error("Invalid key: " + key)
+      case None => sys.error(s"Invalid key: $key")
     }
   }
 
   @Setting(id = 5,
            name = "Get All",
            doc = "Gets all of the key-value pairs defined in this context.")
-  def getAll(r: RequestContext): Seq[(String, Data)] = {
-    log("Get All")
+  def getAll(): Seq[(String, Data)] = {
+    log.debug("Get All")
     registry.toSeq.sortBy(_._1)
   }
 
   @Setting(id = 6,
            name = "Keys",
            doc = "Returns a list of all keys defined in this context.")
-  def getKeys(r: RequestContext): Seq[String] = {
-    log("Keys")
+  def getKeys(): Seq[String] = {
+    log.debug("Keys")
     registry.keys.toSeq.sorted
   }
 
   @Setting(id = 7,
            name = "Remove",
            doc = "Removes the specified key from this context.")
-  def remove(r: RequestContext, key: String): Unit = {
-    log("Remove: %s".format(key))
+  def remove(key: String): Unit = {
+    log.debug(s"Remove: $key")
     registry -= key
   }
 
@@ -109,56 +106,56 @@ extends ServerContext(cxn, server, context) {
 
                    |If a type is specified, the data will be of that type;
                    |otherwise it will be of a random type.""")
-  def getRandomData(r: RequestContext, typ: String): Data = {
-    log("Get Random Data: %s".format(typ))
+  def getRandomData(typ: String): Data = {
+    log.debug(s"Get Random Data: $typ")
     Hydrant.randomData(typ)
   }
-  def getRandomData(r: RequestContext): Data = {
-    log("Get Random Data (no type)")
+  def getRandomData(): Data = {
+    log.debug("Get Random Data (no type)")
     Hydrant.randomData
   }
 
   @Setting(id = 9,
            name = "Get Random Data Remote",
            doc = "Fetches random data by making a request to the python test server.")
-  def getRandomDataRemote(r: RequestContext, typ: Option[String] = None): Data = typ match {
+  def getRandomDataRemote(typ: Option[String] = None): Data = typ match {
     case Some(typ) =>
-      log("Get Random Data Remote: %s".format(typ))
+      log.debug("Get Random Data Remote: $typ")
       makeRequest("Python Test Server", "Get Random Data", Str(typ))
 
     case None =>
-      log("Get Random Data Remote (no type)")
+      log.debug("Get Random Data Remote (no type)")
       makeRequest("Python Test Server", "Get Random Data")
   }
 
   @Setting(id = 10,
            name = "Forward Request",
            doc = "Forwards a request on to another server, specified by name and setting.")
-  def forwardRequest(r: RequestContext, server: String, setting: String, payload: Data): Data = {
-    log("Forward Request: server='%s', setting='%s', payload=%s".format(server, setting, payload))
+  def forwardRequest(server: String, setting: String, payload: Data): Data = {
+    log.debug("Forward Request: server='$server', setting='$setting', payload=$payload")
     makeRequest(server, setting, payload)
   }
 
   @Setting(id = 11,
            name = "Test No Args",
            doc = "Test setting that takes no arguments.")
-  def noArgs(r: RequestContext): Boolean = {
-    log("Test No Args")
+  def noArgs(): Boolean = {
+    log.debug("Test No Args")
     true
   }
 
   @Setting(id = 12,
            name = "Test No Return",
            doc = "Test setting with no return value.")
-  def noReturn(r: RequestContext, data: Data): Unit = {
-    log("Test No Return", data)
+  def noReturn(data: Data): Unit = {
+    log.debug(s"Test No Return: $data")
   }
 
   @Setting(id = 13,
            name = "Test No Args No Return",
            doc = "Test setting that takes no arguments and has no return value.")
-  def noArgsNoReturn(r: RequestContext): Unit = {
-    log("Test No Args No Return")
+  def noArgsNoReturn(): Unit = {
+    log.debug("Test No Args No Return")
   }
 }
 

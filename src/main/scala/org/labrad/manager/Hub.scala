@@ -120,7 +120,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
         case Some(handler: ServerActor) => (handler, true)
         case Some(handler)              => (handler, false)
         case None =>
-          log.warn(s"disconnect called on unknown id: $id")
+          log.debug(s"disconnect called on unknown id: $id")
           return
       }
 
@@ -162,7 +162,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     }
     handlerOpt match {
       case Some(handler) => handler.message(packet)
-      case None => log.warn("Message sent to non-existent target: " + id)
+      case None => log.debug(s"Message sent to non-existent target: $id")
     }
   }
 

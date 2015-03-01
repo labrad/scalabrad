@@ -47,7 +47,7 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
       } yield (),
       timeout
     )
-    println("Now serving...")
+    log.info("Now serving...")
   }
 
   override protected def handleRequest(packet: Packet): Unit = {
@@ -145,7 +145,7 @@ object ServerConnection extends Logging {
 
     // substitute environment variable into string
     for (key <- keys; value <- sys.env.get(key)) {
-      println(key + " -> " + value)
+      log.info(key + " -> " + value)
       name = name.replaceAll("%" + key + "%", value)
     }
 
