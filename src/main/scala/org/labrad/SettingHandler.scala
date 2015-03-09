@@ -144,7 +144,7 @@ object SettingHandler extends Logging {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Accept])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    (patternFor(tpe, annotated), unpacker(tpe, annotated))
+    (patternFor(tpe.dealias, annotated), unpacker(tpe.dealias, annotated))
   }
 
   /** infer the pattern and create a repacker for a method return type */
@@ -153,7 +153,7 @@ object SettingHandler extends Logging {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Return])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    (patternFor(tpe, annotated), packer(tpe, annotated))
+    (patternFor(tpe.dealias, annotated), packer(tpe.dealias, annotated))
   }
 
   implicit class RichAnnotation(a: Annotation) {

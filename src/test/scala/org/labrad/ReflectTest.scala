@@ -138,6 +138,27 @@ class Options extends Testable("translate Option into type or None") {
   )
 }
 
+class TypeAlias extends Testable("type aliases do not affect inference") {
+
+  type Foo = String
+  type Bar = Either[Long, Foo]
+
+  @Setting(id=1, name="a", doc="")
+  def a(name: Foo): Data = Data.NONE
+
+  @Setting(id=2, name="b", doc="")
+  def b(name: Bar): Data = Data.NONE
+
+  @Setting(id=3, name="c", doc="")
+  def c(): Bar = Right("blah")
+
+  val settings = Seq(
+    (1L, "a", "s", "?"),
+    (2L, "b", "w|s", "?"),
+    (3L, "c", "", "w|s")
+  )
+}
+
 object Container {
   class Nested extends Testable("handle nested classes") {
     @Setting(id=1, name="a", doc="")
@@ -242,6 +263,7 @@ class ReflectTests extends FunSuite with Logging {
   testSettings[Tuples]
   testSettings[Eithers]
   testSettings[Options]
+  testSettings[TypeAlias]
   testSettings[Container.Nested]
   testSettings[DefaultArgs]
   testSettings[AcceptAnnotations]
