@@ -25,6 +25,9 @@ object Getter {
   implicit val stringGetter = new Getter[String] {
     def get(data: Data): String = data.getString
   }
+  implicit val bytesGetter = new Getter[Array[Byte]] {
+    def get(data: Data): Array[Byte] = data.getBytes
+  }
   implicit val dateGetter = new Getter[Date] {
     def get(data: Data): Date = data.getTime.toDate
   }
