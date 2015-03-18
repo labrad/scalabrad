@@ -33,7 +33,7 @@ class ClientHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel
 extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport with Logging {
 
   // handle incoming packets
-  override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+  override def messageReceived(ctx: ChannelHandlerContext, packet: Packet): Unit = {
     packet match {
       case Packet(0, _, _, _)          => handleMessage(packet)
       case Packet(r, _, _, _) if r > 0 => handleRequest(packet)
