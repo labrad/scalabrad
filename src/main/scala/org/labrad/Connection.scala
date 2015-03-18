@@ -51,7 +51,7 @@ trait Connection {
   protected val lookupProvider = new LookupProvider(this.send)
   protected val requestDispatcher = new RequestDispatcher(sendPacket)
   protected val executor = Executors.newCachedThreadPool
-  protected implicit val executionContext = ExecutionContext.fromExecutor(executor)
+  implicit val executionContext = ExecutionContext.fromExecutor(executor)
 
   private var socket: Socket = _
   private var reader: Thread = _
