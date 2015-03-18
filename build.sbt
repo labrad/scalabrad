@@ -4,7 +4,7 @@ name := "scalabrad"
 
 version := "0.2.0-M3-3"
 
-scalaVersion := "2.11.5"
+scalaVersion := "2.11.6"
 
 scalacOptions ++= Seq(
   "-deprecation",
