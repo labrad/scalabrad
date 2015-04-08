@@ -68,6 +68,12 @@ trait Data {
   }
 
   private[data] def cast(newType: Type): Data
+  private[data] def castError: Data = {
+    t match {
+      case TError(payload) => cast(TCluster(TInt, TStr, payload))
+      case _ => sys.error(s"cannot cast data of type $t to error cluster")
+    }
+  }
 
   def toBytes(implicit outputOrder: ByteOrder): Array[Byte] = {
     val bs = new ByteArrayOutputStream
@@ -226,12 +232,380 @@ trait Data {
 
   def setError(code: Int, message: String, payload: Data = Data.NONE): Unit = t match {
     case TError(payloadType) =>
-      val data = cast(TCluster(TInt, TStr, payloadType))
+      val data = castError
       val it = data.clusterIterator
       it.next.setInt(code)
       it.next.setString(message)
       it.next.set(payload)
     case _ => sys.error("Data type must be error")
+  }
+}
+
+class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder: ByteOrder) {
+
+  import org.labrad.data.RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
+
+  def toData: FlatDataImpl = new FlatDataImpl(t, buf, ofs)
+
+  def len: Int = {
+    t match {
+      case TNone | TBool | TInt | TUInt | TValue(_) | TComplex(_) | TTime =>
+        t.dataWidth
+
+      case TStr =>
+        val strLen = buf.getInt(ofs)
+        4 + strLen
+
+      case TArr(elem, depth) =>
+        val size = _arrayShape(depth).product
+        var len = 4 * depth
+        if (elem.fixedWidth) {
+          len += size * elem.dataWidth
+        } else {
+          val iter = _arrayCursor(elem, depth)
+          while (iter.hasNext) {
+            len += iter.next.len
+          }
+        }
+        len
+
+      case t: TCluster =>
+        var len = 0
+        if (t.fixedWidth) {
+          len += t.dataWidth
+        } else {
+          val iter = new ClusterCursor(t.elems, buf, ofs)
+          while (iter.hasNext) {
+            len += iter.next.len
+          }
+        }
+        len
+
+      case TError(payload) =>
+        _errorCursor.len
+    }
+  }
+
+  def flatten(os: EndianAwareOutputStream): Unit = {
+    if (os.byteOrder == byteOrder)
+      os.write(buf, ofs, len)
+    else {
+      t match {
+        case TNone =>
+
+        case TBool =>
+          os.writeBool(buf.getBool(ofs))
+
+        case TInt =>
+          os.writeInt(buf.getInt(ofs))
+
+        case TUInt =>
+          os.writeUInt(buf.getUInt(ofs))
+
+        case TValue(_) =>
+          os.writeDouble(buf.getDouble(ofs))
+
+        case TComplex(_) =>
+          os.writeDouble(buf.getDouble(ofs))
+          os.writeDouble(buf.getDouble(ofs + 8))
+
+        case TTime =>
+          os.writeLong(buf.getLong(ofs))
+          os.writeLong(buf.getLong(ofs + 8))
+
+        case TStr =>
+          val strLen = buf.getInt(ofs)
+          os.writeInt(strLen)
+          os.write(buf, ofs + 4, strLen)
+
+        case TArr(elem, depth) =>
+          // write arr shape and compute total number of elements in the list
+          var size = 1
+          for (i <- 0 until depth) {
+            val dim = buf.getInt(ofs + 4*i)
+            os.writeInt(dim)
+            size *= dim
+          }
+
+          // write arr data
+          if (elem.fixedWidth && os.byteOrder == byteOrder) {
+            // for fixed-width data, just copy in one big chunk
+            os.write(buf, ofs + 4*depth, elem.dataWidth * size)
+          } else {
+            // for variable-width data, flatten recursively
+            val iter = _arrayCursor(elem, depth)
+            while (iter.hasNext) {
+              iter.next.flatten(os)
+            }
+          }
+
+        case t: TCluster =>
+          val iter = _clusterCursor(t)
+          while (iter.hasNext) {
+            iter.next.flatten(os)
+          }
+
+        case TError(payload) =>
+          _errorCursor.flatten(os)
+      }
+    }
+  }
+
+  private def _errorCursor: Cursor = {
+    t match {
+      case TError(payload) => new Cursor(TCluster(TInt, TStr, payload), buf, ofs)
+      case t => sys.error(s"cannot create error cursor for data of type $t")
+    }
+  }
+
+  private def _arrayShape(depth: Int): Array[Int] = {
+    Array.tabulate(depth) { i => buf.getInt(ofs + 4*i) }
+  }
+
+  private def _arrayCursor(elem: Type, depth: Int): ArrayCursor = {
+    val size = _arrayShape(depth).product
+    new ArrayCursor(elem, buf, size, ofs + 4 * depth)
+  }
+
+  private def _clusterCursor(t: TCluster): ClusterCursor = {
+    new ClusterCursor(t.elems, buf, ofs)
+  }
+}
+
+class ArrayCursor(val t: Type, val buf: Array[Byte], size: Int, ofs: Int)(implicit byteOrder: ByteOrder) extends Iterator[Cursor] {
+
+  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
+
+  var idx = 0
+  var elemOfs = ofs
+
+  val cursor = new Cursor(t, buf, ofs)
+
+  def hasNext: Boolean = {
+    idx < size
+  }
+
+  def next: Cursor = {
+    require(hasNext)
+    cursor.ofs = elemOfs
+    idx += 1
+    elemOfs += cursor.len
+    cursor
+  }
+}
+
+class ClusterCursor(ts: Seq[Type], buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder) extends Iterator[Cursor] {
+
+  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
+
+  var idx = 0
+  var elemOfs = ofs
+
+  val cursor = new Cursor(TNone, buf, ofs)
+
+  def hasNext: Boolean = {
+    idx < ts.size
+  }
+
+  def next: Cursor = {
+    require(hasNext)
+    cursor.t = ts(idx)
+    cursor.ofs = elemOfs
+    idx += 1
+    elemOfs += cursor.len
+    cursor
+  }
+
+}
+
+
+/**
+ * The Data class encapsulates the data format used to communicate between
+ * LabRAD servers and clients.  This data format is based on the
+ * capabilities of LabVIEW, from National Instruments.  Each piece of LabRAD
+ * data has a Type object which is specified by a String type tag.
+ */
+class FlatDataImpl private[data] (val t: Type, buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder)
+extends Data with Serializable with Cloneable {
+
+  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
+
+  override def clone = Data.copy(this, Data(this.t))
+
+  def cursor: Cursor = new Cursor(t, buf, ofs)
+
+  def len: Int = cursor.len
+
+  /**
+   * Create a new Data object that reinterprets the current data with a new type.
+   */
+  override private[data] def cast(newType: Type) = new FlatDataImpl(newType, buf, ofs)
+  override private[data] def castError: FlatDataImpl = {
+    t match {
+      case TError(payload) => cast(TCluster(TInt, TStr, payload))
+      case _ => sys.error(s"cannot cast data of type $t to error cluster")
+    }
+  }
+
+  def flatten(os: EndianAwareOutputStream): Unit = {
+    cursor.flatten(os)
+  }
+
+  def convertTo(pattern: String): Data = convertTo(Pattern(pattern))
+  def convertTo(pattern: Pattern): Data = {
+    // XXX: converting empty lists is a special case.
+    // If we are converting to a list with the same number of dimensions and
+    // the target element type is a concrete type, we allow this conversion.
+    // We test whether the pattern is a concrete type by parsing it as a type.
+    val empty = (t, pattern) match {
+      case (TArr(TNone, depth), PArr(pat, pDepth)) if depth == pDepth && arrayShape.product == 0 =>
+        val elemType = Try(Type(pat.toString)).toOption
+        elemType.map(t => cast(TArr(t, depth)))
+      case _ =>
+        None
+    }
+
+    empty.getOrElse {
+      pattern(t) match {
+        case Some(tgt) =>
+          Data.makeConverter(t, tgt)(this)
+          cast(tgt)
+        case None =>
+          sys.error(s"cannot convert data from '$t' to '$pattern'")
+      }
+    }
+  }
+
+  /**
+   * Get a Data subobject at the specified array of indices.  Note that
+   * this returns a view rather than a copy, so any modifications to
+   * the subobject will be reflected in the original data.
+   */
+  def apply(idx: Int*): Data = {
+    if (idx.isEmpty) {
+      this
+    } else {
+      t match {
+        case TArr(elem, depth) =>
+          require(idx.size >= depth, "not enough indices for array")
+          val arrIdx = Data.flatIndex(arrayShape, idx)
+          if (elem.fixedWidth) {
+            new FlatDataImpl(elem, buf, ofs + 4 * depth + arrIdx * elem.dataWidth)
+          } else {
+            flatIterator.drop(arrIdx).next()(idx.drop(depth): _*)
+          }
+
+        case t: TCluster =>
+          clusterIterator.drop(idx.head).next()(idx.tail: _*)
+
+        case _ =>
+          sys.error(s"type $t is not indexable")
+      }
+    }
+  }
+
+  /** Return an iterator that runs over all the elements in an N-dimensional array */
+  def flatIterator: Iterator[FlatDataImpl] = t match {
+    case TArr(elem, depth) =>
+      val size = arrayShape.product
+      val iter = new ArrayCursor(elem, buf, size, ofs + 4 * depth)
+      iter.map(_.toData)
+    case _ =>
+      sys.error("can only flat iterate over arrays")
+  }
+
+  // structures
+  def arraySize = t match {
+    case TArr(_, 1) => buf.getInt(ofs)
+    case _ => sys.error("arraySize is only defined for 1D arrays")
+  }
+
+  def arrayShape = t match {
+    case TArr(_, depth) => Array.tabulate(depth) { i => buf.getInt(ofs + 4*i) }
+    case _ => sys.error("arrayShape is only defined for arrays")
+  }
+
+  def setArrayShape(shape: Array[Int]): Unit = t match {
+    case TArr(elem, depth) =>
+      require(shape.length == depth)
+      sys.error("cannot set array shape of flat data")
+    case _ =>
+      sys.error("arrayShape can only be set for arrays")
+  }
+
+  def clusterSize: Int = t match {
+    case TCluster(elems @ _*) => elems.size
+    case _ => sys.error("clusterSize is only defined for clusters")
+  }
+
+  def clusterIterator: Iterator[FlatDataImpl] = t match {
+    case t @ TCluster(elems @ _*) =>
+      val iter = new ClusterCursor(elems, buf, ofs)
+      iter.map(_.toData)
+    case _ =>
+      sys.error("can only cluster iterate over clusters")
+  }
+
+  // getters
+  def getBool: Boolean = { require(isBool); buf.getBool(ofs) }
+  def getInt: Int = { require(isInt); buf.getInt(ofs) }
+  def getUInt: Long = { require(isUInt); buf.getUInt(ofs) }
+  def getBytes: Array[Byte] = { require(isBytes); val len = buf.getInt(ofs); buf.slice(ofs + 4, ofs + 4 + len) }
+  def getString: String = new String(getBytes, UTF_8)
+  def getValue: Double = { require(isValue); buf.getDouble(ofs) }
+  def getReal: Double = { require(isComplex); buf.getDouble(ofs) }
+  def getImag: Double = { require(isComplex); buf.getDouble(ofs + 8) }
+  def getComplex: Complex = { require(isComplex); Complex(buf.getDouble(ofs), buf.getDouble(ofs + 8)) }
+  def getTime: TimeStamp = { require(isTime); TimeStamp(buf.getLong(ofs), buf.getLong(ofs + 8)) }
+  def getSeconds: Long = { require(isTime); buf.getLong(ofs) }
+  def getFraction: Long = { require(isTime); buf.getLong(ofs + 8) }
+
+  def getErrorCode = { require(isError); buf.getInt(ofs) }
+  def getErrorMessage = { require(isError); val len = buf.getInt(ofs + 4); new String(buf.slice(ofs + 8, ofs + 8 + len), UTF_8) }
+  def getErrorPayload = t match {
+    case TError(payload) => castError(2)
+    case _ => sys.error("errorPayload is only defined for errors")
+  }
+
+  // setters
+
+  def setBool(b: Boolean): Unit = {
+    require(isBool)
+    buf.setBool(ofs, b)
+  }
+
+  def setInt(i: Int): Unit = {
+    require(isInt)
+    buf.setInt(ofs, i)
+  }
+
+  def setUInt(u: Long): Unit = {
+    require(isUInt)
+    buf.setUInt(ofs, u)
+  }
+
+  def setBytes(bytes: Array[Byte]): Unit = {
+    require(isString)
+    sys.error("unable to set bytes on flat data")
+  }
+
+  def setString(s: String): Unit = setBytes(s.getBytes(UTF_8))
+
+  def setValue(d: Double): Unit = {
+    require(isValue)
+    buf.setDouble(ofs, d)
+  }
+
+  def setComplex(re: Double, im: Double): Unit = {
+    require(isComplex)
+    buf.setDouble(ofs, re)
+    buf.setDouble(ofs + 8, im)
+  }
+
+  def setTime(seconds: Long, fraction: Long): Unit = {
+    require(isTime)
+    buf.setLong(ofs, seconds)
+    buf.setLong(ofs + 8, fraction)
   }
 }
 
@@ -355,23 +729,16 @@ extends Data with Serializable with Cloneable {
       else
         t match {
           case TArr(elem, depth) =>
-            if (idx.size < depth)
-              sys.error("not enough indices for array")
+            require(idx.size >= depth, "not enough indices for array")
             val arrBuf = heap(buf.getInt(ofs + 4 * depth))
-            var arrOfs = 0
-            var stride = 1
-            val shape = Seq.tabulate(depth)(i => buf.getInt(ofs + 4 * i))
-            for (dim <- (depth - 1) to 0 by -1) {
-              arrOfs += elem.dataWidth * idx(dim) * stride
-              stride *= shape(dim)
-            }
-            find(elem, arrBuf, arrOfs, idx.drop(depth))
+            val arrIdx = Data.flatIndex(arrayShape, idx)
+            find(elem, arrBuf, arrIdx * elem.dataWidth, idx.drop(depth))
 
           case t: TCluster =>
             find(t.elems(idx.head), buf, ofs + t.offsets(idx.head), idx.tail)
 
           case _ =>
-            sys.error("type " + t + " is not indexable")
+            sys.error(s"type $t is not indexable")
         }
     find(this.t, this.buf, this.ofs, idx)
   }
@@ -692,6 +1059,24 @@ object Data {
           data => ()
       }
     }
+  }
+
+  /**
+   * Calculate the index into an N-dimensional array with the given shape,
+   * when doing a flat traversal in row-major order to the indices given
+   * by idx. We use only the first N elements of the index array,
+   * since this may include more indices to travers further into a data
+   * object.
+   */
+  def flatIndex(shape: Array[Int], idx: Seq[Int]): Int = {
+    val depth = shape.size
+    var arrIdx = 0
+    var stride = 1
+    for (dim <- (depth - 1) to 0 by -1) {
+      arrIdx += idx(dim) * stride
+      stride *= shape(dim)
+    }
+    arrIdx
   }
 }
 
