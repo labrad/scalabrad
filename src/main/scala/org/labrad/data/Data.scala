@@ -1,12 +1,14 @@
 package org.labrad
 package data
 
+import io.netty.buffer.ByteBuf
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, Serializable}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Date
 import org.joda.time.{DateTime, DateTimeZone}
+import org.labrad.data.EndianAwareByteArray._
 import org.labrad.errors.{LabradException, NonIndexableTypeException}
 import org.labrad.types._
 import scala.annotation.tailrec
@@ -243,8 +245,6 @@ trait Data {
 
 class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder: ByteOrder) {
 
-  import org.labrad.data.RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
-
   def toData: FlatDataImpl = new FlatDataImpl(t, buf, ofs)
 
   def len: Int = {
@@ -374,8 +374,6 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
 
 class ArrayCursor(val t: Type, val buf: Array[Byte], size: Int, ofs: Int)(implicit byteOrder: ByteOrder) extends Iterator[Cursor] {
 
-  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
-
   var idx = 0
   var elemOfs = ofs
 
@@ -395,8 +393,6 @@ class ArrayCursor(val t: Type, val buf: Array[Byte], size: Int, ofs: Int)(implic
 }
 
 class ClusterCursor(ts: Seq[Type], buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder) extends Iterator[Cursor] {
-
-  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
 
   var idx = 0
   var elemOfs = ofs
@@ -427,8 +423,6 @@ class ClusterCursor(ts: Seq[Type], buf: Array[Byte], ofs: Int)(implicit byteOrde
  */
 class FlatDataImpl private[data] (val t: Type, buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder)
 extends Data with Serializable with Cloneable {
-
-  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
 
   override def clone = Data.copy(this, Data(this.t))
 
@@ -617,8 +611,6 @@ extends Data with Serializable with Cloneable {
  */
 class DataImpl private[data] (val t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]])(implicit byteOrder: ByteOrder)
 extends Data with Serializable with Cloneable {
-
-  import RichByteArray._ // implicitly add endian-aware get* and set* methods to Array[Byte]
 
   override def clone = Data.copy(this, Data(this.t))
 
@@ -883,8 +875,6 @@ object DataImpl {
 
 object Data {
   val NONE = Data("")
-
-  import RichByteArray._
 
   def apply(tag: String): Data = DataImpl(tag)
   def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): Data = DataImpl(t)

@@ -70,7 +70,7 @@ object EndianAwareOutputStream {
   }
 }
 
-object RichByteArray {
+object EndianAwareByteArray {
   implicit class RichByteArray(val buf: Array[Byte]) extends AnyVal {
     def getBool(ofs: Int): Boolean = ByteManip.getBool(buf, ofs)
     def getInt(ofs: Int)(implicit bo: ByteOrder): Int = ByteManip.getInt(buf, ofs)
