@@ -65,6 +65,7 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
 
   def triggerShutdown(): Unit = {
     val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
+    contexts.clear()
     Await.result(Future.sequence(expirations), 60.seconds)
     server.shutdown()
     close()
