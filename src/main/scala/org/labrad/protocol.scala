@@ -68,8 +68,8 @@ class PacketCodec extends ByteToMessageCodec[Packet] with Logging {
 
   override def encode(ctx: ChannelHandlerContext, packet: Packet, out: ByteBuf): Unit = {
     log.trace(s"write packet: $packet")
-    val bytes = packet.toBytes(byteOrder)
-    out.writeBytes(bytes)
+    val buf = out.order(byteOrder)
+    packet.writeTo(buf)
   }
 }
 

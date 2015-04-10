@@ -25,8 +25,8 @@ object DataBench {
     val bytesBE = data.toBytes(BIG_ENDIAN)
     val bytesLE = data.toBytes(LITTLE_ENDIAN)
 
-    val flatBE = new FlatDataImpl(data.t, bytesBE, 0)(BIG_ENDIAN)
-    val flatLE = new FlatDataImpl(data.t, bytesLE, 0)(LITTLE_ENDIAN)
+    val flatBE = new FlatData(data.t, bytesBE, 0)(BIG_ENDIAN)
+    val flatLE = new FlatData(data.t, bytesLE, 0)(LITTLE_ENDIAN)
 
     timeIt("flatten") {
       for (i <- 0 until 1000) {
@@ -59,7 +59,7 @@ object DataBench {
     }
     timeIt("unflattenFlatBE") {
       for (i <- 0 until 1000) {
-        val fd = new FlatDataImpl(data.t, bytesBE, 0)(BIG_ENDIAN)
+        val fd = new FlatData(data.t, bytesBE, 0)(BIG_ENDIAN)
         assert(fd.len == bytesBE.length)
       }
     }
@@ -72,7 +72,7 @@ object DataBench {
     }
     timeIt("unflattenFlatLE") {
       for (i <- 0 until 1000) {
-        val fd = new FlatDataImpl(data.t, bytesLE, 0)(LITTLE_ENDIAN)
+        val fd = new FlatData(data.t, bytesLE, 0)(LITTLE_ENDIAN)
         assert(fd.len == bytesLE.length)
       }
     }

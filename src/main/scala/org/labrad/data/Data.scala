@@ -1,7 +1,7 @@
 package org.labrad
 package data
 
-import io.netty.buffer.ByteBuf
+import io.netty.buffer.{ByteBuf, Unpooled}
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, Serializable}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
@@ -78,13 +78,12 @@ trait Data {
   }
 
   def toBytes(implicit outputOrder: ByteOrder): Array[Byte] = {
-    val bs = new ByteArrayOutputStream
-    val os = EndianAwareOutputStream(bs)(outputOrder)
-    flatten(os)
-    bs.toByteArray
+    val buf = Unpooled.buffer().order(outputOrder)
+    flatten(buf)
+    buf.toByteArray
   }
 
-  def flatten(os: EndianAwareOutputStream): Unit
+  def flatten(buf: ByteBuf): Unit
 
   override def toString = t match {
     case TNone => "_"
@@ -245,7 +244,7 @@ trait Data {
 
 class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder: ByteOrder) {
 
-  def toData: FlatDataImpl = new FlatDataImpl(t, buf, ofs)
+  def toData: FlatData = new FlatData(t, buf, ofs)
 
   def len: Int = {
     t match {
@@ -286,21 +285,21 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
     }
   }
 
-  def flatten(os: EndianAwareOutputStream): Unit = {
-    if (os.byteOrder == byteOrder)
-      os.write(buf, ofs, len)
+  def flatten(os: ByteBuf): Unit = {
+    if (os.order == byteOrder)
+      os.writeBytes(buf, ofs, len)
     else {
       t match {
         case TNone =>
 
         case TBool =>
-          os.writeBool(buf.getBool(ofs))
+          os.writeBoolean(buf.getBool(ofs))
 
         case TInt =>
           os.writeInt(buf.getInt(ofs))
 
         case TUInt =>
-          os.writeUInt(buf.getUInt(ofs))
+          os.writeInt(buf.getUInt(ofs).toInt)
 
         case TValue(_) =>
           os.writeDouble(buf.getDouble(ofs))
@@ -316,7 +315,7 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
         case TStr =>
           val strLen = buf.getInt(ofs)
           os.writeInt(strLen)
-          os.write(buf, ofs + 4, strLen)
+          os.writeBytes(buf, ofs + 4, strLen)
 
         case TArr(elem, depth) =>
           // write arr shape and compute total number of elements in the list
@@ -328,9 +327,9 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
           }
 
           // write arr data
-          if (elem.fixedWidth && os.byteOrder == byteOrder) {
+          if (elem.fixedWidth && os.order == byteOrder) {
             // for fixed-width data, just copy in one big chunk
-            os.write(buf, ofs + 4*depth, elem.dataWidth * size)
+            os.writeBytes(buf, ofs + 4*depth, elem.dataWidth * size)
           } else {
             // for variable-width data, flatten recursively
             val iter = _arrayCursor(elem, depth)
@@ -421,28 +420,31 @@ class ClusterCursor(ts: Seq[Type], buf: Array[Byte], ofs: Int)(implicit byteOrde
  * capabilities of LabVIEW, from National Instruments.  Each piece of LabRAD
  * data has a Type object which is specified by a String type tag.
  */
-class FlatDataImpl private[data] (val t: Type, buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder)
+class FlatData private[data] (val t: Type, buf: Array[Byte], ofs: Int)(implicit byteOrder: ByteOrder)
 extends Data with Serializable with Cloneable {
 
-  override def clone = Data.copy(this, Data(this.t))
+  override def clone = {
+    val newBytes = buf.slice(ofs, ofs + len)
+    new FlatData(t, buf, ofs)
+  }
 
   def cursor: Cursor = new Cursor(t, buf, ofs)
 
-  def len: Int = cursor.len
+  lazy val len: Int = cursor.len
 
   /**
    * Create a new Data object that reinterprets the current data with a new type.
    */
-  override private[data] def cast(newType: Type) = new FlatDataImpl(newType, buf, ofs)
-  override private[data] def castError: FlatDataImpl = {
+  override private[data] def cast(newType: Type) = new FlatData(newType, buf, ofs)
+  override private[data] def castError: FlatData = {
     t match {
       case TError(payload) => cast(TCluster(TInt, TStr, payload))
       case _ => sys.error(s"cannot cast data of type $t to error cluster")
     }
   }
 
-  def flatten(os: EndianAwareOutputStream): Unit = {
-    cursor.flatten(os)
+  def flatten(out: ByteBuf): Unit = {
+    cursor.flatten(out)
   }
 
   def convertTo(pattern: String): Data = convertTo(Pattern(pattern))
@@ -484,7 +486,7 @@ extends Data with Serializable with Cloneable {
           require(idx.size >= depth, "not enough indices for array")
           val arrIdx = Data.flatIndex(arrayShape, idx)
           if (elem.fixedWidth) {
-            new FlatDataImpl(elem, buf, ofs + 4 * depth + arrIdx * elem.dataWidth)
+            new FlatData(elem, buf, ofs + 4 * depth + arrIdx * elem.dataWidth)
           } else {
             flatIterator.drop(arrIdx).next()(idx.drop(depth): _*)
           }
@@ -499,7 +501,7 @@ extends Data with Serializable with Cloneable {
   }
 
   /** Return an iterator that runs over all the elements in an N-dimensional array */
-  def flatIterator: Iterator[FlatDataImpl] = t match {
+  def flatIterator: Iterator[FlatData] = t match {
     case TArr(elem, depth) =>
       val size = arrayShape.product
       val iter = new ArrayCursor(elem, buf, size, ofs + 4 * depth)
@@ -532,7 +534,7 @@ extends Data with Serializable with Cloneable {
     case _ => sys.error("clusterSize is only defined for clusters")
   }
 
-  def clusterIterator: Iterator[FlatDataImpl] = t match {
+  def clusterIterator: Iterator[FlatData] = t match {
     case t @ TCluster(elems @ _*) =>
       val iter = new ClusterCursor(elems, buf, ofs)
       iter.map(_.toData)
@@ -609,7 +611,7 @@ extends Data with Serializable with Cloneable {
  * capabilities of LabVIEW, from National Instruments.  Each piece of LabRAD
  * data has a Type object which is specified by a String type tag.
  */
-class DataImpl private[data] (val t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]])(implicit byteOrder: ByteOrder)
+class TreeData private[data] (val t: Type, buf: Array[Byte], ofs: Int, heap: Buffer[Array[Byte]])(implicit byteOrder: ByteOrder)
 extends Data with Serializable with Cloneable {
 
   override def clone = Data.copy(this, Data(this.t))
@@ -617,25 +619,25 @@ extends Data with Serializable with Cloneable {
   /**
    * Create a new Data object that reinterprets the current data with a new type.
    */
-  override private[data] def cast(newType: Type) = new DataImpl(newType, buf, ofs, heap)
+  override private[data] def cast(newType: Type) = new TreeData(newType, buf, ofs, heap)
 
-  def flatten(os: EndianAwareOutputStream): Unit = flatten(os, t, buf, ofs)
+  def flatten(out: ByteBuf): Unit = flatten(out, t, buf, ofs)
 
-  private def flatten(os: EndianAwareOutputStream, t: Type, buf: Array[Byte], ofs: Int) {
-    if (t.fixedWidth && os.byteOrder == byteOrder)
-      os.write(buf, ofs, t.dataWidth)
+  private def flatten(os: ByteBuf, t: Type, buf: Array[Byte], ofs: Int) {
+    if (t.fixedWidth && os.order == byteOrder)
+      os.writeBytes(buf, ofs, t.dataWidth)
     else {
       t match {
         case TNone =>
 
         case TBool =>
-          os.writeBool(buf.getBool(ofs))
+          os.writeBoolean(buf.getBool(ofs))
 
         case TInt =>
           os.writeInt(buf.getInt(ofs))
 
         case TUInt =>
-          os.writeUInt(buf.getUInt(ofs))
+          os.writeInt(buf.getUInt(ofs).toInt)
 
         case TValue(_) =>
           os.writeDouble(buf.getDouble(ofs))
@@ -651,7 +653,7 @@ extends Data with Serializable with Cloneable {
         case TStr =>
           val strBuf = heap(buf.getInt(ofs))
           os.writeInt(strBuf.length)
-          os.write(strBuf)
+          os.writeBytes(strBuf)
 
         case TArr(elem, depth) =>
           // write arr shape and compute total number of elements in the list
@@ -664,9 +666,9 @@ extends Data with Serializable with Cloneable {
 
           // write arr data
           val arrBuf = heap(buf.getInt(ofs + 4*depth))
-          if (elem.fixedWidth && os.byteOrder == byteOrder) {
+          if (elem.fixedWidth && os.order == byteOrder) {
             // for fixed-width data, just copy in one big chunk
-            os.write(arrBuf, 0, elem.dataWidth * size)
+            os.writeBytes(arrBuf, 0, elem.dataWidth * size)
           } else {
             // for variable-width data, flatten recursively
             for (i <- 0 until size)
@@ -717,7 +719,7 @@ extends Data with Serializable with Cloneable {
     @tailrec
     def find(t: Type, buf: Array[Byte], ofs: Int, idx: Seq[Int]): Data =
       if (idx.isEmpty)
-        new DataImpl(t, buf, ofs, heap)
+        new TreeData(t, buf, ofs, heap)
       else
         t match {
           case TArr(elem, depth) =>
@@ -741,7 +743,7 @@ extends Data with Serializable with Cloneable {
       val size = arrayShape.product
       val arrBuf = heap(buf.getInt(ofs + 4 * depth))
       Iterator.tabulate(size) { i =>
-        new DataImpl(elem, arrBuf, i * elem.dataWidth, heap)
+        new TreeData(elem, arrBuf, i * elem.dataWidth, heap)
       }
     case _ =>
       sys.error("can only flat iterate over arrays")
@@ -788,7 +790,7 @@ extends Data with Serializable with Cloneable {
       val size = clusterSize
       var ofs = this.ofs
       elems.iterator.map { elem =>
-        val result = new DataImpl(elem, buf, ofs, heap)
+        val result = new TreeData(elem, buf, ofs, heap)
         ofs += elem.dataWidth
         result
       }
@@ -813,7 +815,7 @@ extends Data with Serializable with Cloneable {
   def getErrorCode = { require(isError); buf.getInt(ofs) }
   def getErrorMessage = { require(isError); new String(heap(buf.getInt(ofs + 4)), UTF_8) }
   def getErrorPayload = t match {
-    case TError(payload) => new DataImpl(payload, buf, ofs + 8, heap)
+    case TError(payload) => new TreeData(payload, buf, ofs + 8, heap)
     case _ => sys.error("errorPayload is only defined for errors")
   }
 
@@ -868,9 +870,9 @@ extends Data with Serializable with Cloneable {
 }
 
 object DataImpl {
-  def apply(tag: String): DataImpl = apply(Type(tag))
-  def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): DataImpl =
-    new DataImpl(t, Data.newByteArray(t.dataWidth), 0, Data.newHeap)
+  def apply(tag: String): TreeData = apply(Type(tag))
+  def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): TreeData =
+    new TreeData(t, Data.newByteArray(t.dataWidth), 0, Data.newHeap)
 }
 
 object Data {
@@ -919,16 +921,20 @@ object Data {
 
 
   // unflattening from bytes
-  def fromBytes(buf: Array[Byte], t: Type)(implicit bo: ByteOrder): Data =
-    fromBytes(new ByteArrayInputStream(buf), t)
+  def fromBytes(buf: Array[Byte], t: Type)(implicit bo: ByteOrder): Data = {
+    val in = Unpooled.wrappedBuffer(buf).order(bo)
+    val data = fromBytes(in, t)
+    assert(in.readableBytes == 0, "not all bytes consumed when unflattening from array")
+    data
+  }
 
-  def fromBytes(is: InputStream, t: Type)(implicit bo: ByteOrder): Data = {
-    val in = EndianAwareInputStream(is)
+  def fromBytes(in: ByteBuf, t: Type): Data = {
+    implicit val byteOrder = in.order
     val buf = Array.ofDim[Byte](t.dataWidth)
     val heap = newHeap
     def unflatten(t: Type, buf: Array[Byte], ofs: Int) {
       if (t.fixedWidth)
-        in.read(buf, ofs, t.dataWidth)
+        in.readBytes(buf, ofs, t.dataWidth)
       else
         t match {
           case TStr =>
@@ -936,7 +942,7 @@ object Data {
             val strBuf = Array.ofDim[Byte](len)
             buf.setInt(ofs, heap.size)
             heap += strBuf
-            in.read(strBuf, 0, len)
+            in.readBytes(strBuf, 0, len)
 
           case TArr(elem, depth) =>
             var size = 1
@@ -949,7 +955,7 @@ object Data {
             buf.setInt(ofs + 4 * depth, heap.size)
             heap += arrBuf
             if (elem.fixedWidth)
-              in.read(arrBuf, 0, elem.dataWidth * size)
+              in.readBytes(arrBuf, 0, elem.dataWidth * size)
             else
               for (i <- 0 until size)
                 unflatten(elem, arrBuf, elem.dataWidth * i)
@@ -962,11 +968,11 @@ object Data {
             unflatten(TCluster(TInt, TStr, payload), buf, ofs)
 
           case _ =>
-            sys.error("missing case to handle non-fixed-width type: " + t)
+            sys.error(s"missing case to handle non-fixed-width type: $t")
         }
     }
     unflatten(t, buf, 0)
-    new DataImpl(t, buf, 0, heap)
+    new TreeData(t, buf, 0, heap)
   }
 
   // equality testing

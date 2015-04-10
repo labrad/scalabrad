@@ -19,7 +19,7 @@ extends Logging {
   val workerGroup = new NioEventLoopGroup()
 
   val serverChannel = try {
-    val b = new ServerBootstrap();
+    val b = new ServerBootstrap()
     b.group(bossGroup, workerGroup)
      .channel(classOf[NioServerSocketChannel])
      .childOption[java.lang.Boolean](ChannelOption.TCP_NODELAY, true)
