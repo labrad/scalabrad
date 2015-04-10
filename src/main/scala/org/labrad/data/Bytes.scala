@@ -8,7 +8,7 @@ trait EndianAwareInputStream {
   def byteOrder: ByteOrder
   def read: Byte
   def read(n: Int): Array[Byte]
-  def read(buf: Array[Byte], off: Int, len: Int): Int
+  def read(buf: Array[Byte], ofs: Int, len: Int): Int
   def readBool: Boolean
   def readInt: Int
   def readUInt: Long
@@ -25,10 +25,10 @@ object EndianAwareInputStream {
       read(bytes, 0, n)
       bytes
     }
-    def read(buf: Array[Byte], off: Int, len: Int) = {
+    def read(buf: Array[Byte], ofs: Int, len: Int) = {
       var soFar = 0
       while (soFar < len) {
-        val k = is.read(buf, off + soFar, len - soFar)
+        val k = is.read(buf, ofs + soFar, len - soFar)
         if (k < 0) throw new IOException
         soFar += k
       }
@@ -46,7 +46,7 @@ trait EndianAwareOutputStream {
   def byteOrder: ByteOrder
   def write(b: Byte)
   def write(bs: Array[Byte])
-  def write(bs: Array[Byte], off: Int, len: Int)
+  def write(bs: Array[Byte], ofs: Int, len: Int)
   def writeBool(b: Boolean)
   def writeInt(i: Int)
   def writeUInt(w: Long)
@@ -60,7 +60,7 @@ object EndianAwareOutputStream {
       def byteOrder = order
       def write(b: Byte) = os.write(b)
       def write(bs: Array[Byte]) = os.write(bs)
-      def write(bs: Array[Byte], off: Int, len: Int) = os.write(bs, off, len)
+      def write(bs: Array[Byte], ofs: Int, len: Int) = os.write(bs, ofs, len)
       def writeBool(b: Boolean) = ByteManip.writeBool(os, b)
       def writeInt(i: Int) = ByteManip.writeInt(os, i)
       def writeUInt(w: Long) = ByteManip.writeUInt(os, w)

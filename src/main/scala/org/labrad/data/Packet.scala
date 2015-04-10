@@ -1,8 +1,10 @@
 package org.labrad.data
 
+import io.netty.buffer.ByteBuf
 import java.io.{ByteArrayInputStream, InputStream, IOException}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.BIG_ENDIAN
+import java.nio.charset.StandardCharsets.UTF_8
 import org.labrad.types.Type
 
 case class Packet(id: Int, target: Long, context: Context, records: Seq[Record]) {
@@ -54,6 +56,28 @@ object Packet {
     while (stream.available > 0) {
       val Cluster(UInt(id), Str(tag), Bytes(data)) = Data.fromBytes(stream, RECORD)
       records += Record(id, Data.fromBytes(data, Type(tag)))
+    }
+    records.result
+  }
+
+  def extractRecords(buf: ByteBuf): Seq[Record] = {
+    val records = Seq.newBuilder[Record]
+    while (buf.readableBytes > 0) {
+      val id = buf.readUnsignedInt
+
+      val tagLen = buf.readInt
+      val tag = buf.toString(buf.readerIndex, tagLen, UTF_8)
+      val t = Type(tag)
+      buf.skipBytes(tagLen)
+
+      val dataLen = buf.readInt
+      val dataBytes = Array.ofDim[Byte](dataLen)
+      buf.readBytes(dataBytes)
+
+      val data = new FlatDataImpl(t, dataBytes, 0)(buf.order)
+      assert(data.len == dataLen)
+
+      records += Record(id, data)
     }
     records.result
   }

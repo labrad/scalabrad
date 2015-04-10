@@ -57,9 +57,8 @@ class PacketCodec extends ByteToMessageCodec[Packet] with Logging {
       buf.resetReaderIndex
     } else {
       // Unpack the received data into a list of records
-      val data = Array.ofDim[Byte](dataLen)
-      buf.readBytes(data)
-      val records = Packet.extractRecords(data)(buf.order)
+      val recordBuf = buf.readSlice(dataLen)
+      val records = Packet.extractRecords(recordBuf)
 
       // Pass along the assembled packet
       val packet = Packet(request, target, Context(high, low), records)
