@@ -2,6 +2,7 @@ package org.labrad.util
 
 import java.io.IOException
 import java.net.{DatagramSocket, ServerSocket}
+import scala.collection.mutable
 
 class Counter(min: Long, max: Long) {
   require(max >= min)
@@ -14,6 +15,23 @@ class Counter(min: Long, max: Long) {
     val n = idx
     idx = (idx + 1) % length
     n + min
+  }
+}
+
+class Pool[A](factory: => A) {
+  private val pool = mutable.Queue.empty[A]
+  private val lock = new Object
+
+  def get: A = {
+    lock.synchronized {
+      if (pool.isEmpty) factory else pool.dequeue
+    }
+  }
+
+  def release(a: A) = {
+    lock.synchronized {
+      pool += a
+    }
   }
 }
 
