@@ -155,7 +155,7 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
 
     tdOpt match {
       case Some(typ ~ data) =>
-        Data.fromBytes(data.getOrElse(Array.empty), Type(typ))
+        Data.fromBytes(Type(typ), data.getOrElse(Array.empty))
 
       case None =>
         default match {

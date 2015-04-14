@@ -18,19 +18,39 @@ object DataBench {
   }
 
   def main(args: Array[String]): Unit = {
-    //val data = Str("howdy!")
+    val N = 512
 
-    val data = Arr(Seq.fill(512) { Cluster(Str("01:23:45:67:89:AB"), Str("01:23:45:67:89:AB"), Integer(128), Bytes(Array.tabulate(128)(_.toByte))) })
+    val data1 = {
+      val b = DataBuilder("*(ssis)")
+      b.setSize(N)
+      for (_ <- 0 until N) {
+        b.addString("01:23:45:67:89:AB")
+        b.addString("01:23:45:67:89:AB")
+        b.addInt(128)
+        b.addBytes(Array.tabulate(128)(_.toByte))
+      }
+      b.build()
+    }
 
-    val bytesBE = data.toBytes(BIG_ENDIAN)
-    val bytesLE = data.toBytes(LITTLE_ENDIAN)
+    val data2 = Arr(Seq.fill(N) { Cluster(Str("01:23:45:67:89:AB"), Str("01:23:45:67:89:AB"), Integer(128), Bytes(Array.tabulate(128)(_.toByte))) })
 
-    val flatBE = new FlatData(data.t, bytesBE, 0)(BIG_ENDIAN)
-    val flatLE = new FlatData(data.t, bytesLE, 0)(LITTLE_ENDIAN)
+    assert(data1 == data2)
+    assert(data1.toBytes(BIG_ENDIAN).toSeq == data2.toBytes(BIG_ENDIAN).toSeq)
+
+    val data = data2
+
+    val bytesBE = data1.toBytes(BIG_ENDIAN)
+    val bytesLE = data1.toBytes(LITTLE_ENDIAN)
+
+    val unflatBE = TreeData.fromBytes(data.t, bytesBE)(BIG_ENDIAN)
+    val unflatLE = TreeData.fromBytes(data.t, bytesLE)(LITTLE_ENDIAN)
+
+    val flatBE = FlatData.fromBytes(data.t, bytesBE)(BIG_ENDIAN)
+    val flatLE = FlatData.fromBytes(data.t, bytesLE)(LITTLE_ENDIAN)
 
     timeIt("flatten") {
       for (i <- 0 until 1000) {
-        data.toBytes(BIG_ENDIAN)
+        unflatBE.toBytes(BIG_ENDIAN)
       }
     }
     timeIt("flattenFlat") {
@@ -42,7 +62,7 @@ object DataBench {
 
     timeIt("flattenSwap") {
       for (i <- 0 until 1000) {
-        data.toBytes(LITTLE_ENDIAN)
+        unflatBE.toBytes(LITTLE_ENDIAN)
       }
     }
     timeIt("flattenFlatSwap") {
@@ -54,26 +74,24 @@ object DataBench {
 
     timeIt("unflattenBE") {
       for (i <- 0 until 1000) {
-        Data.fromBytes(bytesBE, data.t)(BIG_ENDIAN)
+        TreeData.fromBytes(data.t, bytesBE)(BIG_ENDIAN)
       }
     }
     timeIt("unflattenFlatBE") {
       for (i <- 0 until 1000) {
-        val fd = new FlatData(data.t, bytesBE, 0)(BIG_ENDIAN)
-        assert(fd.len == bytesBE.length)
+        FlatData.fromBytes(data.t, bytesBE)(BIG_ENDIAN)
       }
     }
     println()
 
     timeIt("unflattenLE") {
       for (i <- 0 until 1000) {
-        Data.fromBytes(bytesLE, data.t)(LITTLE_ENDIAN)
+        TreeData.fromBytes(data.t, bytesLE)(LITTLE_ENDIAN)
       }
     }
     timeIt("unflattenFlatLE") {
       for (i <- 0 until 1000) {
-        val fd = new FlatData(data.t, bytesLE, 0)(LITTLE_ENDIAN)
-        assert(fd.len == bytesLE.length)
+        FlatData.fromBytes(data.t, bytesLE)(LITTLE_ENDIAN)
       }
     }
   }

@@ -149,7 +149,7 @@ class FileStore(rootDir: File) extends RegistryStore {
   }
 
   private def decodeData(bytes: Array[Byte]): Data = {
-    val Cluster(Str(typ), Bytes(data)) = Data.fromBytes(bytes, Type("ss"))
-    Data.fromBytes(data, Type(typ))
+    val (typ, data) = Data.fromBytes(Type("ss"), bytes).get[(String, Array[Byte])]
+    Data.fromBytes(Type(typ), data)
   }
 }

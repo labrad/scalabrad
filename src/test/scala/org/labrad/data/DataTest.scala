@@ -112,7 +112,7 @@ class DataTests extends FunSuite {
     }
 
     val flat = d1.toBytes
-    val d2 = Data.fromBytes(flat, Type("*(biwsv[m]c[m/s])"))
+    val d2 = Data.fromBytes(Type("*(biwsv[m]c[m/s])"), flat)
     assert(d1 == d2)
   }
 
@@ -126,7 +126,7 @@ class DataTests extends FunSuite {
         )
     )
     val flat = d1.toBytes
-    val d2 = Data.fromBytes(flat, Type("*2i"))
+    val d2 = Data.fromBytes(Type("*2i"), flat)
     assert(d1 == d2)
 
     val d3 = Arr3(
@@ -142,7 +142,7 @@ class DataTests extends FunSuite {
         )
     )
     val flat3 = d3.toBytes
-    val d4 = Data.fromBytes(flat3, Type("*3s"))
+    val d4 = Data.fromBytes(Type("*3s"), flat3)
     assert(d3 == d4)
   }
 
@@ -211,7 +211,7 @@ class HydrantTests extends FunSuite {
       implicit val bo = order
 
       val bytes = data.toBytes
-      val unflattened = Data.fromBytes(bytes, data.t)
+      val unflattened = Data.fromBytes(data.t, bytes)
       assert(unflattened == data)
     }
   }

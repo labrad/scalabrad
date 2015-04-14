@@ -53,7 +53,7 @@ object Packet {
     }
 
     val headerBytes = readBytes(20)
-    val hdr = Data.fromBytes(headerBytes, HEADER)
+    val hdr = FlatData.fromBytes(HEADER, headerBytes)
     val ((high, low), req, src, len) = hdr.get[((Long, Long), Int, Long, Long)]
 
     val data = readBytes(len.toInt)
@@ -76,8 +76,7 @@ object Packet {
       val dataBytes = Array.ofDim[Byte](dataLen)
       buf.readBytes(dataBytes)
 
-      val data = new FlatData(t, dataBytes, 0)(buf.order)
-      assert(data.len == dataLen)
+      val data = FlatData.fromBytes(t, dataBytes)(buf.order)
 
       records += Record(id, data)
     }

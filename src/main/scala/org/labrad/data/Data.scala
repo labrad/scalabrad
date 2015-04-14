@@ -605,6 +605,58 @@ extends Data with Serializable with Cloneable {
   }
 }
 
+object FlatData {
+  def fromBytes(t: Type, buf: Array[Byte])(implicit bo: ByteOrder): Data = {
+    val data = new FlatData(t, buf, 0)
+    assert(data.len == buf.length)
+    data
+  }
+
+  def fromBytes(t: Type, in: ByteBuf): Data = {
+    implicit val byteOrder = in.order
+    def traverse(t: Type, ofs: Int): Int = {
+      if (t.fixedWidth) {
+        t.dataWidth
+      } else {
+        t match {
+          case TStr =>
+            val len = in.getInt(ofs)
+            4 + len
+
+          case TArr(elem, depth) =>
+            var size = 1
+            for (i <- 0 until depth) {
+              val dim = in.getInt(ofs + 4 * i)
+              size *= dim
+            }
+            var len = 0
+            for (i <- 0 until size) {
+              len += traverse(elem, ofs + 4 * depth + len)
+            }
+            len
+
+          case t: TCluster =>
+            var len = 0
+            for (elem <- t.elems) {
+              len += traverse(elem, ofs + len)
+            }
+            len
+
+          case TError(payload) =>
+            traverse(TCluster(TInt, TStr, payload), ofs)
+
+          case _ =>
+            sys.error(s"missing case to handle non-fixed-width type: $t")
+        }
+      }
+    }
+    val len = traverse(t, in.readerIndex)
+    val buf = Array.ofDim[Byte](len)
+    in.readBytes(len)
+    new FlatData(t, buf, 0)
+  }
+}
+
 /**
  * The Data class encapsulates the data format used to communicate between
  * LabRAD servers and clients.  This data format is based on the
@@ -766,7 +818,7 @@ extends Data with Serializable with Cloneable {
       val size = shape.product
       for (i <- 0 until depth)
         buf.setInt(ofs + 4*i, shape(i))
-      val newBuf = Data.newByteArray(elem.dataWidth * size)
+      val newBuf = TreeData.newByteArray(elem.dataWidth * size)
       val heapIndex = buf.getInt(ofs + 4*depth)
       if (heapIndex == -1) {
         buf.setInt(ofs + 4*depth, heap.size)
@@ -869,66 +921,22 @@ extends Data with Serializable with Cloneable {
   }
 }
 
-object DataImpl {
+object TreeData {
   def apply(tag: String): TreeData = apply(Type(tag))
   def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): TreeData =
-    new TreeData(t, Data.newByteArray(t.dataWidth), 0, Data.newHeap)
-}
-
-object Data {
-  val NONE = Data("")
-
-  def apply(tag: String): Data = DataImpl(tag)
-  def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): Data = DataImpl(t)
-
-  /**
-   * Parse data from string representation
-   */
-  def parse(data: String): Data = Parsers.parseData(data)
+    new TreeData(t, newByteArray(t.dataWidth), 0, newHeap)
 
   private[data] def newByteArray(length: Int): Array[Byte] = Array.fill[Byte](length)(0xFF.toByte)
   private[data] def newHeap: Buffer[Array[Byte]] = Buffer.empty[Array[Byte]]
 
-  def copy(src: Data, dst: Data): Data = {
-    require(src.t == dst.t, s"source and destination types do not match. src=${src.t}, dst=${dst.t}")
-    src.t match {
-      case TNone =>
-      case TBool => dst.setBool(src.getBool)
-      case TInt => dst.setInt(src.getInt)
-      case TUInt => dst.setUInt(src.getUInt)
-      case TValue(_) => dst.setValue(src.getValue)
-      case TComplex(_) => dst.setComplex(src.getReal, src.getImag)
-      case TTime => dst.setTime(src.getTime)
-      case TStr => dst.setBytes(src.getBytes)
-
-      case TArr(elem, depth) =>
-        val shape = src.arrayShape
-        dst.setArrayShape(shape)
-        for ((srcElem, dstElem) <- src.flatIterator zip dst.flatIterator) {
-          copy(srcElem, dstElem)
-        }
-
-      case TCluster(elems @ _*) =>
-        for ((s, d) <- src.clusterIterator zip dst.clusterIterator) {
-          copy(s, d)
-        }
-
-      case TError(_) =>
-        dst.setError(src.getErrorCode, src.getErrorMessage, src.getErrorPayload)
-    }
-    dst
-  }
-
-
-  // unflattening from bytes
-  def fromBytes(buf: Array[Byte], t: Type)(implicit bo: ByteOrder): Data = {
+  def fromBytes(t: Type, buf: Array[Byte])(implicit bo: ByteOrder): Data = {
     val in = Unpooled.wrappedBuffer(buf).order(bo)
-    val data = fromBytes(in, t)
+    val data = fromBytes(t, in)
     assert(in.readableBytes == 0, "not all bytes consumed when unflattening from array")
     data
   }
 
-  def fromBytes(in: ByteBuf, t: Type): Data = {
+  def fromBytes(t: Type, in: ByteBuf): Data = {
     implicit val byteOrder = in.order
     val buf = Array.ofDim[Byte](t.dataWidth)
     val heap = newHeap
@@ -973,6 +981,58 @@ object Data {
     }
     unflatten(t, buf, 0)
     new TreeData(t, buf, 0, heap)
+  }
+}
+
+object Data {
+  val NONE = Data("")
+
+  def apply(tag: String): Data = TreeData(tag)
+  def apply(t: Type)(implicit bo: ByteOrder = BIG_ENDIAN): Data = TreeData(t)
+
+  /**
+   * Parse data from string representation
+   */
+  def parse(data: String): Data = Parsers.parseData(data)
+
+  def copy(src: Data, dst: Data): Data = {
+    require(src.t == dst.t, s"source and destination types do not match. src=${src.t}, dst=${dst.t}")
+    src.t match {
+      case TNone =>
+      case TBool => dst.setBool(src.getBool)
+      case TInt => dst.setInt(src.getInt)
+      case TUInt => dst.setUInt(src.getUInt)
+      case TValue(_) => dst.setValue(src.getValue)
+      case TComplex(_) => dst.setComplex(src.getReal, src.getImag)
+      case TTime => dst.setTime(src.getTime)
+      case TStr => dst.setBytes(src.getBytes)
+
+      case TArr(elem, depth) =>
+        val shape = src.arrayShape
+        dst.setArrayShape(shape)
+        for ((srcElem, dstElem) <- src.flatIterator zip dst.flatIterator) {
+          copy(srcElem, dstElem)
+        }
+
+      case TCluster(elems @ _*) =>
+        for ((s, d) <- src.clusterIterator zip dst.clusterIterator) {
+          copy(s, d)
+        }
+
+      case TError(_) =>
+        dst.setError(src.getErrorCode, src.getErrorMessage, src.getErrorPayload)
+    }
+    dst
+  }
+
+
+  // unflattening from bytes
+  def fromBytes(t: Type, buf: Array[Byte])(implicit bo: ByteOrder): Data = {
+    TreeData.fromBytes(t, buf)
+  }
+
+  def fromBytes(t: Type, in: ByteBuf): Data = {
+    TreeData.fromBytes(t, in)
   }
 
   // equality testing
@@ -1374,7 +1434,7 @@ object Parsers extends RegexParsers {
   def number = """\d+""".r
 
   def array = arrND ^^ { case (elems, typ, shape) =>
-    val data = DataImpl(TArr(typ, shape.size))
+    val data = TreeData(TArr(typ, shape.size))
     data.setArrayShape(shape: _*)
     for ((data, elem) <- data.flatIterator zip elems.iterator) {
       data.set(elem)
