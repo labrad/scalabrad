@@ -107,7 +107,12 @@ trait RegistryServer extends Requester {
   def mkDir(dir: String): Future[Seq[String]] = call("mkdir", Str(dir)).map { _.get[Seq[String]] }
   def rmDir(dir: String): Future[Unit] = callUnit("rmdir", Str(dir))
 
-  def get(key: String): Future[Data] = call("get", Str(key))
+  def get(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Future[Data] = {
+    default match {
+      case Some((set, default)) => call("get", Str(key), Str(pat), Bool(set), default)
+      case None => call("get", Str(key), Str(pat))
+    }
+  }
   def set(key: String, value: Data): Future[Unit] = callUnit("set", Str(key), value)
   def del(key: String): Future[Unit] = callUnit("del", Str(key))
 

@@ -1,6 +1,7 @@
 package org.labrad.manager
 
 import java.io.File
+import java.net.URI
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
@@ -119,18 +120,41 @@ object Manager extends Logging {
     val options = parseArgs(args.toList)
 
     val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
-    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
-    val registry = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new File(_)).getOrElse(sys.props("user.home") / ".labrad" / "registry.sqlite")
-
-    log.info(s"registry location: $registry")
-    val dir = registry.getAbsoluteFile.getParentFile
-    if (!dir.exists) {
-      val ok = dir.mkdirs()
-      if (!ok) sys.error(s"failed to create registry directory: $dir")
+    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+    val registryUri = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
+      (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
     }
-    val store = SQLiteStore(registry)
 
-    val centralNode = new CentralNode(port, password.toCharArray, store)
+    val store = registryUri.getScheme match {
+      case "file" =>
+        val registry = new File(registryUri)
+        log.info(s"registry location: $registry")
+        val dir = registry.getAbsoluteFile.getParentFile
+        if (!dir.exists) {
+          val ok = dir.mkdirs()
+          if (!ok) sys.error(s"failed to create registry directory: $dir")
+        }
+        SQLiteStore(registry)
+
+      case "labrad" =>
+        val remoteHost = registryUri.getHost
+        val remotePort = registryUri.getPort
+        val remotePassword = registryUri.getUserInfo match {
+          case null => password
+          case info => info.split(":") match {
+            case Array() => password
+            case Array(pw) => pw.toCharArray
+            case Array(u, pw) => pw.toCharArray
+          }
+        }
+        log.info(s"remote registry location: $remoteHost:$remotePort")
+        RemoteStore(remoteHost, remotePort, remotePassword)
+
+      case scheme =>
+        sys.error(s"unknown scheme for registry uri: $scheme. must use 'file' or 'labrad'")
+    }
+
+    val centralNode = new CentralNode(port, password, store)
 
     @tailrec def enterPressed(): Boolean =
       System.in.available > 0 && (System.in.read() == '\n'.toInt || enterPressed())
