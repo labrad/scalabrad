@@ -110,14 +110,7 @@ object Manager extends Logging {
   }
 
   def main(args: Array[String]) {
-    def parseArgs(args: List[String]): Map[String, String] = args match {
-      case Nil => Map()
-      case "--password" :: password :: rest => parseArgs(rest) + ("password" -> password)
-      case "--port" :: port :: rest => parseArgs(rest) + ("port" -> port)
-      case "--registry" :: registry :: rest => parseArgs(rest) + ("registry" -> registry)
-      case arg :: rest => sys.error("Unknown argument: " + arg)
-    }
-    val options = parseArgs(args.toList)
+    val options = Util.parseArgs(args, Seq("port", "password", "registry"))
 
     val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray

@@ -4,9 +4,9 @@ import org.labrad.data._
 
 class Client(
   val name: String = "Scala Client",
-  val host: String = "localhost" /*Util.getEnv("LABRADHOST", "localhost")*/,
-  val port: Int = 7682 /*Util.getEnvInt("LABRADPORT", 7682)*/,
-  val password: Array[Char] = Array() /*Util.getEnv("LABRADPASSWORD", "")*/
+  val host: String = sys.env.getOrElse("LABRADHOST", ""),
+  val port: Int = sys.env.getOrElse("LABRADPORT", "7682").toInt,
+  val password: Array[Char] = sys.env.getOrElse("LABRADPASSWORD", "").toCharArray
 ) extends Connection {
   protected def loginData = Cluster(UInt(Client.PROTOCOL_VERSION), Str(name))
 }

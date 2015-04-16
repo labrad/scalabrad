@@ -3,6 +3,7 @@ package org.labrad
 import java.io.{PrintWriter, StringWriter}
 import org.labrad.data._
 import org.labrad.errors.LabradException
+import org.labrad.util.Util
 import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
@@ -14,7 +15,13 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
   def shutdown(): Unit
 
   def run(args: Array[String]): Unit = {
-    val cxn = ServerConnection[T](this, "localhost", 7682, Array())
+    val options = Util.parseArgs(args, Seq("host", "port", "password"))
+
+    val host = options.get("host").orElse(sys.env.get("LABRADHOST")).getOrElse("localhost")
+    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
+    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+
+    val cxn = ServerConnection[T](this, host, port, password)
     cxn.connect()
     sys.ShutdownHookThread(cxn.triggerShutdown)
     cxn.serve()
