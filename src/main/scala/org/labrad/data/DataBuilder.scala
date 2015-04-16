@@ -140,11 +140,11 @@ class DataBuilder(t: Type)(implicit byteOrder: ByteOrder = BIG_ENDIAN) { self =>
     throw new IllegalStateException(msg)
   }
 
-  private def addSimple(t: Type)(write: => Unit): this.type = {
+  private def addSimple(p: Pattern)(write: => Unit): this.type = {
     state = state match {
-      case state: ConsumeOne if state.t == t => write; state.gotValue()
-      case state: ConsumeOne => nope(s"cannot add $t. expecting ${state.t}")
-      case state: ConsumeArray => nope(s"cannot add $t. expecting array shape")
+      case state: ConsumeOne if p.accepts(state.t) => write; state.gotValue()
+      case state: ConsumeOne => nope(s"cannot add $p. expecting ${state.t}")
+      case state: ConsumeArray => nope(s"cannot add $p. expecting array shape")
       case state => nope(s"cannot add $t. unexpected state: $state")
     }
     this
@@ -160,9 +160,9 @@ class DataBuilder(t: Type)(implicit byteOrder: ByteOrder = BIG_ENDIAN) { self =>
     buf.writeBytes(bytes)
   }
   def addTime(seconds: Long, fraction: Long): this.type = addSimple(TTime) { buf.writeLong(seconds); buf.writeLong(fraction) }
-  def addValue(x: Double): this.type = addSimple(TValue(None)) { buf.writeDouble(x) }
+  def addValue(x: Double): this.type = addSimple(PValue(None)) { buf.writeDouble(x) }
   def addComplex(re: Double, im: Double): this.type = {
-    addSimple(TComplex(None)) { buf.writeDouble(re); buf.writeDouble(im) }
+    addSimple(PComplex(None)) { buf.writeDouble(re); buf.writeDouble(im) }
   }
 
   def setSize(size: Int): this.type = this.setShape(Array(size))
