@@ -14,7 +14,6 @@ import org.labrad.manager.Manager
 import org.labrad.util.{Counter, LookupProvider}
 import scala.concurrent.{Await, Channel, ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.swing.Swing
 
 trait Connection {
 
@@ -139,21 +138,27 @@ trait Connection {
 
   def close(): Unit = close(new IOException("Connection closed."))
 
-  private def close(cause: Throwable): Unit = synchronized {
-    if (connected) {
-      connected = false
-      requestDispatcher.failAll(cause)
-      executor.shutdown
+  private def close(cause: Throwable): Unit = {
+    val listeners = synchronized {
+      if (connected) {
+        connected = false
+        requestDispatcher.failAll(cause)
+        executor.shutdown
 
-      writer.interrupt
-      try { writer.join } catch { case e: InterruptedException => }
+        writer.interrupt
+        reader.interrupt
 
-      reader.interrupt
-      try { socket.close } catch { case e: IOException => }
-      try { reader.join } catch { case e: InterruptedException => }
-
-      for (listener <- connectionListeners) listener.lift(false)
+        connectionListeners.map(_.lift)
+      } else {
+        Seq()
+      }
     }
+    for (listener <- listeners) listener(false)
+
+    try { writer.join } catch { case e: InterruptedException => }
+
+    try { socket.close } catch { case e: IOException => }
+    try { reader.join } catch { case e: InterruptedException => }
   }
 
   def send(target: String, records: (String, Data)*): Future[Seq[Data]] =
