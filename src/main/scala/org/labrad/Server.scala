@@ -37,22 +37,26 @@ object Server {
   def handle(packet: Packet)(f: RequestContext => Data): Packet = {
     val Packet(request, source, context, records) = packet
 
-    def process(records: Seq[Record]): Seq[Record] = records match {
-      case Seq(Record(id, data), tail @ _*) =>
-        val resp = try {
-          f(RequestContext(source, context, id, data))
-        } catch {
-          case ex: Throwable =>
-            val sw = new StringWriter
-            ex.printStackTrace(new PrintWriter(sw))
-            Error(0, sw.toString)
-        }
-        Record(id, resp) +: (if (resp.isError) Seq() else process(tail))
-
-      case Seq() =>
-        Seq()
+    val in = records.iterator
+    val out = Seq.newBuilder[Record]
+    var error = false
+    while (in.hasNext && !error) {
+      val Record(id, data) = in.next
+      val resp = try {
+        f(RequestContext(source, context, id, data))
+      } catch {
+        case ex: Throwable =>
+          val sw = new StringWriter
+          ex.printStackTrace(new PrintWriter(sw))
+          Error(0, sw.toString)
+      }
+      if (resp.isError) {
+        error = true
+      }
+      out += Record(id, resp)
     }
-    Packet(-request, source, context, process(records))
+
+    Packet(-request, source, context, out.result)
   }
 
   def handleAsync(packet: Packet)(f: RequestContext => Future[Data])(implicit ec: ExecutionContext): Future[Packet] = {
