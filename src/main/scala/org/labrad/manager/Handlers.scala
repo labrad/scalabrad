@@ -1,6 +1,7 @@
 package org.labrad.manager
 
 import io.netty.channel._
+import java.io.IOException
 import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo }
 import org.labrad.annotations._
 import org.labrad.data._
@@ -85,7 +86,11 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
   }
 
   override def exceptionCaught(ctx: ChannelHandlerContext, ex: Throwable): Unit = {
-    log.error("exceptionCaught", ex)
+    ex match {
+      case _: IOException => // do nothing
+      case e =>
+        log.error("exceptionCaught", ex)
+    }
     ctx.close()
   }
 
