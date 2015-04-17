@@ -194,11 +194,15 @@ trait Connection {
     requestDispatcher.finishRequest(packet)
   }
 
-  protected def handleMessage(packet: Packet): Unit = Swing.onEDT {
-    for (Record(id, data) <- packet.records) {
-      val message = Message(packet.target, packet.context, id, data)
-      messageListeners.foreach(_.lift(message))
-    }
+  protected def handleMessage(packet: Packet): Unit = {
+    executionContext.execute(new Runnable {
+      def run: Unit = {
+        for (Record(id, data) <- packet.records) {
+          val message = Message(packet.target, packet.context, id, data)
+          messageListeners.foreach(_.lift(message))
+        }
+      }
+    })
   }
 
   protected def handleRequest(packet: Packet): Unit = {}
