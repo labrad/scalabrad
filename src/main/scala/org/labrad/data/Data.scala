@@ -1478,6 +1478,7 @@ object Translate {
     for (c <- ASCII_CHARS) translate(c.toByte, c.toString)
 
     // escape characters are preceded by a backslash
+    translate('\\', """\\""")
     translate('\n', """\n""")
     translate('\t', """\t""")
     translate('"',  """\"""")
@@ -1511,6 +1512,7 @@ object Translate {
             case 'v' => 11 // NOTE: this escape is not in standard java
             case 'f' => 12
             case 'r' => 13
+            case '\\' => 92
             case c => c.toByte
           }
         case c =>
