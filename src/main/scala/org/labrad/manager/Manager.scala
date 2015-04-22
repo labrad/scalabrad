@@ -33,7 +33,7 @@ class AuthServiceImpl(password: Array[Char]) extends AuthService {
 }
 
 
-class CentralNode(port: Int, password: Array[Char], store: RegistryStore) extends Logging {
+class CentralNode(port: Int, password: Array[Char], storeOpt: Option[RegistryStore]) extends Logging {
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
@@ -43,7 +43,8 @@ class CentralNode(port: Int, password: Array[Char], store: RegistryStore) extend
   // Manager gets id 1L
   tracker.connectServer(Manager.ID, Manager.NAME)
 
-  { // Registry gets id 2L
+  for (store <- storeOpt) {
+    // Registry gets id 2L
     val name = "Registry"
     val id = hub.allocateServerId(name)
     val server = new Registry(id, name, store, hub, tracker)
@@ -118,7 +119,11 @@ object Manager extends Logging {
       (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
     }
 
-    val store = registryUri.getScheme match {
+    val storeOpt = registryUri.getScheme match {
+      case null if registryUri == new URI("none") =>
+        log.info("running with external registry")
+        None
+
       case "file" =>
         val registry = new File(registryUri)
         log.info(s"registry location: $registry")
@@ -127,7 +132,7 @@ object Manager extends Logging {
           val ok = dir.mkdirs()
           if (!ok) sys.error(s"failed to create registry directory: $dir")
         }
-        SQLiteStore(registry)
+        Some(SQLiteStore(registry))
 
       case "labrad" =>
         val remoteHost = registryUri.getHost
@@ -141,13 +146,13 @@ object Manager extends Logging {
           }
         }
         log.info(s"remote registry location: $remoteHost:$remotePort")
-        RemoteStore(remoteHost, remotePort, remotePassword)
+        Some(RemoteStore(remoteHost, remotePort, remotePassword))
 
       case scheme =>
-        sys.error(s"unknown scheme for registry uri: $scheme. must use 'file' or 'labrad'")
+        sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")
     }
 
-    val centralNode = new CentralNode(port, password, store)
+    val centralNode = new CentralNode(port, password, storeOpt)
 
     @tailrec def enterPressed(): Boolean =
       System.in.available > 0 && (System.in.read() == '\n'.toInt || enterPressed())

@@ -46,7 +46,7 @@ object Migrate {
 
     val srcReg = new RegistryServerProxy(srcCxn)
     val dstReg = new RegistryServerProxy(dstCxn)
-    
+
     def traverse(srcPath: Seq[String], dstPath: Seq[String]): Unit = {
       await(srcReg.cd(srcPath))
       val (dirs, keys) = await(srcReg.dir())
@@ -77,14 +77,14 @@ object Migrate {
         await(dstPkt.send())
       }
       val t3 = System.nanoTime()
-      
+
       println(s" (load: ${((t1-t0) / 1e6).toInt}, save: ${((t3-t2) / 1e6).toInt})")
 
       for (dir <- dirs.sorted) {
         traverse(srcPath :+ dir, dstPath :+ dir)
       }
     }
-    
+
     val tStart = System.nanoTime()
     traverse(srcPath, dstPath)
     val tEnd = System.nanoTime()

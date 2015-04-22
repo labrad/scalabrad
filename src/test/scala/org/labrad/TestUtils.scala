@@ -30,7 +30,7 @@ object TestUtils extends {
     //registryFile.mkdir()
     //val registryStore = new FileStore(registryFile)
 
-    val manager = new CentralNode(port, password, registryStore)
+    val manager = new CentralNode(port, password, Some(registryStore))
     try {
       f(host, port, password)
     } finally {
