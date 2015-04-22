@@ -70,6 +70,9 @@ object Manager extends Logging {
   val SETTINGS = 2L
   val LOOKUP = 3L
 
+  // first client id
+  val ClientIdStart = 1000000000L
+
   // named messages
   case class Connect(id: Long, name: String, isServer: Boolean) extends Message {
     def msgName: String = "Connect"

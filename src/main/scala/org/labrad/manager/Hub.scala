@@ -53,8 +53,8 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
 
   private lazy val messager = _messager()
 
-  private val serverCounter = new Counter(0x00000002L, 0x7FFFFFFFL) // 2 to 2**31-1. id 1 is reserved
-  private val clientCounter = new Counter(0x80000000L, 0xFFFFFFFFL) // 2**31 to 2**32-1
+  private val serverCounter = new Counter(2L, Manager.ClientIdStart - 1) // id 1 is reserved
+  private val clientCounter = new Counter(Manager.ClientIdStart, 0xFFFFFFFFL)
 
   private var nServersAllocated = 0L
   private var nServersConnected = 0L
