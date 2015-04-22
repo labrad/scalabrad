@@ -92,7 +92,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       tracker.connectServer(id, name)
       nServersConnected += 1
     }
-    messager.broadcast(Manager.Connect(id), sourceId = Manager.ID)
+    messager.broadcast(Manager.Connect(id, name, isServer = true), sourceId = Manager.ID)
   }
 
   def connectClient(id: Long, name: String, handler: ClientActor): Unit = {
@@ -104,7 +104,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       tracker.connectClient(id, name)
       nClientsConnected += 1
     }
-    messager.broadcast(Manager.Connect(id), sourceId = Manager.ID)
+    messager.broadcast(Manager.Connect(id, name, isServer = false), sourceId = Manager.ID)
   }
 
   def close(id: Long): Unit = {
@@ -115,7 +115,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
   }
 
   def disconnect(id: Long): Unit = {
-    val (serverNameOpt) = synchronized {
+    val (name, isServer) = synchronized {
       val (handler, isServer) = handlerMap.get(id) match {
         case Some(handler: ServerActor) => (handler, true)
         case Some(handler)              => (handler, false)
@@ -124,7 +124,14 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
           return
       }
 
-      log.debug(s"disconnecting (id=$id): $handler")
+      // look up the name for this id
+      val name = if (isServer) {
+        allocatedServerIds(id)
+      } else {
+        allocatedClientIds(id)
+      }
+
+      log.debug(s"disconnecting id=$id (name=$name): $handler")
 
       // remove from the handler map
       handlerMap -= id
@@ -140,7 +147,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
         allocatedClientIds -= id
       }
 
-      if (isServer) allocatedServerIds.get(id) else None
+      (name, isServer)
     }
 
     // send expiration messages to all remaining servers (asynchronously)
@@ -150,10 +157,10 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     }
 
     // send server disconnect message
-    for (name <- serverNameOpt) {
+    if (isServer) {
       messager.broadcast(Manager.DisconnectServer(id, name), sourceId = Manager.ID)
     }
-    messager.broadcast(Manager.Disconnect(id), sourceId = Manager.ID)
+    messager.broadcast(Manager.Disconnect(id, name, isServer = true), sourceId = Manager.ID)
   }
 
   def message(id: Long, packet: Packet): Unit = {

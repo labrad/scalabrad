@@ -43,6 +43,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
   }
 
   protected def handleMessage(packet: Packet): Unit = {
+    tracker.msgSend(id)
     hub.message(packet.target, packet.copy(target=id))
   }
 
@@ -72,6 +73,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
   // handle outgoing packets
   override def message(packet: Packet): Unit = {
     log.debug(s"sending message (target=$id): $packet")
+    tracker.msgRecv(id)
     channel.writeAndFlush(packet)
   }
 
@@ -350,7 +352,10 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   @Setting(id=61, name="Send Named Message", doc="Send a message with the given name, to be forward to all registered subscribers.")
   def sendNamedMessage(name: String, message: Data): Unit = {
-    messager.broadcast(name, message, id)
+    // for compatibility with delphi manager, we send a cluster of
+    // id and message data as the message itself, and set the source
+    // to alway be the manager
+    messager.broadcast(name, Cluster(UInt(id), message), sourceId = Manager.ID)
   }
 
   // server settings (should stay local)

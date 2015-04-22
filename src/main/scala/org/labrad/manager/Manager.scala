@@ -37,7 +37,7 @@ class CentralNode(port: Int, password: Array[Char], storeOpt: Option[RegistrySto
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
-  val messager: Messager = new MessagerImpl(hub)
+  val messager: Messager = new MessagerImpl(hub, tracker)
   val auth: AuthService = new AuthServiceImpl(password)
 
   // Manager gets id 1L
@@ -71,34 +71,34 @@ object Manager extends Logging {
   val LOOKUP = 3L
 
   // named messages
-  case class Connect(id: Long) extends Message {
-    def name: String = "Connect"
-    def data: Data = UInt(id)
+  case class Connect(id: Long, name: String, isServer: Boolean) extends Message {
+    def msgName: String = "Connect"
+    def msgData: Data = Cluster(UInt(id), Str(name), Bool(isServer))
   }
 
-  case class Disconnect(id: Long) extends Message {
-    def name: String = "Disconnect"
-    def data: Data = UInt(id)
+  case class Disconnect(id: Long, name: String, isServer: Boolean) extends Message {
+    def msgName: String = "Disconnect"
+    def msgData: Data = Cluster(UInt(id), Str(name), Bool(isServer))
   }
 
-  case class ConnectServer(id: Long, serverName: String) extends Message {
-    def name: String = "Server Connect"
-    def data: Data = Cluster(UInt(id), Str(serverName))
+  case class ConnectServer(id: Long, name: String) extends Message {
+    def msgName: String = "Server Connect"
+    def msgData: Data = Cluster(UInt(id), Str(name))
   }
 
-  case class DisconnectServer(id: Long, serverName: String) extends Message {
-    def name: String = "Server Disconnect"
-    def data: Data = Cluster(UInt(id), Str(serverName))
+  case class DisconnectServer(id: Long, name: String) extends Message {
+    def msgName: String = "Server Disconnect"
+    def msgData: Data = Cluster(UInt(id), Str(name))
   }
 
   case class ExpireAll(id: Long) extends Message {
-    def name: String = "Expire All"
-    def data: Data = UInt(id)
+    def msgName: String = "Expire All"
+    def msgData: Data = UInt(id)
   }
 
   case class ExpireContext(ctx: Context) extends Message {
-    def name: String = "Expire Context"
-    def data: Data = ctx.toData
+    def msgName: String = "Expire Context"
+    def msgData: Data = ctx.toData
   }
 
   // helpers for dealing with paths
