@@ -44,7 +44,9 @@ class StatsTrackerImpl extends StatsTracker {
   def msgSend(id: Long): Unit = update(id, _.msgSent += 1)
   def msgRecv(id: Long): Unit = update(id, _.msgRecd += 1)
 
-  def stats = synchronized { statsMap.values.map(_.immutable) }.toSeq.sortBy(_.id)
+  def stats: Seq[ConnectionStats] = {
+    synchronized { statsMap.values.map(_.immutable).toVector }.sortBy(_.id)
+  }
 }
 
 case class ConnectionStats(
