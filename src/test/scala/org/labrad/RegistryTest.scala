@@ -74,7 +74,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
         }
 
         await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
-        await(c.send("Registry", "Notify On Change" -> Cluster(UInt(msgId), Bool(true))))
+        await(c.send("Registry", "Notify on Change" -> Cluster(UInt(msgId), Bool(true))))
         await(c.send("Registry", "set" -> Cluster(Str("a"), Str("test"))))
         w.await(timeout(10.seconds))
       }
@@ -97,7 +97,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
         await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
         await(c.send("Registry", "set" -> Cluster(Str("a"), Str("first"))))
-        await(c.send("Registry", "Notify On Change" -> Cluster(UInt(msgId), Bool(true))))
+        await(c.send("Registry", "Notify on Change" -> Cluster(UInt(msgId), Bool(true))))
         await(c.send("Registry", "set" -> Cluster(Str("a"), Str("second"))))
         w.await
       }
@@ -120,7 +120,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
         await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
         await(c.send("Registry", "set" -> Cluster(Str("a"), Str("first"))))
-        await(c.send("Registry", "Notify On Change" -> Cluster(UInt(msgId), Bool(true))))
+        await(c.send("Registry", "Notify on Change" -> Cluster(UInt(msgId), Bool(true))))
         await(c.send("Registry", "del" -> Str("a")))
         w.await
       }
