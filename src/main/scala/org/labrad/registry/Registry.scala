@@ -166,7 +166,7 @@ extends ServerActor with Logging {
     }
 
     @Setting(id=50,
-             name="Notify On Change",
+             name="Notify on Change",
              doc="Requests notifications if the contents of the current directory change")
     def notifyOnChange(r: RequestContext, id: Long, enable: Boolean): Unit = {
       changeListener = if (enable) Some((r.source, id)) else None

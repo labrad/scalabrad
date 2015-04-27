@@ -117,7 +117,7 @@ trait RegistryServer extends Requester {
   def del(key: String): Future[Unit] = callUnit("del", Str(key))
 
   def notifyOnChange(id: Long, enable: Boolean): Future[Unit] =
-    callUnit("Notify On Change", UInt(id), Bool(enable))
+    callUnit("Notify on Change", UInt(id), Bool(enable))
 }
 
 class RegistryServerProxy(cxn: Connection, name: String = "Registry", context: Context = Context(0, 0))
