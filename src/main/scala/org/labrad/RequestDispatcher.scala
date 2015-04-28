@@ -45,7 +45,7 @@ class RequestDispatcher(sendFunc: Packet => Unit) extends Logging {
     }
   }
 
-  def failAll(cause: Throwable): Unit = synchronized {
+  def failAll(cause: Throwable): Unit = {
     val ps = synchronized {
       val ps = for ((id, promise) <- promises) yield {
         idPool += id
