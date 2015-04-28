@@ -105,7 +105,9 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
     tracker.serverReq(Manager.ID)
     // use a lock to ensure that we process manager requests sequentially
     val response = mgrLock.synchronized {
-      Server.handle(packet) { req => mgrHandler(req) }
+      Server.handle(packet, includeStackTrace = false) { req =>
+        mgrHandler(req)
+      }
     }
     tracker.serverRep(Manager.ID)
     Future.successful(response)

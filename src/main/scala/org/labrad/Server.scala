@@ -34,7 +34,7 @@ abstract class ServerContext(val cxn: Connection, val server: Server[_], val con
 }
 
 object Server {
-  def handle(packet: Packet)(f: RequestContext => Data): Packet = {
+  def handle(packet: Packet, includeStackTrace: Boolean = true)(f: RequestContext => Data): Packet = {
     val Packet(request, source, context, records) = packet
 
     val in = records.iterator
@@ -45,10 +45,18 @@ object Server {
       val resp = try {
         f(RequestContext(source, context, id, data))
       } catch {
+        case ex: LabradException =>
+          ex.toData
+
         case ex: Throwable =>
-          val sw = new StringWriter
-          ex.printStackTrace(new PrintWriter(sw))
-          Error(0, sw.toString)
+          val msg = if (includeStackTrace) {
+            val sw = new StringWriter
+            ex.printStackTrace(new PrintWriter(sw))
+            sw.toString
+          } else {
+            ex.getMessage
+          }
+          Error(0, msg)
       }
       if (resp.isError) {
         error = true

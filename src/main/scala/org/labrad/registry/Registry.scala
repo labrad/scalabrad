@@ -51,9 +51,9 @@ extends ServerActor with Logging {
   def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = semaphore.map {
     // TODO: handle timeout
     tracker.serverReq(id)
-    val response = Server.handle(packet) { case req @ RequestContext(source, ctx, id, data) =>
-      val (_, handler) = contexts.getOrElseUpdate(ctx, {
-        val regCtx = new RegistryContext(ctx)
+    val response = Server.handle(packet, includeStackTrace = false) { req =>
+      val (_, handler) = contexts.getOrElseUpdate(req.context, {
+        val regCtx = new RegistryContext(req.context)
         val handler = bind(regCtx)
         (regCtx, handler)
       })
