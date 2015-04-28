@@ -163,7 +163,7 @@ object Manager extends Logging {
     var done = false
     while (!done) {
       Thread.sleep(100)
-      if (enterPressed()) done = true
+      //if (enterPressed()) done = true
     }
     centralNode.stop()
   }
