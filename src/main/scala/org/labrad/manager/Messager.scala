@@ -20,18 +20,22 @@ trait Messager {
 class MessagerImpl(hub: Hub, tracker: StatsTracker) extends Messager with Logging {
   private var regs = mutable.Map.empty[String, mutable.Set[(Long, Context, Long)]]
 
-  def register(msg: String, target: Long, ctx: Context, id: Long): Unit = synchronized {
+  def register(msg: String, target: Long, ctx: Context, id: Long): Unit = {
     log.debug(s"subscribe to named message: msg=$msg, target=$target, ctx=$ctx, id=$id")
-    val listeners = regs.getOrElseUpdate(msg, mutable.Set.empty[(Long, Context, Long)])
-    listeners += ((target, ctx, id))
+    synchronized {
+      val listeners = regs.getOrElseUpdate(msg, mutable.Set.empty[(Long, Context, Long)])
+      listeners += ((target, ctx, id))
+    }
   }
 
-  def unregister(msg: String, target: Long, ctx: Context, id: Long): Unit = synchronized {
+  def unregister(msg: String, target: Long, ctx: Context, id: Long): Unit = {
     log.debug(s"unsubscribe from named message: msg=$msg, target=$target, ctx=$ctx, id=$id")
-    regs.get(msg) foreach { listeners =>
-      listeners -= ((target, ctx, id))
-      if (listeners.isEmpty)
-        regs -= msg
+    synchronized {
+      regs.get(msg) foreach { listeners =>
+        listeners -= ((target, ctx, id))
+        if (listeners.isEmpty)
+          regs -= msg
+      }
     }
   }
 
@@ -50,11 +54,18 @@ class MessagerImpl(hub: Hub, tracker: StatsTracker) extends Messager with Loggin
     }
   }
 
-  def disconnect(id: Long): Unit = synchronized {
-    for ((msg, listeners) <- regs) {
-      listeners --= listeners filter { case (target, _, _) => target == id }
-      if (listeners.isEmpty)
+  def disconnect(id: Long): Unit = {
+    synchronized {
+      val empties = Seq.newBuilder[String]
+      for ((msg, listeners) <- regs) {
+        listeners --= listeners filter { case (target, _, _) => target == id }
+        if (listeners.isEmpty) {
+          empties += msg
+        }
+      }
+      for (msg <- empties.result) {
         regs -= msg
+      }
     }
   }
 }
