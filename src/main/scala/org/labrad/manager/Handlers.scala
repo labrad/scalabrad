@@ -206,14 +206,10 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   }
 
   override def startNotifications(r: RequestContext, settingId: Long, expireAll: Boolean): Unit = synchronized {
-    mgr.subscribeToNamedMessage(r, "Expire Context", settingId, true)
     contextExpirationInfo = Some((settingId, expireAll))
   }
 
   override def stopNotifications(r: RequestContext): Unit = synchronized {
-    contextExpirationInfo.foreach { case (settingId, expireAll) =>
-      mgr.subscribeToNamedMessage(r, "Expire Context", settingId, false)
-    }
     contextExpirationInfo = None
   }
 
