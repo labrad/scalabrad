@@ -98,11 +98,15 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
 
   // handle manager calls locally
   protected val mgr = new ManagerImpl(id, name, hub, this, tracker, messager)
-  protected val mgrHandler = ManagerImpl.bind(mgr)
+  private val mgrHandler = ManagerImpl.bind(mgr)
+  private val mgrLock = new Object
 
-  private def handleManagerRequest(packet: Packet): Future[Packet] = synchronized {
+  private def handleManagerRequest(packet: Packet): Future[Packet] = {
     tracker.serverReq(Manager.ID)
-    val response = Server.handle(packet) { req => mgrHandler(req) }
+    // use a lock to ensure that we process manager requests sequentially
+    val response = mgrLock.synchronized {
+      Server.handle(packet) { req => mgrHandler(req) }
+    }
     tracker.serverRep(Manager.ID)
     Future.successful(response)
   }
@@ -125,20 +129,28 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   private var contexts = Set.empty[Context]
   private var promises = Map.empty[Int, Promise[Packet]]
 
-  override def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = synchronized {
+  private var settingsById: Map[Long, SettingInfo] = Map.empty
+  private var settingsByName: Map[String, SettingInfo] = Map.empty
+  private var contextExpirationInfo: Option[(Long, Boolean)] = None
+
+
+  override def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = {
     tracker.serverReq(id)
     try {
-      val converted = packet.records map { case Record(id, data) =>
-        settingsById.get(id) match {
-          case Some(setting) => Record(id, data.convertTo(setting.accepts))
-          case None => sys.error(s"No setting with id $id")
+      val (toSend, promise) = synchronized {
+        val converted = packet.records map { case Record(id, data) =>
+          settingsById.get(id) match {
+            case Some(setting) => Record(id, data.convertTo(setting.accepts))
+            case None => sys.error(s"No setting with id $id")
+          }
         }
+        val promise = Promise[Packet]
+        promises += -packet.id -> promise
+        contexts += packet.context
+        (packet.copy(records = converted), promise)
       }
-      log.debug(s"sending packet: ${packet}...")
-      val promise = Promise[Packet]
-      promises += -packet.id -> promise
-      contexts += packet.context
-      channel.writeAndFlush(packet.copy(records = converted))
+      log.debug(s"sending packet: $toSend")
+      channel.writeAndFlush(toSend)
       promise.future.onComplete { _ => tracker.serverRep(id) }
       promise.future
     } catch {
@@ -149,7 +161,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   override protected def handleResponse(packet: Packet): Unit = synchronized {
     promises.get(packet.id) match {
       case Some(promise) =>
-        log.debug(s"handle response: ${packet}")
+        log.debug(s"handle response: $packet")
         promises -= packet.id
         promise.success(packet.copy(target=id))
       case None =>
@@ -166,14 +178,11 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
 
 
   // support methods for manager settings
-  private var settingsById: Map[Long, SettingInfo] = Map.empty
-  private var settingsByName: Map[String, SettingInfo] = Map.empty
-  private var contextExpirationInfo: Option[(Long, Boolean)] = None
-
-  override def startServing: Unit =
+  override def startServing: Unit = synchronized {
     hub.setServerInfo(ServerInfo(id, name, doc, settingsById.values.toSeq))
+  }
 
-  override def addSetting(id: Long, name: String, doc: String, accepts: String, returns: String): Unit = {
+  override def addSetting(id: Long, name: String, doc: String, accepts: String, returns: String): Unit = synchronized {
     require(!settingsById.contains(id), s"Setting already exists with id $id")
     require(!settingsByName.contains(name), s"Setting already exists with name '$name'")
     val inf = SettingInfo(id, name, doc, Pattern(accepts), Pattern(returns))
@@ -181,63 +190,77 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     settingsByName += name -> inf
   }
 
-  override def delSetting(id: Long): Unit =
+  override def delSetting(id: Long): Unit = synchronized {
     settingsById.get(id).map(delSetting).getOrElse(sys.error(s"No setting with id $id"))
+  }
 
-  override def delSetting(name: String): Unit =
+  override def delSetting(name: String): Unit = synchronized {
     settingsByName.get(name).map(delSetting).getOrElse(sys.error(s"No setting '$name'"))
+  }
 
-  private def delSetting(inf: SettingInfo): Unit = {
+  private def delSetting(inf: SettingInfo): Unit = synchronized {
     settingsById -= inf.id
     settingsByName -= inf.name
   }
 
-  override def startNotifications(r: RequestContext, settingId: Long, expireAll: Boolean): Unit = {
+  override def startNotifications(r: RequestContext, settingId: Long, expireAll: Boolean): Unit = synchronized {
     mgr.subscribeToNamedMessage(r, "Expire Context", settingId, true)
     contextExpirationInfo = Some((settingId, expireAll))
   }
 
-  override def stopNotifications(r: RequestContext): Unit = {
+  override def stopNotifications(r: RequestContext): Unit = synchronized {
     contextExpirationInfo.foreach { case (settingId, expireAll) =>
       mgr.subscribeToNamedMessage(r, "Expire Context", settingId, false)
     }
     contextExpirationInfo = None
   }
 
-  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = synchronized {
-    val result = contextExpirationInfo match {
-      case Some((settingId, _)) =>
-        if (contexts contains ctx) {
-          message(Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData))))
-          contexts -= ctx
-          1L
-        } else {
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = {
+    var messages = Seq.newBuilder[Packet]
+    val result = synchronized {
+      contextExpirationInfo match {
+        case Some((settingId, _)) =>
+          if (contexts contains ctx) {
+            messages += Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData)))
+            contexts -= ctx
+            1L
+          } else {
+            0L
+          }
+        case None =>
           0L
-        }
-      case None =>
-        0L
+      }
+    }
+    for (msg <- messages.result) {
+      message(msg)
     }
     Future.successful(result)
   }
 
-  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = synchronized {
-    val result = contextExpirationInfo match {
-      case Some((settingId, expireAll)) =>
-        val expired = contexts.filter(_.high == high)
-        if (!expired.isEmpty) {
-          if (expireAll) {
-            message(Packet(0, 1, Context(high, 0), Seq(Record(settingId, UInt(high)))))
+  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = {
+    val messages = Seq.newBuilder[Packet]
+    val result = synchronized {
+      contextExpirationInfo match {
+        case Some((settingId, expireAll)) =>
+          val expired = contexts.filter(_.high == high)
+          if (!expired.isEmpty) {
+            if (expireAll) {
+              messages += Packet(0, 1, Context(high, 0), Seq(Record(settingId, UInt(high))))
+            } else {
+              for (ctx <- expired)
+                messages += Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData)))
+            }
+            contexts --= expired
+            1L
           } else {
-            for (ctx <- expired)
-              message(Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData))))
+            0L
           }
-          contexts --= expired
-          1L
-        } else {
+        case None =>
           0L
-        }
-      case None =>
-        0L
+      }
+    }
+    for (msg <- messages.result) {
+      message(msg)
     }
     Future.successful(result)
   }
