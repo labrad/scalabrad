@@ -46,7 +46,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
   private val allocatedServerIds = mutable.Map.empty[Long, String]
 
   private val handlerMap = mutable.Map.empty[Long, ClientActor]
-  private def servers = handlerMap.values.collect { case s: ServerActor => s }
+  private def serverHandlers = handlerMap.values.collect { case s: ServerActor => s }
 
   private val serverIdCache = mutable.Map.empty[String, Long]
   private val serverInfoCache = mutable.Map.empty[Long, ServerInfo]
@@ -115,7 +115,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
   }
 
   def disconnect(id: Long): Unit = {
-    val (name, isServer) = synchronized {
+    val (name, isServer, allServers) = synchronized {
       val (handler, isServer) = handlerMap.get(id) match {
         case Some(handler: ServerActor) => (handler, true)
         case Some(handler)              => (handler, false)
@@ -147,12 +147,15 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
         allocatedClientIds -= id
       }
 
-      (name, isServer)
+      // get a list of all connected servers that will be notified
+      val allServers = this.serverHandlers
+
+      (name, isServer, allServers)
     }
 
     // send expiration messages to all remaining servers (asynchronously)
     messager.broadcast(Manager.ExpireAll(id), sourceId = Manager.ID)
-    Future.sequence(servers.map(_.expireAll(id)(10.seconds))) onFailure {
+    Future.sequence(allServers.map(_.expireAll(id)(10.seconds))) onFailure {
       case ex => //log.warn("error while sending context expiration messages", ex)
     }
 
@@ -184,20 +187,23 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     }
   }
 
-  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = synchronized {
-    Future.sequence(servers.map(_.expireContext(ctx))).map(_.sum)
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = {
+    val allServers = synchronized { this.serverHandlers }
+    Future.sequence(allServers.map(_.expireContext(ctx))).map(_.sum)
   }
 
-  def expireContext(id: Long, ctx: Context)(implicit timeout: Duration): Future[Long] = synchronized {
-    handlerMap.get(id) match {
-      case Some(s: ServerActor) => s.expireContext(ctx)
+  def expireContext(id: Long, ctx: Context)(implicit timeout: Duration): Future[Long] = {
+    val handlerOpt = synchronized { handlerMap.get(id) }
+    handlerOpt match {
+      case Some(s: ServerActor) => s.expireContext(ctx)(10.seconds)
       case Some(_) => Hub.notAServer(id)
       case None => Hub.noSuchServer(id)
     }
   }
 
-  def expireAll(id: Long, high: Long)(implicit timeout: Duration): Future[Long] = synchronized {
-    handlerMap.get(id) match {
+  def expireAll(id: Long, high: Long)(implicit timeout: Duration): Future[Long] = {
+    val handlerOpt = synchronized { handlerMap.get(id) }
+    handlerOpt match {
       case Some(s: ServerActor) => s.expireAll(high)
       case Some(_) => Hub.notAServer(id)
       case None => Hub.noSuchServer(id)
@@ -206,7 +212,7 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
 
   // expose server metadata
   def setServerInfo(info: ServerInfo): Unit = synchronized { serverInfoCache(info.id) = info }
-  def serversInfo: Seq[ServerInfo] = synchronized { serverInfoCache.values.toSeq.sortBy(_.id) }
+  def serversInfo: Seq[ServerInfo] = synchronized { serverInfoCache.values.toVector }.sortBy(_.id)
   def serverInfo(id: Either[Long, String]): Option[ServerInfo] = synchronized {
     id.fold(i => serverInfoCache.get(i), n => serverInfoCache.values.find(_.name == n))
   }
