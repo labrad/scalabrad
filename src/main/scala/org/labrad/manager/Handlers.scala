@@ -128,8 +128,8 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
 class ServerHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, name: String, doc: String)(implicit ec: ExecutionContext)
 extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActor with ManagerSupport with Logging {
 
-  private var contexts = Set.empty[Context]
-  private var promises = Map.empty[Int, Promise[Packet]]
+  private val contexts = mutable.Set.empty[Context]
+  private val promises = mutable.Map.empty[(Long, Int), Promise[Packet]]
 
   private var settingsById: Map[Long, SettingInfo] = Map.empty
   private var settingsByName: Map[String, SettingInfo] = Map.empty
@@ -147,7 +147,8 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
           }
         }
         val promise = Promise[Packet]
-        promises += -packet.id -> promise
+        val key = (packet.target, -packet.id)
+        promises(key) = promise
         contexts += packet.context
         (packet.copy(records = converted), promise)
       }
@@ -161,13 +162,14 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   }
 
   override protected def handleResponse(packet: Packet): Unit = synchronized {
-    promises.get(packet.id) match {
+    val key = (packet.target, packet.id)
+    promises.get(key) match {
       case Some(promise) =>
         log.debug(s"handle response: $packet")
-        promises -= packet.id
+        promises -= key
         promise.success(packet.copy(target=id))
       case None =>
-        log.error(s"invalid response with id ${packet.id}")
+        log.error(s"invalid response with id ${packet.id}. server=$id, name=$name, response=$packet")
     }
   }
 
@@ -175,7 +177,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     for ((_, promise) <- promises)
       promise.failure(LabradException(8, "Server disconnected"))
 
-    promises = promises.empty
+    promises.clear()
   }
 
 
