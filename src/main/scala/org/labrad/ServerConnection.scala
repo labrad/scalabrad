@@ -8,7 +8,7 @@ import org.labrad.errors._
 import org.labrad.events._
 import org.labrad.util._
 import scala.collection._
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.currentMirror
@@ -62,12 +62,24 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
     }
   }
 
+  private val shutdownPromise = Promise[Unit]
+
   def triggerShutdown(): Unit = {
-    val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
-    contexts.clear()
-    Await.result(Future.sequence(expirations), 60.seconds)
-    server.shutdown()
-    close()
+    try {
+      val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
+      contexts.clear()
+      Await.result(Future.sequence(expirations), 60.seconds)
+      server.shutdown()
+      close()
+      shutdownPromise.success(())
+    } catch {
+      case e: Exception =>
+        shutdownPromise.failure(e)
+    }
+  }
+
+  def awaitShutdown(timeout: Duration = Duration.Inf): Unit = {
+    Await.result(shutdownPromise.future, timeout)
   }
 
 
