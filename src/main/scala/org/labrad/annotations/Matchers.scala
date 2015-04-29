@@ -16,13 +16,6 @@ object Matchers {
     }
   }
 
-  object NamedMessageHandler {
-    def unapply(obj: Object): Option[String] = obj match {
-      case a: NamedMessageHandler => Some(a.value)
-      case _ => None
-    }
-  }
-
   object Setting {
     def unapply(obj: Object): Option[(Long, String, String)] = obj match {
       case a: Setting => Some((a.id, a.name, a.doc))

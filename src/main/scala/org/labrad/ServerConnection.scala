@@ -3,7 +3,6 @@ package org.labrad
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.regex.Pattern
 import org.labrad.annotations.IsServer
-import org.labrad.annotations.Matchers.NamedMessageHandler
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events._
@@ -41,7 +40,6 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
     Await.result(
       for {
         _ <- registerSettings()
-        _ <- subscribeToNamedMessages()
         _ <- send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
         _ <- send("Manager", "S: Start Serving" -> Data.NONE)
       } yield (),
@@ -93,28 +91,6 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
         Str(""))
     )
     send("Manager", registrations.map("S: Register Setting" -> _): _*).map(_ => ())
-  }
-
-  private def subscribeToNamedMessages(): Future[Unit] = {
-    val subscriptions = for {
-      m <- server.getClass.getMethods.toSeq
-      NamedMessageHandler(name) <- m.getDeclaredAnnotations
-    } yield
-      onNamedMessage(name) { m.invoke(server, _) }
-    Future.sequence(subscriptions).map(_ => ())
-  }
-
-  private def onNamedMessage(name: String)(f: Message => Unit): Future[Unit] = {
-    val id = getMessageId
-    addMessageListener {
-      case message @ Message(_, _, `id`, _) =>
-        try {
-          f(message)
-        } catch {
-          case e: Exception => log.error(s"exception in named message handler '${name}'", e)
-        }
-    }
-    send("Manager", "Subscribe to Named Message" -> Cluster(Str(name), UInt(id), Bool(true))).map(_ => ())
   }
 }
 
