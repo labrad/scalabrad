@@ -51,11 +51,12 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   override protected def handleRequest(packet: Packet): Unit = {
     val cls = implicitly[ClassTag[T]].runtimeClass
     val ctor = cls.getConstructors()(0)
-    val (_, ctx) = contexts.getOrElseUpdate(packet.context, {
-      val instance = ctor.newInstance(Array[java.lang.Object](this, server, packet.context): _*).asInstanceOf[T]
-      instance -> new ContextMgr(instance, server => handler(server.asInstanceOf[T]))
+    val (_, ctxMgr) = contexts.getOrElseUpdate(packet.context, {
+      val ctxObj = ctor.newInstance(Array[java.lang.Object](this, server, packet.context): _*).asInstanceOf[T]
+      val ctxMgr = new ContextMgr[T](ctxObj, serverCtx => handler(serverCtx))
+      (ctxObj, ctxMgr)
     })
-    ctx.serve(packet).onComplete {
+    ctxMgr.serve(packet).onComplete {
       case Success(response) => sendPacket(response)
       case Failure(e) => // should not happen
     }
@@ -75,7 +76,7 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
   protected def loginData =
     Cluster(UInt(Client.PROTOCOL_VERSION), Str(name), Str(doc.stripMargin), Str(""))
 
-  private val contexts = mutable.Map.empty[Context, (T, ContextMgr)]
+  private val contexts = mutable.Map.empty[Context, (T, ContextMgr[T])]
   private val (settings, handler): (Seq[SettingInfo], T => RequestContext => Data) = Reflect.makeHandler[T]
 
   def get(context: Context): Option[T] = contexts.get(context).map(_._1)

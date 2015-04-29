@@ -4,9 +4,9 @@ import org.labrad.data._
 import org.labrad.util.AsyncSemaphore
 import scala.concurrent.{ExecutionContext, Future}
 
-class ContextMgr(factory: => ServerContext, bind: Any => RequestContext => Data) {
+class ContextMgr[T <: ServerContext](factory: => T, bind: T => RequestContext => Data) {
   @volatile private var firstTime = true
-  @volatile private var server: ServerContext = _
+  @volatile private var server: T = _
   @volatile private var handler: RequestContext => Data = _
   private val semaphore = new AsyncSemaphore(1)
 
