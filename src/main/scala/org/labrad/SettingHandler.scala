@@ -132,6 +132,7 @@ object SettingHandler extends Logging {
           val xs = acceptPats.find {
             case (p, _, _) => p.accepts(r.data.t)
           }.map {
+            case (p, 0, k) => Seq.fill(k)(Data.NONE)
             case (p, 1, k) => Seq(r.data) ++ Seq.fill(k)(Data.NONE)
             case (p, n, k) => r.data.clusterIterator.toSeq ++ Seq.fill(k)(Data.NONE)
           }.getOrElse {

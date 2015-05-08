@@ -188,10 +188,14 @@ class DefaultArgs extends Testable("allow parameters with default values to be o
   @Setting(id=3, name="c", doc="")
   def c(r: RequestContext, name: Option[String] = None): Data = Data.NONE
 
+  @Setting(id=4, name="d", doc="")
+  def d(path: Seq[String] = Nil, create: Boolean = false): Seq[String] = path
+
   val settings = Seq(
     (1L, "a", "s | s<s|_> | s<s|_><w|_>", "?"),
     (2L, "b", "s<s|_>w", "?"),
-    (3L, "c", "s | _", "?")
+    (3L, "c", "s | _", "?"),
+    (4L, "d", "_ | *s | <*s|_><b|_>", "*s")
   )
 }
 
@@ -371,4 +375,22 @@ class TypeTests extends FunSuite with Logging {
   testInferenceArray[Array[Byte]](Pattern("s"), Array.tabulate[Byte](256)(_.toByte))
   testInferenceArray[Array[Data]](Pattern("*?"), Array(Str("abc")), Array())
   testInferenceArray[Array[String]](Pattern("*s"), Array("abc"), Array())
+}
+
+class InvokeTests extends FunSuite with Logging {
+  val (_, bindDefaultArgs) = Reflect.makeHandler[DefaultArgs]
+
+  test("can invoke method with some args having default values") {
+    val defaultArgs = new DefaultArgs
+    val handler = bindDefaultArgs(defaultArgs)
+    val result = handler(RequestContext(source = 3, context = Context(3, 1), id = 4, data = Arr(Str("test"))))
+    assert(result.get[Seq[String]] == Seq("test"))
+  }
+
+  test("can invoke method with None when all args have default values") {
+    val defaultArgs = new DefaultArgs
+    val handler = bindDefaultArgs(defaultArgs)
+    val result = handler(RequestContext(source = 3, context = Context(3, 1), id = 4, data = Data.NONE))
+    assert(result.get[Seq[String]] == Nil)
+  }
 }
