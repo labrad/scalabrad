@@ -59,6 +59,16 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
     }
   }
 
+  test("registry cd with no arguments stays in same directory") {
+    withManager { (host, port, password) =>
+      withClient(host, port, password) { c =>
+        await(c.send("Registry", "cd" -> Cluster(Arr(Str("test"), Str("a")), Bool(true))))
+        val result = await(c.send("Registry", "cd" -> Data.NONE))(0)
+        assert(result.get[Seq[String]] == Seq("", "test", "a"))
+      }
+    }
+  }
+
   test("registry sends message when key is created") {
     withManager { (host, port, password) =>
       withClient(host, port, password) { c =>

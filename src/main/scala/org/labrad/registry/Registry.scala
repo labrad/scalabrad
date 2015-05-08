@@ -86,7 +86,10 @@ extends ServerActor with Logging {
     @Setting(id=10,
              name="cd",
              doc="Change the current directory")
-    def changeDir(dir: Either[String, Seq[String]] = Left(""), create: Boolean = false): Seq[String] = {
+    def changeDir(): Seq[String] = {
+      store.pathTo(curDir)
+    }
+    def changeDir(dir: Either[String, Seq[String]], create: Boolean = false): Seq[String] = {
       val dirs = dir match {
         case Left(dir) => Seq(dir)
         case Right(dirs) => dirs
