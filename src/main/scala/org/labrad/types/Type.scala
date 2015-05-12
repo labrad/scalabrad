@@ -6,8 +6,8 @@ import scala.util.parsing.combinator.RegexParsers
 object Parsers extends RegexParsers {
 
   private def stripComments(tag: String): String =
-    tag.split(":")(0) // strip off any trailing comments
-       .replaceAll("""\{[^\{\}]*\}""", "") // remove bracketed comments
+    tag.replaceAll("""\{[^\{\}]*\}""", "") // remove bracketed comments
+       .split(":")(0) // strip off any trailing comments
 
   private def parseOrThrow[A](p: Parser[A], s: String): A =
     parseAll(p, s) match {

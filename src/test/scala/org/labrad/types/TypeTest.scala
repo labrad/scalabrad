@@ -98,6 +98,17 @@ class TypeTests extends FunSuite {
       assert(Type(s) == t)
   }
 
+  test("embedded comments can contain a colon") {
+    val tests = Seq(
+      // comments
+      "ss{embedded comment: this is a test}is" -> TCluster(TStr, TStr, TInt, TStr),
+      "{embedded comment: this, too}ssis" -> TCluster(TStr, TStr, TInt, TStr)
+    )
+
+    for ((s, t) <- tests)
+      assert(Type(s) == t)
+  }
+
   test("top-level pattern alternatives can be separated by |") {
     assert(Pattern("s|t") == PChoice(TStr, TTime))
 
