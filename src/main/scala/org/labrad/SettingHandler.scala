@@ -12,7 +12,20 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.runtime.universe.{Return => _, _}
 import scala.reflect.runtime.currentMirror
 
-case class SettingInfo(id: Long, name: String, doc: String, accepts: Pattern, returns: Pattern)
+case class TypeInfo(pat: Pattern, strs: Seq[String])
+object TypeInfo {
+  def fromPatterns(pats: Seq[String]): TypeInfo = {
+    val pattern = pats match {
+      case Seq()  => Pattern("?")
+      case Seq(p) => Pattern(p)
+      case ps     => Pattern.reduce(ps.map(Pattern(_)): _*)
+    }
+    TypeInfo(pattern, pats)
+  }
+}
+
+
+case class SettingInfo(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo)
 
 case class ServerInfo(id: Long, name: String, doc: String, settings: Seq[SettingInfo]) {
   def setting(id: Long): Option[SettingInfo] = settings.find(_.id == id)

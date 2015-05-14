@@ -250,8 +250,8 @@ class ReflectTests extends FunSuite with Logging {
         assert(found.exists(_.id == id), "expecting setting with id " + id)
         val setting = found.find(_.id == id).get
         assert(setting.name == name, s"incorrect name: expected $name, got ${setting.name}")
-        assert(same(setting.accepts, Pattern(acceptPat)), s"incorrect pattern: expected $acceptPat, got ${setting.accepts}")
-        assert(same(setting.returns, Pattern(returnPat)), s"incorrect pattern: expected $returnPat, got ${setting.returns}")
+        assert(same(setting.accepts.pat, Pattern(acceptPat)), s"incorrect pattern: expected $acceptPat, got ${setting.accepts}")
+        assert(same(setting.returns.pat, Pattern(returnPat)), s"incorrect pattern: expected $returnPat, got ${setting.returns}")
       }
     }
   }

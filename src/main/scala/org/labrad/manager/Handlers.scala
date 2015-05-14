@@ -2,7 +2,7 @@ package org.labrad.manager
 
 import io.netty.channel._
 import java.io.IOException
-import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo }
+import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo, TypeInfo }
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
@@ -116,7 +116,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
   // support methods for manager settings
   def startServing: Unit = ???
 
-  def addSetting(id: Long, name: String, doc: String, accepts: String, returns: String): Unit = ???
+  def addSetting(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo): Unit = ???
   def delSetting(id: Long): Unit = ???
   def delSetting(name: String): Unit = ???
 
@@ -142,7 +142,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
       val (toSend, promise) = synchronized {
         val converted = packet.records map { case Record(id, data) =>
           settingsById.get(id) match {
-            case Some(setting) => Record(id, data.convertTo(setting.accepts))
+            case Some(setting) => Record(id, data.convertTo(setting.accepts.pat))
             case None => sys.error(s"No setting with id $id")
           }
         }
@@ -186,10 +186,10 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     hub.setServerInfo(ServerInfo(id, name, doc, settingsById.values.toSeq))
   }
 
-  override def addSetting(id: Long, name: String, doc: String, accepts: String, returns: String): Unit = synchronized {
+  override def addSetting(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo): Unit = synchronized {
     require(!settingsById.contains(id), s"Setting already exists with id $id")
     require(!settingsByName.contains(name), s"Setting already exists with name '$name'")
-    val inf = SettingInfo(id, name, doc, Pattern(accepts), Pattern(returns))
+    val inf = SettingInfo(id, name, doc, accepts, returns)
     settingsById += id -> inf
     settingsByName += name -> inf
   }
@@ -273,7 +273,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
 trait ManagerSupport {
   def startServing(): Unit
 
-  def addSetting(id: Long, name: String, doc: String, accepts: String, returns: String): Unit
+  def addSetting(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo): Unit
   def delSetting(id: Long): Unit
   def delSetting(name: String): Unit
 
@@ -329,8 +329,8 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
         sys.error("Setting not found: " + settingId.fold(_.toString, _.toString))
       case Some(setting) =>
         (setting.doc,
-         setting.accepts.expand.map(_.toString), // TODO: setting.accepts.toString
-         setting.returns.expand.map(_.toString), // TODO: setting.returns.toString
+         setting.accepts.strs, // TODO: setting.accepts.toString
+         setting.returns.strs, // TODO: setting.returns.toString
          "" // TODO: get rid of notes field
         )
     }
@@ -386,13 +386,8 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
   @Setting(id=100, name="S: Register Setting", doc="(Servers only) Register an available setting for this server.") // TODO: change types to *(s, s) instead of *s, *s
   def addSetting(id: Long, name: String, doc: String,
                  accepted: Seq[String], returned: Seq[String], notes: String): Unit = {
-    def makePattern(ps: Seq[String]) = ps match {
-      case Seq()  => "?"
-      case Seq(p) => p
-      case ps     => Pattern.reduce(ps.map(Pattern(_)): _*).toString
-    }
     val docStr = if (notes.isEmpty) doc else s"$doc\n\n$notes"
-    stub.addSetting(id, name, docStr, makePattern(accepted), makePattern(returned))
+    stub.addSetting(id, name, docStr, TypeInfo.fromPatterns(accepted), TypeInfo.fromPatterns(returned))
   }
 
   @Setting(id=101, name="S: Unregister Setting", doc="(Servers only) Unregister an available setting for this server.")

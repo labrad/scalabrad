@@ -99,8 +99,8 @@ class ServerConnection[T <: ServerContext : ClassTag : TypeTag](
         UInt(s.id),
         Str(s.name),
         Str(s.doc),
-        Arr(s.accepts.expand.map(_.toString).map(Str(_))), // TODO: when manager supports patterns, no need for expand
-        Arr(s.returns.expand.map(_.toString).map(Str(_))),
+        Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
+        Arr(s.returns.strs.map(Str(_))),
         Str(""))
     )
     send("Manager", registrations.map("S: Register Setting" -> _): _*).map(_ => ())

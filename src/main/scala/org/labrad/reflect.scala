@@ -28,7 +28,9 @@ object Reflect {
         (m, defaults)
       }
       val (accepts, returns, binder) = SettingHandler.forMethods(methodsWithDefaults)
-      val settingInfo = SettingInfo(id, name, doc.stripMargin, accepts, returns)
+      val acceptsInfo = TypeInfo(accepts, accepts.expand.map(_.toString))
+      val returnsInfo = TypeInfo(returns, returns.expand.map(_.toString))
+      val settingInfo = SettingInfo(id, name, doc.stripMargin, acceptsInfo, returnsInfo)
 
       (settingInfo, binder)
     }
