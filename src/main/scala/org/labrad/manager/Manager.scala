@@ -139,7 +139,10 @@ object Manager extends Logging {
 
       case "labrad" =>
         val remoteHost = registryUri.getHost
-        val remotePort = registryUri.getPort
+        val remotePort = registryUri.getPort match {
+          case -1 => 7682 // not specified; use default
+          case port => port
+        }
         val remotePassword = registryUri.getUserInfo match {
           case null => password
           case info => info.split(":") match {
