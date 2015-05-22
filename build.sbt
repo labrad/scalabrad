@@ -28,7 +28,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang.modules" %% "scala-swing" % "1.0.1",
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1",
   "org.clapper" %% "argot" % "1.0.3",
-  "io.netty" % "netty-all" % "5.0.0.Alpha2",
+  "io.netty" % "netty-all" % "4.1.0.Beta5",
   "joda-time" % "joda-time" % "2.1",
   "org.joda" % "joda-convert" % "1.2",
   "org.slf4j" % "slf4j-api" % "1.7.2",

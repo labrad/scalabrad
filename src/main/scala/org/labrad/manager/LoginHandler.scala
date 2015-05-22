@@ -13,7 +13,7 @@ import scala.util.Random
 class LoginHandler(auth: AuthService, hub: Hub, tracker: StatsTracker, messager: Messager)(implicit ec: ExecutionContext)
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
-  override def messageReceived(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+  override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
     val Packet(req, target, context, records) = packet
     val resp = try {
       handle(ctx, packet)
