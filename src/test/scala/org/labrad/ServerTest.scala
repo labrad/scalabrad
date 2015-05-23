@@ -12,13 +12,13 @@ import scala.reflect.runtime.universe
 
 @IsServer(name = "Scala Test Server",
            doc = "Basic server to test Scalabrad API.")
-object TestSrv extends Server[TestCtx] with Logging {
-  def init(cxn: ServerConnection[TestCtx]): Unit = log.info("init() called on server.")
+class TestSrv extends Server[TestCtx] with Logging {
+  def init(cxn: ServerConnection): Unit = log.info("init() called on server.")
   def shutdown(): Unit = log.info("shutdown() called on server.")
 }
 
 
-class TestCtx(cxn: ServerConnection[TestCtx], server: Server[TestCtx], context: Context)
+class TestCtx(cxn: ServerConnection, server: TestSrv, context: Context)
 extends ServerContext(cxn, server, context) with Logging {
   private val registry = mutable.Map.empty[String, Data]
 
@@ -198,7 +198,7 @@ object TestServer {
     val PORT = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
     val PASSWORD = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
 
-    val s = ServerConnection(TestSrv, HOST, PORT, PASSWORD.toCharArray)
+    val s = ServerConnection(new TestSrv, HOST, PORT, PASSWORD.toCharArray)
     s.connect
     sys.ShutdownHookThread(s.triggerShutdown)
     s.serve

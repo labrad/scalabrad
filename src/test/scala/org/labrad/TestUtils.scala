@@ -49,7 +49,7 @@ object TestUtils extends {
   }
 
   def withServer[T](host: String, port: Int, password: Array[Char])(body: => T) = {
-    val s = ServerConnection(TestSrv, host, port, password)
+    val s = ServerConnection(new TestSrv, host, port, password)
     s.connect()
     s.serve()
     try {

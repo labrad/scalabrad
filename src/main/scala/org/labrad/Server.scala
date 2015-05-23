@@ -3,15 +3,63 @@ package org.labrad
 import java.io.{PrintWriter, StringWriter}
 import org.labrad.data._
 import org.labrad.errors.LabradException
-import org.labrad.util.Util
-import scala.concurrent.{ExecutionContext, Future}
+import org.labrad.util.{Logging, Util}
+import scala.collection.mutable
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Success, Failure}
 
-abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
+abstract class Server[T <: ServerContext : ClassTag : TypeTag] extends Logging {
 
-  def init(cxn: ServerConnection[T]): Unit
+  private var cxn: ServerConnection = _
+  private implicit def ec: ExecutionContext = cxn.executionContext
+
+  private[labrad] def doInit(cxn: ServerConnection): Unit = {
+    this.cxn = cxn
+
+    init(cxn)
+
+    val msgId = cxn.getMessageId
+    cxn.addMessageListener {
+      case Message(`msgId`, context, _, _) =>
+        contexts.remove(context).map { case (instance, ctxMgr) => ctxMgr.expire() }
+    }
+
+    val registerF = for {
+      _ <- registerSettings()
+      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
+      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
+    } yield ()
+    Await.result(registerF, 30.seconds)
+
+    log.info("Now serving...")
+  }
+
+  private def registerSettings(): Future[Unit] = {
+    val registrations = settings.sortBy(_.id).map(s =>
+      Cluster(
+        UInt(s.id),
+        Str(s.name),
+        Str(s.doc),
+        Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
+        Arr(s.returns.strs.map(Str(_))),
+        Str(""))
+    )
+    cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*).map(_ => ())
+  }
+
+
+  private[labrad] def doShutdown(): Unit = {
+    val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
+    contexts.clear()
+    Await.result(Future.sequence(expirations), 60.seconds)
+    shutdown()
+  }
+
+  // user-overidden methods
+  def init(cxn: ServerConnection): Unit
   def shutdown(): Unit
 
   def run(args: Array[String]): Unit = {
@@ -26,6 +74,23 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] {
     sys.ShutdownHookThread(cxn.triggerShutdown)
     cxn.serve()
   }
+
+  private val ctxClass = implicitly[ClassTag[T]].runtimeClass
+  private val ctxCtor = ctxClass.getConstructors()(0)
+
+  def handleRequest(packet: Packet): Future[Packet] = {
+    val (_, ctxMgr) = contexts.getOrElseUpdate(packet.context, {
+      val ctxObj = ctxCtor.newInstance(Array[java.lang.Object](cxn, this, packet.context): _*).asInstanceOf[T]
+      val ctxMgr = new ContextMgr[T](ctxObj, serverCtx => handler(serverCtx))
+      (ctxObj, ctxMgr)
+    })
+    ctxMgr.serve(packet)
+  }
+
+  private val contexts = mutable.Map.empty[Context, (T, ContextMgr[T])]
+  private val (settings, handler): (Seq[SettingInfo], T => RequestContext => Data) = Reflect.makeHandler[T]
+
+  def get(context: Context): Option[T] = contexts.get(context).map(_._1)
 }
 
 abstract class ServerContext(val cxn: Connection, val server: Server[_], val context: Context) {
