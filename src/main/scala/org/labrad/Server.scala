@@ -16,6 +16,16 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   private var cxn: ServerConnection = _
   private implicit def ec: ExecutionContext = cxn.executionContext
 
+  private val contexts = mutable.Map.empty[Context, ContextState]
+
+  private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
+  private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
+  private val settings = srvSettings ++ ctxSettings
+  private val srvHandler = srvHandlerFactory(this.asInstanceOf[S])
+
+  private val srvSettingIds = srvSettings.map(_.id).toSet
+  private val ctxSettingIds = ctxSettings.map(_.id).toSet
+
   private[labrad] def doInit(cxn: ServerConnection): Unit = {
     this.cxn = cxn
 
@@ -24,7 +34,8 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     val msgId = cxn.getMessageId
     cxn.addMessageListener {
       case Message(`msgId`, context, _, _) =>
-        contexts.remove(context).map { _.expire() }
+        val stateOpt = contexts.synchronized { contexts.remove(context) }
+        stateOpt.foreach { _.expire() }
     }
 
     val registerF = for {
@@ -52,8 +63,12 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
 
 
   private[labrad] def doShutdown(): Unit = {
-    val expirations = contexts.values.map { _.expire() }
-    contexts.clear()
+    val states = contexts.synchronized {
+      val states = contexts.values.toVector
+      contexts.clear()
+      states
+    }
+    val expirations = states.map { _.expire() }
     Await.result(Future.sequence(expirations), 60.seconds)
     shutdown()
   }
@@ -93,18 +108,11 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
       state.foreach(_.expire())
     }
   }
-  private val contexts = mutable.Map.empty[Context, ContextState]
-
-  private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
-  private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
-  private val settings = srvSettings ++ ctxSettings
-  private val srvHandler = srvHandlerFactory(this.asInstanceOf[S])
-
-  private val srvSettingIds = srvSettings.map(_.id).toSet
-  private val ctxSettingIds = ctxSettings.map(_.id).toSet
 
   def handleRequest(packet: Packet): Future[Packet] = {
-    val contextState = contexts.getOrElseUpdate(packet.context, new ContextState)
+    val contextState = contexts.synchronized {
+      contexts.getOrElseUpdate(packet.context, new ContextState)
+    }
     contextState.sem.map {
       Server.handle(packet) { r =>
         if (srvSettingIds.contains(r.id)) {
@@ -126,7 +134,11 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     }
   }
 
-  def get(context: Context): Option[T] = contexts.get(context).flatMap(_.state)
+  def get(context: Context): Option[T] = {
+    contexts.synchronized {
+      contexts.get(context).flatMap(_.state)
+    }
+  }
 }
 
 trait ServerContext {
