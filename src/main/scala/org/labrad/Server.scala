@@ -11,7 +11,7 @@ import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Success, Failure}
 
-abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag : TypeTag] extends Logging {
+abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends Logging {
 
   private var cxn: ServerConnection = _
   private implicit def ec: ExecutionContext = cxn.executionContext
@@ -62,6 +62,13 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag
   def init(cxn: ServerConnection): Unit
   def shutdown(): Unit
 
+  def newContext(cxn: ServerConnection, context: Context): T
+
+  /**
+   * Standard entry point for running a server.
+   *
+   * Includes standard parsing of command line options.
+   */
   def run(args: Array[String]): Unit = {
     val options = Util.parseArgs(args, Seq("host", "port", "password"))
 
@@ -87,8 +94,6 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag
     }
   }
   private val contexts = mutable.Map.empty[Context, ContextState]
-  private val ctxClass = implicitly[ClassTag[T]].runtimeClass
-  private val ctxCtor = ctxClass.getConstructors()(0)
 
   private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
   private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
@@ -106,8 +111,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag
           srvHandler(r)
         } else if (ctxSettingIds.contains(r.id)) {
           if (!contextState.inited) {
-            val args = Array[java.lang.Object](cxn, this, packet.context)
-            val state = ctxCtor.newInstance(args: _*).asInstanceOf[T]
+            val state = newContext(cxn, packet.context)
             val handler = ctxHandlerFactory(state)
             state.init()
             contextState.state = Some(state)
@@ -125,7 +129,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag
   def get(context: Context): Option[T] = contexts.get(context).flatMap(_.state)
 }
 
-abstract class ServerContext(val cxn: Connection, val server: Server[_, _], val context: Context) {
+trait ServerContext {
   def init(): Unit
   def expire(): Unit
 }

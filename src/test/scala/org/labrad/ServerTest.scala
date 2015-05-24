@@ -16,6 +16,10 @@ class TestSrv extends Server[TestSrv, TestCtx] with Logging {
   def init(cxn: ServerConnection): Unit = log.info("init() called on server.")
   def shutdown(): Unit = log.info("shutdown() called on server.")
 
+  def newContext(cxn: ServerConnection, context: Context): TestCtx = {
+    new TestCtx(cxn, this, context)
+  }
+
   @Setting(id = 100, name = "Srv Echo", doc = "setting defined on server")
   def serverEcho(data: Data): Data = {
     log.debug(s"Echo: $data")
@@ -25,7 +29,7 @@ class TestSrv extends Server[TestSrv, TestCtx] with Logging {
 
 
 class TestCtx(cxn: ServerConnection, server: TestSrv, context: Context)
-extends ServerContext(cxn, server, context) with Logging {
+extends ServerContext with Logging {
   private val registry = mutable.Map.empty[String, Data]
 
   def init(): Unit = {
