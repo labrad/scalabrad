@@ -38,7 +38,7 @@ object TestUtils extends {
     }
   }
 
-  def withClient(host: String, port: Int, password: Array[Char])(func: Client => Unit) = {
+  def withClient[A](host: String, port: Int, password: Array[Char])(func: Client => A): A = {
     val c = new Client(host = host, port = port, password = password)
     c.connect()
     try {

@@ -3,8 +3,8 @@ package org.labrad
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.util.Logging
-import org.scalatest.FunSuite
 import org.scalatest.concurrent.AsyncAssertions
+import org.scalatest.fixture.FunSuite
 import scala.collection._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
@@ -12,9 +12,15 @@ import scala.reflect.runtime.universe
 
 @IsServer(name = "Scala Test Server",
            doc = "Basic server to test Scalabrad API.")
-class TestSrv extends Server[TestCtx] with Logging {
+class TestSrv extends Server[TestSrv, TestCtx] with Logging {
   def init(cxn: ServerConnection): Unit = log.info("init() called on server.")
   def shutdown(): Unit = log.info("shutdown() called on server.")
+
+  @Setting(id = 100, name = "Srv Echo", doc = "setting defined on server")
+  def serverEcho(data: Data): Data = {
+    log.debug(s"Echo: $data")
+    data
+  }
 }
 
 
@@ -163,23 +169,36 @@ class ServerTest extends FunSuite with AsyncAssertions {
 
   import TestUtils._
 
-  test("server can log in and log out of manager") {
+  type FixtureParam = Client
+
+  def withFixture(test: OneArgTest) = {
     withManager { (host, port, password) =>
       withServer(host, port, password) {
-        withClient(host, port, password) { c =>
-          val msg = "This is a test"
-          val result = await(c.send("Scala Test Server", "Echo" -> Str(msg)))
-          val Str(s) = result(0)
-          assert(s == msg)
-
-          val aVal = 1
-          await(c.send("Scala Test Server", "Set" -> Cluster(Str("a"), UInt(aVal))))
-          val result2 = await(c.send("Scala Test Server", "Get" -> Str("a")))
-          val UInt(a) = result2(0)
-          assert(a == 1)
+        withClient(host, port, password) { client =>
+          withFixture(test.toNoArgTest(client))
         }
       }
     }
+  }
+
+  test("server can log in and log out of manager") { c =>
+    val msg = "This is a test"
+    val result = await(c.send("Scala Test Server", "Echo" -> Str(msg)))
+    val Str(s) = result(0)
+    assert(s == msg)
+
+    val aVal = 1
+    await(c.send("Scala Test Server", "Set" -> Cluster(Str("a"), UInt(aVal))))
+    val result2 = await(c.send("Scala Test Server", "Get" -> Str("a")))
+    val UInt(a) = result2(0)
+    assert(a == 1)
+  }
+
+  test("can call setting defined on server object") { c =>
+    val msg = "This is a test"
+    val result = await(c.send("Scala Test Server", "Srv Echo" -> Str(msg)))
+    val Str(s) = result(0)
+    assert(s == msg)
   }
 }
 

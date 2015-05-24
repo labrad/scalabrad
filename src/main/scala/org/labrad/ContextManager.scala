@@ -4,7 +4,7 @@ import org.labrad.data._
 import org.labrad.util.AsyncSemaphore
 import scala.concurrent.{ExecutionContext, Future}
 
-class ContextMgr[T <: ServerContext](factory: => T, bind: T => RequestContext => Data) {
+class ContextMgr[T <: ServerContext](factory: => T, handlerFactory: T => RequestContext => Data) {
   @volatile private var firstTime = true
   @volatile private var server: T = _
   @volatile private var handler: RequestContext => Data = _
@@ -15,7 +15,7 @@ class ContextMgr[T <: ServerContext](factory: => T, bind: T => RequestContext =>
       if (firstTime) {
         server = factory
         server.init()
-        handler = bind(server)
+        handler = handlerFactory(server)
         firstTime = false
       }
       handler(req)

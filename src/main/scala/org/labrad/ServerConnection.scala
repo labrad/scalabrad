@@ -19,7 +19,7 @@ import scala.util.{Failure, Success}
 class ServerConnection(
   val name: String,
   val doc: String,
-  val server: Server[_],
+  val server: Server[_, _],
   val host: String,
   val port: Int,
   val password: Array[Char]
@@ -65,12 +65,12 @@ class ServerConnection(
 
 object ServerConnection extends Logging {
   /** Create a new server connection that will use a particular context server object. */
-  def apply[T <: ServerContext](server: Server[T], host: String, port: Int, password: Array[Char]) = {
+  def apply[S <: Server[S, _], T <: ServerContext](server: Server[S, T], host: String, port: Int, password: Array[Char]) = {
     val (name, doc) = checkAnnotation(server)
     new ServerConnection(name, doc, server, host, port, password)
   }
 
-  private def checkAnnotation[T <: ServerContext](server: Server[T]): (String, String) = {
+  private def checkAnnotation(server: Server[_, _]): (String, String) = {
     val cls = server.getClass
     if (!cls.isAnnotationPresent(classOf[IsServer]))
       sys.error(s"Server class '${cls.getName}' lacks @ServerInfo annotation.")

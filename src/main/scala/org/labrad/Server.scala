@@ -3,7 +3,7 @@ package org.labrad
 import java.io.{PrintWriter, StringWriter}
 import org.labrad.data._
 import org.labrad.errors.LabradException
-import org.labrad.util.{Logging, Util}
+import org.labrad.util.{AsyncSemaphore, Logging, Util}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -11,7 +11,7 @@ import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Success, Failure}
 
-abstract class Server[T <: ServerContext : ClassTag : TypeTag] extends Logging {
+abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : ClassTag : TypeTag] extends Logging {
 
   private var cxn: ServerConnection = _
   private implicit def ec: ExecutionContext = cxn.executionContext
@@ -24,7 +24,7 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] extends Logging {
     val msgId = cxn.getMessageId
     cxn.addMessageListener {
       case Message(`msgId`, context, _, _) =>
-        contexts.remove(context).map { case (instance, ctxMgr) => ctxMgr.expire() }
+        contexts.remove(context).map { _.expire() }
     }
 
     val registerF = for {
@@ -52,7 +52,7 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] extends Logging {
 
 
   private[labrad] def doShutdown(): Unit = {
-    val expirations = contexts.values.map { case (instance, ctxMgr) => ctxMgr.expire() }
+    val expirations = contexts.values.map { _.expire() }
     contexts.clear()
     Await.result(Future.sequence(expirations), 60.seconds)
     shutdown()
@@ -69,31 +69,63 @@ abstract class Server[T <: ServerContext : ClassTag : TypeTag] extends Logging {
     val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
 
-    val cxn = ServerConnection[T](this, host, port, password)
+    val cxn = ServerConnection[S, T](this, host, port, password)
     cxn.connect()
     sys.ShutdownHookThread(cxn.triggerShutdown)
     cxn.serve()
   }
 
+
+  class ContextState {
+    val sem: AsyncSemaphore = new AsyncSemaphore(1)
+    var state: Option[T] = None
+    var handler: RequestContext => Data = _
+    var inited: Boolean = false
+
+    def expire()(implicit ec: ExecutionContext): Future[Unit] = sem.map {
+      state.foreach(_.expire())
+    }
+  }
+  private val contexts = mutable.Map.empty[Context, ContextState]
   private val ctxClass = implicitly[ClassTag[T]].runtimeClass
   private val ctxCtor = ctxClass.getConstructors()(0)
 
+  private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
+  private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
+  private val settings = srvSettings ++ ctxSettings
+  private val srvHandler = srvHandlerFactory(this.asInstanceOf[S])
+
+  private val srvSettingIds = srvSettings.map(_.id).toSet
+  private val ctxSettingIds = ctxSettings.map(_.id).toSet
+
   def handleRequest(packet: Packet): Future[Packet] = {
-    val (_, ctxMgr) = contexts.getOrElseUpdate(packet.context, {
-      val ctxObj = ctxCtor.newInstance(Array[java.lang.Object](cxn, this, packet.context): _*).asInstanceOf[T]
-      val ctxMgr = new ContextMgr[T](ctxObj, serverCtx => handler(serverCtx))
-      (ctxObj, ctxMgr)
-    })
-    ctxMgr.serve(packet)
+    val contextState = contexts.getOrElseUpdate(packet.context, new ContextState)
+    contextState.sem.map {
+      Server.handle(packet) { r =>
+        if (srvSettingIds.contains(r.id)) {
+          srvHandler(r)
+        } else if (ctxSettingIds.contains(r.id)) {
+          if (!contextState.inited) {
+            val args = Array[java.lang.Object](cxn, this, packet.context)
+            val state = ctxCtor.newInstance(args: _*).asInstanceOf[T]
+            val handler = ctxHandlerFactory(state)
+            state.init()
+            contextState.state = Some(state)
+            contextState.handler = handler
+            contextState.inited = true
+          }
+          contextState.handler(r)
+        } else {
+          Error(1, s"Setting not found: ${r.id}")
+        }
+      }
+    }
   }
 
-  private val contexts = mutable.Map.empty[Context, (T, ContextMgr[T])]
-  private val (settings, handler): (Seq[SettingInfo], T => RequestContext => Data) = Reflect.makeHandler[T]
-
-  def get(context: Context): Option[T] = contexts.get(context).map(_._1)
+  def get(context: Context): Option[T] = contexts.get(context).flatMap(_.state)
 }
 
-abstract class ServerContext(val cxn: Connection, val server: Server[_], val context: Context) {
+abstract class ServerContext(val cxn: Connection, val server: Server[_, _], val context: Context) {
   def init(): Unit
   def expire(): Unit
 }
