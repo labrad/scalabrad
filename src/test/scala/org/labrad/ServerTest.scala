@@ -27,6 +27,11 @@ class TestSrv extends Server[TestSrv, TestCtx] with Logging {
     log.debug(s"Echo: $data")
     data
   }
+
+  @Setting(id = 1000, name = "Expire Context", doc = "Expire the context in which this request was made")
+  def expireContext(rc: RequestContext): Unit = {
+    doExpireContext(rc.context)
+  }
 }
 
 
@@ -205,6 +210,29 @@ class ServerTest extends FunSuite with AsyncAssertions {
     val result = await(c.send("Scala Test Server", "Srv Echo" -> Str(msg)))
     val Str(s) = result(0)
     assert(s == msg)
+  }
+
+  test("can expire context in a separate packet") { case (s, c) =>
+    await(c.send("Scala Test Server", "Set" -> Cluster(Str("a"), Str("test"))))
+    val keys = await(c.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
+    assert(keys.contains("a"))
+
+    await(c.send("Scala Test Server", "Expire Context" -> Data.NONE))
+
+    val keys2 = await(c.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
+    assert(!keys2.contains("a"))
+  }
+
+  test("can expire context within a single packet") { case (s, c) =>
+    val result = await(c.send("Scala Test Server",
+                                "Set" -> Cluster(Str("a"), Str("test")),
+                                "Keys" -> Data.NONE,
+                                "Expire Context" -> Data.NONE,
+                                "Keys" -> Data.NONE))
+    val keys = result(1).get[Seq[String]]
+    val keys2 = result(3).get[Seq[String]]
+    assert(keys.contains("a"))
+    assert(!keys2.contains("a"))
   }
 }
 

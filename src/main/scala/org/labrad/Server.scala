@@ -127,12 +127,15 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
    */
   class ContextState {
     val sem: AsyncSemaphore = new AsyncSemaphore(1)
-    var state: Option[T] = None
-    var handler: RequestContext => Data = _
-    var inited: Boolean = false
+    var handler: Option[(T, RequestContext => Data)] = None
 
     def expire(): Future[Unit] = sem.map {
-      state.foreach(_.expire())
+      expireNoLock()
+    }
+
+    def expireNoLock(): Unit = {
+      handler.foreach { case (state, _) => state.expire() }
+      handler = None
     }
   }
 
@@ -145,15 +148,18 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
         if (srvSettingIds.contains(r.id)) {
           srvHandler(r)
         } else if (ctxSettingIds.contains(r.id)) {
-          if (!contextState.inited) {
-            val state = newContext(packet.context)
-            val handler = ctxHandlerFactory(state)
-            state.init()
-            contextState.state = Some(state)
-            contextState.handler = handler
-            contextState.inited = true
+          val handler = contextState.handler match {
+            case None =>
+              val state = newContext(packet.context)
+              val handler = ctxHandlerFactory(state)
+              state.init()
+              contextState.handler = Some((state, handler))
+              handler
+
+            case Some((state, handler)) =>
+              handler
           }
-          contextState.handler(r)
+          handler(r)
         } else {
           Error(1, s"Setting not found: ${r.id}")
         }
@@ -168,7 +174,21 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
    */
   protected def get(context: Context): Option[T] = {
     contexts.synchronized {
-      contexts.get(context).flatMap(_.state)
+      contexts.get(context).flatMap(_.handler).map { case (state, _) => state}
+    }
+  }
+
+  /**
+   * Expire the given context.
+   *
+   * Does not attempt to acquire the context lock, so this can and should be
+   * used only if the lock is already being held, for example while handling
+   * a request in this context. Note that the setting method must have a
+   * different name from this function, in order not to confuse the
+   */
+  protected def doExpireContext(context: Context): Unit = {
+    contexts.synchronized {
+      contexts.get(context).foreach(_.expireNoLock())
     }
   }
 }

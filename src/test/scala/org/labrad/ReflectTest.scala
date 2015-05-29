@@ -16,7 +16,7 @@ abstract class Testable(val name: String) {
 
 class NoInput extends Testable("methods with no input params") {
   @Setting(id=1, name="noInput", doc="")
-  def noInput(r: RequestContext): Data = Data.NONE
+  def noInput(): Data = Data.NONE
 
   @Setting(id=2, name="noInput2", doc="")
   def noInput2(r: RequestContext): Data = Data.NONE
