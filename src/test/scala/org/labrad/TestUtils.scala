@@ -26,10 +26,6 @@ object TestUtils extends {
 
     val registryStore = SQLiteStore(registryFile)
 
-    //registryFile.delete()
-    //registryFile.mkdir()
-    //val registryStore = new FileStore(registryFile)
-
     val manager = new CentralNode(port, password, Some(registryStore))
     try {
       f(host, port, password)
@@ -48,14 +44,13 @@ object TestUtils extends {
     }
   }
 
-  def withServer[T](host: String, port: Int, password: Array[Char])(body: => T) = {
-    val s = ServerConnection(new TestSrv, host, port, password)
-    s.connect()
-    s.serve()
+  def withServer[T](host: String, port: Int, password: Array[Char])(body: TestSrv => T) = {
+    val s = new TestSrv
+    s.start(host, port, password)
     try {
-      body
+      body(s)
     } finally {
-      try s.triggerShutdown() catch { case _: Throwable => }
+      try s.stop() catch { case _: Throwable => }
     }
   }
 }

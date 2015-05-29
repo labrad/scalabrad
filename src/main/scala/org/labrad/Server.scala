@@ -1,22 +1,37 @@
 package org.labrad
 
 import java.io.{PrintWriter, StringWriter}
+import java.util.regex.Pattern
+import org.labrad.annotations.IsServer
 import org.labrad.data._
 import org.labrad.errors.LabradException
 import org.labrad.util.{AsyncSemaphore, Logging, Util}
 import scala.collection.mutable
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Success, Failure}
 
+trait ServerContext {
+  def init(): Unit
+  def expire(): Unit
+}
+
 abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends Logging {
 
-  private var cxn: ServerConnection = _
-  private implicit def ec: ExecutionContext = cxn.executionContext
+  val name: String
+  val doc: String
 
-  private val contexts = mutable.Map.empty[Context, ContextState]
+  private var _cxn: ServerConnection = _
+
+  /**
+   * Allow subclasses to access (but not modify) the server connection
+   */
+  protected def cxn: ServerConnection = _cxn
+
+  protected val contexts = mutable.Map.empty[Context, ContextState]
 
   private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
   private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
@@ -26,10 +41,19 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   private val srvSettingIds = srvSettings.map(_.id).toSet
   private val ctxSettingIds = ctxSettings.map(_.id).toSet
 
-  private[labrad] def doInit(cxn: ServerConnection): Unit = {
-    this.cxn = cxn
+  /**
+   * Start this server by connecting to the manager at the given location.
+   */
+  def start(host: String, port: Int, password: Array[Char], nameOpt: Option[String] = None): Unit = {
+    val name = nameOpt.getOrElse(this.name)
+    _cxn = new ServerConnection(name, doc, host, port, password, packet => handleRequest(packet))
+    cxn.connect()
 
-    init(cxn)
+    // if the vm goes down or we lose the connection, shutdown
+    sys.ShutdownHookThread { stop() }
+    cxn.addConnectionListener { case false => stop() }
+
+    init()
 
     val msgId = cxn.getMessageId
     cxn.addMessageListener {
@@ -38,17 +62,6 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
         stateOpt.foreach { _.expire() }
     }
 
-    val registerF = for {
-      _ <- registerSettings()
-      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
-      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
-    } yield ()
-    Await.result(registerF, 30.seconds)
-
-    log.info("Now serving...")
-  }
-
-  private def registerSettings(): Future[Unit] = {
     val registrations = settings.sortBy(_.id).map(s =>
       Cluster(
         UInt(s.id),
@@ -58,58 +71,72 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
         Arr(s.returns.strs.map(Str(_))),
         Str(""))
     )
-    cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*).map(_ => ())
+
+    val registerF = for {
+      _ <- cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*)
+      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
+      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
+    } yield ()
+    Await.result(registerF, 30.seconds)
+
+    log.info("Now serving...")
   }
 
+  /**
+   * A promise that will be completed when this server shuts down.
+   */
+  private val shutdownPromise = Promise[Unit]
 
-  private[labrad] def doShutdown(): Unit = {
-    val states = contexts.synchronized {
-      val states = contexts.values.toVector
-      contexts.clear()
-      states
+  /**
+   * Stop this server
+   */
+  def stop(): Unit = {
+    try {
+      val ctxs = contexts.synchronized {
+        val ctxs = contexts.values.toVector
+        contexts.clear()
+        ctxs
+      }
+      val expirations = ctxs.map { _.expire() }
+      Await.result(Future.sequence(expirations), 60.seconds)
+      shutdown()
+      cxn.close()
+      shutdownPromise.success(())
+    } catch {
+      case e: Exception =>
+        shutdownPromise.failure(e)
     }
-    val expirations = states.map { _.expire() }
-    Await.result(Future.sequence(expirations), 60.seconds)
-    shutdown()
+  }
+
+  /**
+   * Wait for this server to shutdown
+   */
+  def awaitShutdown(timeout: Duration = Duration.Inf): Unit = {
+    Await.result(shutdownPromise.future, timeout)
   }
 
   // user-overidden methods
-  def init(cxn: ServerConnection): Unit
+  def init(): Unit
   def shutdown(): Unit
+  def newContext(context: Context): T
 
-  def newContext(cxn: ServerConnection, context: Context): T
 
   /**
-   * Standard entry point for running a server.
-   *
-   * Includes standard parsing of command line options.
+   * Helper class containing per-context state and a semaphore to enable
+   * serializing requests made within a given context.
    */
-  def run(args: Array[String]): Unit = {
-    val options = Util.parseArgs(args, Seq("host", "port", "password"))
-
-    val host = options.get("host").orElse(sys.env.get("LABRADHOST")).getOrElse("localhost")
-    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
-    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
-
-    val cxn = ServerConnection[S, T](this, host, port, password)
-    cxn.connect()
-    sys.ShutdownHookThread(cxn.triggerShutdown)
-    cxn.serve()
-  }
-
-
   class ContextState {
     val sem: AsyncSemaphore = new AsyncSemaphore(1)
     var state: Option[T] = None
     var handler: RequestContext => Data = _
     var inited: Boolean = false
 
-    def expire()(implicit ec: ExecutionContext): Future[Unit] = sem.map {
+    def expire(): Future[Unit] = sem.map {
       state.foreach(_.expire())
     }
   }
 
-  def handleRequest(packet: Packet): Future[Packet] = {
+  private def handleRequest(packet: Packet): Future[Packet] = {
     val contextState = contexts.synchronized {
       contexts.getOrElseUpdate(packet.context, new ContextState)
     }
@@ -119,7 +146,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
           srvHandler(r)
         } else if (ctxSettingIds.contains(r.id)) {
           if (!contextState.inited) {
-            val state = newContext(cxn, packet.context)
+            val state = newContext(packet.context)
             val handler = ctxHandlerFactory(state)
             state.init()
             contextState.state = Some(state)
@@ -134,16 +161,16 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     }
   }
 
-  def get(context: Context): Option[T] = {
+  /**
+   * Allow looking up the context object for another context.
+   *
+   * This is needed in some cases for cross-context communication.
+   */
+  protected def get(context: Context): Option[T] = {
     contexts.synchronized {
       contexts.get(context).flatMap(_.state)
     }
   }
-}
-
-trait ServerContext {
-  def init(): Unit
-  def expire(): Unit
 }
 
 object Server {
@@ -203,5 +230,21 @@ object Server {
     process(records) map {
       Packet(-request, source, context, _)
     }
+  }
+
+  /**
+   * Standard entry point for running a server.
+   *
+   * Includes basic parsing of command line options.
+   */
+  def run(s: Server[_, _], args: Array[String]): Unit = {
+    val options = Util.parseArgs(args, Seq("name", "host", "port", "password"))
+
+    val nameOpt = options.get("name")
+    val host = options.get("host").orElse(sys.env.get("LABRADHOST")).getOrElse("localhost")
+    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
+    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+
+    s.start(host, port, password, nameOpt)
   }
 }

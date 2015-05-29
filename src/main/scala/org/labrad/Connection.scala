@@ -7,6 +7,7 @@ import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
 import java.util.concurrent.{ExecutionException, Executors}
+import java.util.concurrent.atomic.AtomicInteger
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
@@ -45,6 +46,9 @@ trait Connection {
   def removeMessageListener(listener: PartialFunction[Message, Unit]): Unit = {
     messageListeners = messageListeners filterNot (_ == listener)
   }
+
+  private val nextMessageId = new AtomicInteger(1)
+  def getMessageId = nextMessageId.getAndIncrement()
 
   protected val writeQueue: Channel[Packet] = new Channel[Packet]
   protected val lookupProvider = new LookupProvider(this.send)

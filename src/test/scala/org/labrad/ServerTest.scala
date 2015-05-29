@@ -10,14 +10,16 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.reflect.runtime.universe
 
-@IsServer(name = "Scala Test Server",
-           doc = "Basic server to test Scalabrad API.")
 class TestSrv extends Server[TestSrv, TestCtx] with Logging {
-  def init(cxn: ServerConnection): Unit = log.info("init() called on server.")
+
+  val name = "Scala Test Server"
+  val doc = "Basic server to test Scalabrad API."
+
+  def init(): Unit = log.info("init() called on server.")
   def shutdown(): Unit = log.info("shutdown() called on server.")
 
-  def newContext(cxn: ServerConnection, context: Context): TestCtx = {
-    new TestCtx(cxn, this, context)
+  def newContext(context: Context): TestCtx = {
+    new TestCtx(cxn, context)
   }
 
   @Setting(id = 100, name = "Srv Echo", doc = "setting defined on server")
@@ -28,7 +30,7 @@ class TestSrv extends Server[TestSrv, TestCtx] with Logging {
 }
 
 
-class TestCtx(cxn: ServerConnection, server: TestSrv, context: Context)
+class TestCtx(cxn: ServerConnection, context: Context)
 extends ServerContext with Logging {
   private val registry = mutable.Map.empty[String, Data]
 
@@ -173,19 +175,19 @@ class ServerTest extends FunSuite with AsyncAssertions {
 
   import TestUtils._
 
-  type FixtureParam = Client
+  type FixtureParam = (TestSrv, Client)
 
   def withFixture(test: OneArgTest) = {
     withManager { (host, port, password) =>
-      withServer(host, port, password) {
+      withServer(host, port, password) { server =>
         withClient(host, port, password) { client =>
-          withFixture(test.toNoArgTest(client))
+          withFixture(test.toNoArgTest((server, client)))
         }
       }
     }
   }
 
-  test("server can log in and log out of manager") { c =>
+  test("server can log in and log out of manager") { case (s, c) =>
     val msg = "This is a test"
     val result = await(c.send("Scala Test Server", "Echo" -> Str(msg)))
     val Str(s) = result(0)
@@ -198,7 +200,7 @@ class ServerTest extends FunSuite with AsyncAssertions {
     assert(a == 1)
   }
 
-  test("can call setting defined on server object") { c =>
+  test("can call setting defined on server object") { case (s, c) =>
     val msg = "This is a test"
     val result = await(c.send("Scala Test Server", "Srv Echo" -> Str(msg)))
     val Str(s) = result(0)
@@ -208,22 +210,6 @@ class ServerTest extends FunSuite with AsyncAssertions {
 
 object TestServer {
   def main(args: Array[String]): Unit = {
-    def parseArgs(args: List[String]): Map[String, String] = args match {
-      case Nil => Map()
-      case "--host" :: host :: rest => parseArgs(rest) + ("host" -> host)
-      case "--password" :: password :: rest => parseArgs(rest) + ("password" -> password)
-      case "--port" :: port :: rest => parseArgs(rest) + ("port" -> port)
-      case arg :: rest => sys.error("Unknown argument: " + arg)
-    }
-    val options = parseArgs(args.toList)
-
-    val HOST = options.get("host").orElse(sys.env.get("LABRADHOST")).getOrElse("localhost")
-    val PORT = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
-    val PASSWORD = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("")
-
-    val s = ServerConnection(new TestSrv, HOST, PORT, PASSWORD.toCharArray)
-    s.connect
-    sys.ShutdownHookThread(s.triggerShutdown)
-    s.serve
+    Server.run(new TestSrv, args)
   }
 }
