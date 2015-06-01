@@ -21,6 +21,10 @@ trait ClientActor {
 }
 
 trait ServerActor extends ClientActor {
+  def name: String
+  def doc: String
+  def settings: Seq[SettingInfo]
+
   def message(packet: Packet): Unit
   def request(packet: Packet)(implicit timeout: Duration): Future[Packet]
 
@@ -125,7 +129,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
 }
 
 
-class ServerHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, name: String, doc: String)(implicit ec: ExecutionContext)
+class ServerHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, val name: String, val doc: String)(implicit ec: ExecutionContext)
 extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActor with ManagerSupport with Logging {
 
   private val contexts = mutable.Set.empty[Context]
@@ -135,6 +139,9 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   private var settingsByName: Map[String, SettingInfo] = Map.empty
   private var contextExpirationInfo: Option[(Long, Boolean)] = None
 
+  def settings: Seq[SettingInfo] = {
+    settingsById.values.toSeq.sortBy(_.id)
+  }
 
   override def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = {
     tracker.serverReq(id)

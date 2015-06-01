@@ -12,7 +12,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
+class Registry(id: Long, val name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
 extends ServerActor with Logging {
 
   // enforce doing one thing at a time using an async semaphore
@@ -20,8 +20,8 @@ extends ServerActor with Logging {
 
   private val contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
 
-  private val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
-  private val (settings, bind) = Reflect.makeHandler[RegistryContext]
+  val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
+  val (settings, bind) = Reflect.makeHandler[RegistryContext]
 
   // send info about this server and its settings to the manager
   hub.setServerInfo(ServerInfo(id, name, doc, settings))

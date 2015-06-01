@@ -5,6 +5,7 @@ import java.net.URI
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
+import org.labrad.ServerInfo
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
@@ -49,7 +50,31 @@ class CentralNode(port: Int, password: Array[Char], storeOpt: Option[RegistrySto
     val id = hub.allocateServerId(name)
     val server = new Registry(id, name, store, hub, tracker)
     hub.connectServer(id, name, server)
+    hub.setServerInfo(ServerInfo(id, name, server.doc, server.settings))
   }
+
+  // start listening for incoming network connections
+  val listener = new Listener(auth, hub, tracker, messager, port)
+
+  def stop() {
+    listener.stop()
+  }
+}
+
+class ServerNode(port: Int, password: Array[Char], server: ServerActor) extends Logging {
+  // start services
+  val tracker = new StatsTrackerImpl
+  val hub: Hub = new HubImpl(tracker, () => messager)
+  val messager: Messager = new MessagerImpl(hub, tracker)
+  val auth: AuthService = new AuthServiceImpl(password)
+
+  // Manager gets id 1L
+  tracker.connectServer(Manager.ID, Manager.NAME)
+
+  // Connect the server for this node
+  val id = hub.allocateServerId(server.name)
+  hub.connectServer(id, server.name, server)
+  hub.setServerInfo(ServerInfo(id, server.name, server.doc, server.settings))
 
   // start listening for incoming network connections
   val listener = new Listener(auth, hub, tracker, messager, port)

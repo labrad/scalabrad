@@ -5,7 +5,9 @@ import java.util.regex.Pattern
 import org.labrad.annotations.IsServer
 import org.labrad.data._
 import org.labrad.errors.LabradException
+import org.labrad.manager.{ServerActor, ServerNode}
 import org.labrad.util.{AsyncSemaphore, Logging, Util}
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -19,7 +21,7 @@ trait ServerContext {
   def expire(): Unit
 }
 
-abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends Logging {
+abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends Logging { self =>
 
   val name: String
   val doc: String
@@ -80,6 +82,46 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     Await.result(registerF, 30.seconds)
 
     log.info("Now serving...")
+  }
+
+  /**
+   * Start this server with an as an embedded server
+   */
+  def standalone(nameOpt: Option[String] = None): ServerActor = {
+    val theName = nameOpt.getOrElse(this.name)
+
+    new ServerActor {
+      def name: String = theName
+      def doc: String = self.doc
+      def settings: Seq[SettingInfo] = self.settings
+
+      def message(packet: Packet): Unit = {} // TODO: how do we handle messages
+      def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = self.handleRequest(packet)
+
+      def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = Future { contextExpired(ctx); 0 }
+      def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = Future { contextExpired(high); 0 }
+
+      def close(): Unit = self.stop()
+    }
+  }
+
+  def contextExpired(high: Long): Unit = {
+    val states = contexts.synchronized {
+      val ctxs = Seq.newBuilder[Context]
+      val states = Seq.newBuilder[ContextState]
+      for ((ctx, state) <- contexts if ctx.high == high) {
+        ctxs += ctx
+        states += state
+      }
+      contexts --= ctxs.result
+      states.result
+    }
+    states.foreach { _.expire() }
+  }
+
+  def contextExpired(context: Context): Unit = {
+    val stateOpt = contexts.synchronized { contexts.remove(context) }
+    stateOpt.foreach { _.expire() }
   }
 
   /**
@@ -253,7 +295,7 @@ object Server {
   }
 
   /**
-   * Standard entry point for running a server.
+   * Standard entry point for running a server which connects to a manger.
    *
    * Includes basic parsing of command line options.
    */
@@ -266,5 +308,23 @@ object Server {
     val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
 
     s.start(host, port, password, nameOpt)
+  }
+
+  /**
+   * Standard entry point for running a server in standalone mode.
+   *
+   * Includes basic parsing of command line options.
+   */
+  def runStandalone(s: Server[_, _], args: Array[String]): Unit = {
+    val options = Util.parseArgs(args, Seq("name", "port", "password"))
+
+    val nameOpt = options.get("name")
+    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
+    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+
+    val serverActor = s.standalone(nameOpt)
+    val serverNode = new ServerNode(port, password, serverActor)
+    Util.awaitEOF()
+    serverNode.stop()
   }
 }

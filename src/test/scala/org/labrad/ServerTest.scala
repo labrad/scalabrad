@@ -241,3 +241,9 @@ object TestServer {
     Server.run(new TestSrv, args)
   }
 }
+
+object TestServerStandalone {
+  def main(args: Array[String]): Unit = {
+    Server.runStandalone(new TestSrv, args)
+  }
+}
