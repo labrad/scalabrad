@@ -50,7 +50,7 @@ object DelphiParsers extends RegexParsers {
 
   val DelphiFormat = DateTimeFormat.forPattern("MM/dd/yyyy HH:mm:ss.SSS")
   def time: Parser[Data] =
-    """\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{3})?""".r ~ """\d*(E-\d+)?""".r ^^ { case s ~ ignored => Time(DelphiFormat.parseDateTime(s).toDate) }
+    """\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""".r ~ """\d*(E-\d+)?""".r ^^ { case s ~ ignored => Time(DelphiFormat.parseDateTime(s).toDate) }
 
   def value: Parser[Data] =
       signedReal ~ (' ' ~> units).? ^^ { case num ~ unit => Value(num, unit) }
@@ -66,6 +66,7 @@ object DelphiParsers extends RegexParsers {
 
   def unsignedReal: Parser[Double] =
     ( "NAN.0" ^^ { _ => Double.NaN }
+    | "INF.0" ^^ { _ => Double.PositiveInfinity }
     | """(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""".r ^^ { _.toDouble }
     | """\d*\.\d+""".r ^^ { _.toDouble }
     )
