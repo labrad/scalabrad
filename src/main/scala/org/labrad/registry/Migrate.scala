@@ -1,5 +1,7 @@
 package org.labrad.registry
 
+import java.io.File
+import java.net.URI
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.Client
@@ -8,15 +10,15 @@ import org.labrad.data.Data
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.io.Source
 
 object Migrate {
+
   def main(args: Array[String]): Unit = {
     val parser = new ArgotParser("migrate-registry")
 
-    val srcOpt = parser.parameter[String]("srchost[:port][/path]", "host, port, and registry path of source manager", false)
-    val dstOpt = parser.parameter[String]("dsthost[:port][/path]", "host, port, and registry path of destination manager", false)
-
-    val writeOpt = parser.flag[Boolean](List("w", "write"), "actually write values to destination manager")
+    val srcOpt = parser.parameter[String]("src", "uri of source registry", false)
+    val dstOpt = parser.parameter[String]("dst", "uri of destination registry", true)
 
     try {
       parser.parse(args)
@@ -26,59 +28,53 @@ object Migrate {
         return
     }
 
-    val (srcHost, srcPort, srcPath) = splitAddr(srcOpt.value.get)
-    val (dstHost, dstPort, dstPath) = splitAddr(dstOpt.value.get)
-    val write = writeOpt.value.getOrElse(false)
+    val srcReg: RegistrySrc = {
+      val uri = new URI(srcOpt.value.get)
 
-    val stdIn = System.console()
+      uri.getScheme match {
+        case "labrad" =>
+          new RemoteRegistry(connectToUri(uri))
 
-    println(s"Connecting to $srcHost:$srcPort...")
-    println(s"Enter password:")
-    val srcPass = stdIn.readPassword()
-    val srcCxn = new Client(host = srcHost, port = srcPort, password = srcPass)
-    srcCxn.connect()
+        case "file" =>
+          val file = new File(uri)
+          require(file.exists, "source file does not exist")
+          if (file.isDirectory) {
+            new DelphiRegistry(file)
+          } else {
+            new SQLiteRegistry(file)
+          }
+      }
+    }
 
-    println(s"Connecting to $dstHost:$dstPort...")
-    println(s"Enter password:")
-    val dstPass = stdIn.readPassword()
-    val dstCxn = new Client(host = dstHost, port = dstPort, password = dstPass)
-    dstCxn.connect()
+    val dstRegOpt: Option[RegistrySink] = dstOpt.value.map { srcUriStr =>
+      val uri = new URI(srcUriStr)
 
-    val srcReg = new RegistryServerProxy(srcCxn)
-    val dstReg = new RegistryServerProxy(dstCxn)
+      uri.getScheme match {
+        case "labrad" =>
+          new RemoteRegistry(connectToUri(uri))
+
+        case "file" =>
+          val file = new File(uri)
+          if (file.isDirectory) {
+            sys.error("cannot use directory as destination uri")
+          } else {
+            new SQLiteRegistry(file)
+          }
+      }
+    }
 
     def traverse(srcPath: Seq[String], dstPath: Seq[String]): Unit = {
-      await(srcReg.cd(srcPath))
-      val (dirs, keys) = await(srcReg.dir())
-
-      print(s"fetching ${srcPath.mkString("/")}/")
-      val futures = Map.newBuilder[String, Future[Data]]
-      val pkt = srcReg.packet()
-      pkt.cd(srcPath)
-      for (key <- keys.sorted) {
-        futures += key -> pkt.get(key)
-      }
 
       val t0 = System.nanoTime()
-      await(pkt.send())
+      val (dirs, values) = srcReg.get(srcPath)
       val t1 = System.nanoTime()
 
-      val results = futures.result.map {
-        case (key, f) => key -> await(f)
+      for (dstReg <- dstRegOpt) {
+        dstReg.set(srcPath, values)
       }
-
       val t2 = System.nanoTime()
-      if (write) {
-        val dstPkt = dstReg.packet()
-        dstPkt.cd(dstPath, create = true)
-        for (key <- keys) {
-          dstPkt.set(key, results(key))
-        }
-        await(dstPkt.send())
-      }
-      val t3 = System.nanoTime()
 
-      println(s" (load: ${((t1-t0) / 1e6).toInt}, save: ${((t3-t2) / 1e6).toInt})")
+      println(s" ${srcPath.mkString("/")} (load: ${((t1-t0) / 1e6).toInt}, save: ${((t2-t1) / 1e6).toInt})")
 
       for (dir <- dirs.sorted) {
         traverse(srcPath :+ dir, dstPath :+ dir)
@@ -86,12 +82,198 @@ object Migrate {
     }
 
     val tStart = System.nanoTime()
-    traverse(srcPath, dstPath)
+    traverse(Seq(""), Seq(""))
     val tEnd = System.nanoTime()
     println(s"total time: ${((tEnd - tStart) / 1e9).toInt} seconds")
 
-    srcCxn.close()
-    dstCxn.close()
+    val failed = failures.result
+    println(s"${failed.length} failures")
+    for (s <- failed) {
+      println()
+      println(s)
+    }
+  }
+
+  def connectToUri(uri: URI): Client = {
+    val host = uri.getHost
+    val port = uri.getPort match {
+      case -1 => 7682 // not specified; use default
+      case port => port
+    }
+    val prompt = s"Password for registry at $uri:"
+    val password = uri.getUserInfo match {
+      case null => println(prompt); System.console.readPassword()
+      case info => info.split(":") match {
+        case Array() => println(prompt); System.console.readPassword()
+        case Array(pw) => pw.toCharArray
+        case Array(u, pw) => pw.toCharArray
+      }
+    }
+    val cxn = new Client(host = host, port = port, password = password)
+    cxn.connect()
+    cxn
+  }
+
+  val failures = Seq.newBuilder[String]
+
+  /**
+   * Interface to the source registry
+   */
+  trait RegistrySrc {
+    def get(path: Seq[String]): (Seq[String], Map[String, Data])
+  }
+
+  /**
+   * Interface to the destination registry
+   */
+  trait RegistrySink {
+    def set(path: Seq[String], keys: Map[String, Data]): Unit
+  }
+
+  /**
+   * Remote registry that we connect to over the network (source or sink).
+   */
+  class RemoteRegistry(cxn: Client) extends RegistrySrc with RegistrySink {
+    val reg = new RegistryServerProxy(cxn)
+
+    def get(path: Seq[String]): (Seq[String], Map[String, Data]) = {
+      await(reg.cd(path))
+      val (dirs, keys) = await(reg.dir())
+
+      val futures = Map.newBuilder[String, Future[Data]]
+
+      val pkt = reg.packet()
+      pkt.cd(path)
+      for (key <- keys.sorted) {
+        futures += key -> pkt.get(key)
+      }
+      await(pkt.send())
+
+      val values = futures.result.map {
+        case (key, f) => key -> await(f)
+      }
+
+      (dirs, values)
+    }
+
+    def set(path: Seq[String], keys: Map[String, Data]): Unit = {
+      val pkt = reg.packet()
+      pkt.cd(path, create = true)
+      for ((key, value) <- keys) {
+        pkt.set(key, value)
+      }
+      await(pkt.send())
+    }
+  }
+
+  /**
+   * Legacy delphi registry format on disk (source only).
+   */
+  class DelphiRegistry(root: File) extends RegistrySrc {
+    val decoded = """%/\:*?"<>|."""
+    val encoded = """pfbcaqQlgPd"""
+    val dirSuffix = ".dir"
+    val keySuffix = ".key"
+
+    def encodeFilename(s: String): String = {
+      val result = new StringBuilder
+      for (c <- s) {
+        if (decoded.contains(c)) {
+          result ++= ("%" + encoded(decoded.indexOf(c)))
+        } else {
+          result += c
+        }
+      }
+      result.toString
+    }
+
+    def decodeFilename(s: String): String = {
+      val result = new StringBuilder
+      var escape = false
+      for (c <- s) {
+        if (c == '%') {
+          escape = true
+        } else if (escape) {
+          result += decoded(encoded.indexOf(c))
+          escape = false
+        } else {
+          result += c
+        }
+      }
+      result.toString
+    }
+
+    def dirFile(path: Seq[String]): File = {
+      var file = root
+      for (d <- path; if d.nonEmpty) {
+        file = new File(file, encodeFilename(d) + dirSuffix)
+      }
+      file
+    }
+
+    def get(path: Seq[String]): (Seq[String], Map[String, Data]) = {
+      val loc = dirFile(path)
+
+      val dirs = Seq.newBuilder[String]
+      val values = Map.newBuilder[String, Data]
+      for {
+        f <- loc.listFiles
+        name = f.getName
+      } {
+        if (f.isDirectory && name.endsWith(dirSuffix)) {
+          dirs += decodeFilename(name.stripSuffix(dirSuffix))
+        } else if (f.isFile && name.endsWith(keySuffix)) {
+          val key = decodeFilename(name.stripSuffix(keySuffix))
+          val src = Source.fromFile(f)
+          val s = src.mkString
+          src.close()
+          try {
+            val data = DelphiParsers.parseData(s)
+            values += key -> data
+          } catch {
+            case e: Exception =>
+              println(s"failed to parse $f: $s")
+              failures += s
+              //throw e
+          }
+        }
+      }
+      (dirs.result, values.result)
+    }
+  }
+
+  /**
+   * SQLite registry format on disk (source or sink).
+   */
+  class SQLiteRegistry(file: File) extends RegistrySrc with RegistrySink {
+    val store = SQLiteStore(file)
+
+    def find(path: Seq[String], create: Boolean = false): store.Dir = {
+      var loc = store.root
+      for (dir <- path; if dir.nonEmpty) {
+        loc = store.child(loc, dir, create = create)._1
+      }
+      loc
+    }
+
+    def get(path: Seq[String]): (Seq[String], Map[String, Data]) = {
+      val loc = find(path)
+      val (dirs, keys) = store.dir(loc)
+
+      val values = Map.newBuilder[String, Data]
+      for (key <- keys) {
+        val data = store.getValue(loc, key, default = None)
+        values += key -> data
+      }
+      (dirs, values.result)
+    }
+
+    def set(path: Seq[String], keys: Map[String, Data]): Unit = {
+      val loc = find(path, create = true)
+      for ((key, value) <- keys) {
+        store.setValue(loc, key, value)
+      }
+    }
   }
 
   /**
@@ -99,39 +281,5 @@ object Migrate {
    */
   def await[T](f: Future[T]): T = {
     Await.result(f, 60.seconds)
-  }
-
-  // regex for parsing host/port/path combinations
-  val Addr = """([\w.]+)((?::\d+)?)((?:/[\w/]*)?)""".r
-
-  /**
-   * Split a host:port/path string into component parts,
-   * using the provided default port and path if none are given.
-   */
-  def splitAddr(
-    s: String,
-    defaultPort: Int = 7682,
-    defaultPath: Seq[String] = Seq("")
-  ): (String, Int, Seq[String]) = {
-    s match {
-      case Addr(host, portStr, pathStr) =>
-        val port = if (portStr.isEmpty) defaultPort else portStr.stripPrefix(":").toInt
-        val path = if (pathStr.isEmpty) defaultPath else splitPath(pathStr)
-        (host, port, path)
-
-      case _ => sys.error(s"invalid host address: $s expected host[:port][/path]")
-    }
-  }
-
-  /**
-   * Split a directory path into a form suitable for giving to the registry,
-   * with leading empty string to indicate that this is an absolute path.
-   */
-  def splitPath(s: String): Seq[String] = {
-    s.split("/") match {
-      case Array() => Seq("")
-      case Array(h, tail @ _*) if h.nonEmpty => Seq("", h) ++ tail
-      case path => path.toSeq
-    }
   }
 }
