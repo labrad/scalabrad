@@ -12,6 +12,7 @@ trait Requester {
 
   def call(setting: String, data: Data*): Future[Data]
   def callUnit(setting: String, data: Data*): Future[Unit] = call(setting, data: _*).map { _ => () }
+  def call[T](setting: String, data: Data*)(implicit getter: Getter[T]): Future[T] = call(setting, data: _*).map { result => getter.get(result) }
 }
 
 
@@ -61,22 +62,22 @@ class GenericProxy(cxn: Connection, name: String, context: Context = Context(0, 
 
 trait ManagerServer extends Requester {
   def servers(): Future[Seq[(Long, String)]] =
-    call("Servers").map { _.get[Seq[(Long, String)]] }
+    call[Seq[(Long, String)]]("Servers")
 
   def settings(server: String): Future[Seq[(Long, String)]] =
-    call("Settings", Str(server)).map { _.get[Seq[(Long, String)]] }
+    call[Seq[(Long, String)]]("Settings", Str(server))
 
   def lookupServer(name: String): Future[Long] =
-    call("Lookup", Str(name)).map { _.get[Long] }
+    call[Long]("Lookup", Str(name))
 
   def serverHelp(server: String): Future[(String, String)] =
-    call("Help", Str(server)).map { _.get[(String, String)] }
+    call[(String, String)]("Help", Str(server))
 
   def settingHelp(server: String, setting: String): Future[(String, Seq[String], Seq[String], String)] =
-    call("Help", Str(server), Str(setting)).map { _.get[(String, Seq[String], Seq[String], String)] }
+    call[(String, Seq[String], Seq[String], String)]("Help", Str(server), Str(setting))
 
   def dataToString(data: Data): Future[String] =
-    call("Data To String", data).map { _.get[String] }
+    call[String]("Data To String", data)
 
   def stringToData(s: String): Future[Data] =
     call("String To Data", Str(s))
@@ -85,7 +86,7 @@ trait ManagerServer extends Requester {
     callUnit("Subscribe to Named Message", Cluster(Str(name), UInt(msgId), Bool(active)))
 
   def connectionInfo(): Future[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] =
-    call("Connection Info").map { _.get[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] }
+    call[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]]("Connection Info")
 }
 
 class ManagerServerProxy(cxn: Connection, name: String = "Manager", context: Context = Context(0, 0))
@@ -99,12 +100,12 @@ extends PacketProxy(server, ctx) with ManagerServer
 
 trait RegistryServer extends Requester {
   def dir(): Future[(Seq[String], Seq[String])] =
-    call("dir").map { _.get[(Seq[String], Seq[String])] }
+    call[(Seq[String], Seq[String])]("dir")
 
-  def cd(dir: String): Future[Seq[String]] = call("cd", Str(dir)).map { _.get[Seq[String]] }
-  def cd(dir: Seq[String], create: Boolean = false): Future[Seq[String]] = call("cd", Arr(dir.map(Str(_))), Bool(create)).map { _.get[Seq[String]] }
+  def cd(dir: String): Future[Seq[String]] = call[Seq[String]]("cd", Str(dir))
+  def cd(dir: Seq[String], create: Boolean = false): Future[Seq[String]] = call[Seq[String]]("cd", Arr(dir.map(Str(_))), Bool(create))
 
-  def mkDir(dir: String): Future[Seq[String]] = call("mkdir", Str(dir)).map { _.get[Seq[String]] }
+  def mkDir(dir: String): Future[Seq[String]] = call[Seq[String]]("mkdir", Str(dir))
   def rmDir(dir: String): Future[Unit] = callUnit("rmdir", Str(dir))
 
   def get(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Future[Data] = {
