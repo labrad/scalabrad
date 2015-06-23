@@ -2,7 +2,7 @@ organization := "org.labrad"
 
 name := "scalabrad"
 
-version := "0.2.0-M8"
+version := "0.2.0-M9"
 
 scalaVersion := "2.11.6"
 
