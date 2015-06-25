@@ -55,6 +55,21 @@ class ShapeIterator(shape: Array[Int]) extends Iterator[Array[Int]] {
 }
 
 object Util {
+  /**
+   * Reads from stdin until EOF is reached, e.g. due to Ctrl-D.
+   *
+   * This consumes and discards any input on stdin and blocks the calling
+   * thread; use with care.
+   */
+  def awaitEOF(): Unit = {
+    var done = false
+    while (!done) {
+      if (System.in.read() == -1) {
+        done = true
+      }
+    }
+  }
+
   def findAvailablePort(start: Int = 10000, stop: Int = 60000): Int = {
     for (port <- start to stop) {
       if (available(port)) return port

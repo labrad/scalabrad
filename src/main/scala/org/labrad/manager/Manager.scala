@@ -159,15 +159,7 @@ object Manager extends Logging {
     }
 
     val centralNode = new CentralNode(port, password, storeOpt)
-
-    @tailrec def enterPressed(): Boolean =
-      System.in.available > 0 && (System.in.read() == '\n'.toInt || enterPressed())
-
-    var done = false
-    while (!done) {
-      Thread.sleep(100)
-      //if (enterPressed()) done = true
-    }
+    Util.awaitEOF()
     centralNode.stop()
   }
 }
