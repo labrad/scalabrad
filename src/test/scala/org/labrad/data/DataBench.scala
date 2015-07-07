@@ -21,15 +21,17 @@ object DataBench {
     val N = 512
 
     val data1 = {
-      val b = DataBuilder("*(ssis)")
-      b.setSize(N)
+      val b = DataBuilder()
+      b.array(N)
       for (_ <- 0 until N) {
-        b.addString("01:23:45:67:89:AB")
-        b.addString("01:23:45:67:89:AB")
-        b.addInt(128)
-        b.addBytes(Array.tabulate(128)(_.toByte))
+        b.clusterStart()
+           .string("01:23:45:67:89:AB")
+           .string("01:23:45:67:89:AB")
+           .int(128)
+           .bytes(Array.tabulate(128)(_.toByte))
+         .clusterEnd()
       }
-      b.build()
+      b.result()
     }
 
     val data2 = Arr(Seq.fill(N) { Cluster(Str("01:23:45:67:89:AB"), Str("01:23:45:67:89:AB"), Integer(128), Bytes(Array.tabulate(128)(_.toByte))) })
