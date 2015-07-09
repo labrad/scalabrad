@@ -47,7 +47,8 @@ parallelExecution in Test := false
 
 
 // use bintray to publish library jars
-bintraySettings
+bintrayOrganization := Some("labrad")
+bintrayReleaseOnPublish in ThisBuild := false
 
 
 // use sbt-pack to create distributable package
