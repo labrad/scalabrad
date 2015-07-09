@@ -15,16 +15,45 @@ import scala.io.Source
 object Migrate {
 
   def main(args: Array[String]): Unit = {
-    val parser = new ArgotParser("migrate-registry")
-
-    val srcOpt = parser.parameter[String]("src", "uri of source registry", false)
-    val dstOpt = parser.parameter[String]("dst", "uri of destination registry", true)
+    val parser = new ArgotParser("labrad-migrate-registry",
+      preUsage = Some("Migrate registry between managers and formats."),
+      sortUsage = false
+    )
+    val srcOpt = parser.parameter[String](
+      valueName = "src",
+      description = "Location of source registry. " +
+        "Can be labrad://[<pw>@]<host>[:<port>] to connect to a running manager, " +
+        "or file://<path> to load data from a local file. " +
+        "If the path points to a directory, we assume it is in the " +
+        "legacy delphi format; if it points to a file, we assume it " +
+        "is in the new SQLite format.",
+      optional = false
+    )
+    val dstOpt = parser.parameter[String](
+      valueName = "dst",
+      description = "Location of destination registry. " +
+        "Can be labrad://[<pw>@]<host>[:<port>] to send data to a running manager, " +
+        "or file://<path> to write data to a local file. " +
+        "If writing to a file, you must specify a file, not a directory, " +
+        "and the data will be stored in the new SQLite format. " +
+        "If sending the data to a running manager, the data will be stored " +
+        "in whatever format that manager uses. " +
+        "If not specified, we traverse the source registry but do not " +
+        "transfer the data to a new location. This can be used as a dry run " +
+        "to verify the integrity of the source registry before migration.",
+      optional = true
+    )
+    val verbose = parser.flag[Boolean](List("v", "verbose"),
+      "Print progress information during the migration")
 
     try {
       parser.parse(args)
     } catch {
       case e: ArgotUsageException =>
         println(e.message)
+        return
+      case e: Exception =>
+        println(s"enexpected error: $e")
         return
     }
 
@@ -63,6 +92,8 @@ object Migrate {
       }
     }
 
+    val noisy = verbose.value.getOrElse(false)
+
     def traverse(srcPath: Seq[String], dstPath: Seq[String]): Unit = {
 
       val t0 = System.nanoTime()
@@ -74,7 +105,9 @@ object Migrate {
       }
       val t2 = System.nanoTime()
 
-      println(s" ${srcPath.mkString("/")} (load: ${((t1-t0) / 1e6).toInt}, save: ${((t2-t1) / 1e6).toInt})")
+      if (noisy) {
+        println(s" ${srcPath.mkString("/")} (time [ms]: load=${((t1-t0) / 1e6).toInt}, save=${((t2-t1) / 1e6).toInt})")
+      }
 
       for (dir <- dirs.sorted) {
         traverse(srcPath :+ dir, dstPath :+ dir)
@@ -84,7 +117,7 @@ object Migrate {
     val tStart = System.nanoTime()
     traverse(Seq(""), Seq(""))
     val tEnd = System.nanoTime()
-    println(s"total time: ${((tEnd - tStart) / 1e9).toInt} seconds")
+    println(s"total time [s]: ${((tEnd - tStart) / 1e9).toInt}")
 
     val failed = failures.result
     println(s"${failed.length} failures")
@@ -96,19 +129,27 @@ object Migrate {
 
   def connectToUri(uri: URI): Client = {
     val host = uri.getHost
+
     val port = uri.getPort match {
-      case -1 => 7682 // not specified; use default
+      case -1 => sys.env.get("LABRADPORT").map(_.toInt).getOrElse(7682)
       case port => port
     }
-    val prompt = s"Password for registry at $uri:"
+
+    def getPassword(): Array[Char] = {
+      sys.env.get("LABRADPASSWORD").map(_.toCharArray).getOrElse {
+        println(s"Password for registry at $uri:")
+        System.console.readPassword()
+      }
+    }
     val password = uri.getUserInfo match {
-      case null => println(prompt); System.console.readPassword()
+      case null => getPassword()
       case info => info.split(":") match {
-        case Array() => println(prompt); System.console.readPassword()
+        case Array() => getPassword()
         case Array(pw) => pw.toCharArray
         case Array(u, pw) => pw.toCharArray
       }
     }
+
     val cxn = new Client(host = host, port = port, password = password)
     cxn.connect()
     cxn
