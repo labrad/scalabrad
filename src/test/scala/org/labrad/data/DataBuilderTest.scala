@@ -131,4 +131,40 @@ class DataBuilderTest extends FunSuite {
     val d2 = DataBuilder("*2s").array(1, 0).result()
     assert(d2.t == TArr(TStr, depth = 2))
   }
+
+  test("empty array type can be narrowed in subsequent elements") {
+    val d = DataBuilder()
+      .array(2)
+        .clusterStart()
+          .array(0)
+        .clusterEnd()
+        .clusterStart()
+          .array(1).string("hi")
+        .clusterEnd()
+      .result()
+    assert(d.t == Type("*(*s)"))
+
+    val d2 = DataBuilder()
+      .array(3)
+        .clusterStart()
+          .array(0)
+          .array(0)
+        .clusterEnd()
+        .clusterStart()
+          .array(1).string("hi")
+          .array(0)
+        .clusterEnd()
+        .clusterStart()
+          .array(0)
+          .array(1).int(2)
+        .clusterEnd()
+      .result()
+    assert(d2.t == Type("*(*s*i)"))
+  }
+
+  test("none is not allowed in array") {
+    val b = DataBuilder().array(1)
+    intercept[Exception] { b.none() }
+    b.int(1).result()
+  }
 }

@@ -97,6 +97,52 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
   }
 
   /**
+   * Narrow two types to a more specific type.
+   *
+   * This is needed to handle empty lists, which have indeterminate element
+   * type, when embedded into composite structures. The type *_ for an empty
+   * list can be narrowed to *s, for example, if we are later given strings.
+   */
+  def narrow(t1: Type, t2: Type): (Type, Boolean) = {
+    (t1, t2) match {
+      // empty array can be narrowed to any other array type
+      case (TArr(TNone, d1), TArr(e2, d2)) if d1 == d2 => TArr(e2, d1) -> true
+      case (TArr(e1, d1), TArr(TNone, d2)) if d1 == d2 => TArr(e1, d1) -> false
+
+      // elements in composite types can be narrowed
+      case (TArr(e1, d1), TArr(e2, d2)) if d1 == d2 =>
+        val (e, narrowed) = narrow(e1, e2)
+        TArr(e, d1) -> narrowed
+
+      case (TCluster(elems1 @ _*), TCluster(elems2 @ _*)) if elems1.size == elems2.size =>
+        val (elems, narrowings) = (elems1 zip elems2).map { case (e1, e2) => narrow(e1, e2) }.unzip
+        TCluster(elems: _*) -> narrowings.exists(_ == true)
+
+      case (TError(e1), TError(e2)) =>
+        val (elem, narrowed) = narrow(e1, e2)
+        TError(elem) -> narrowed
+
+      // basic types must match, cannot be narrowed
+      case (t1, t2) =>
+        if (t1 != t2) throw new IllegalStateException(s"cannot narrow $t1 to $t2")
+        t1 -> false
+    }
+  }
+
+  /**
+   * Determine whether a given type can be narrowed, that is, whether it is
+   * or contains any empty list types.
+   */
+  def canNarrow(t: Type): Boolean = {
+    t match {
+      case TArr(TNone, d) => true
+      case TCluster(elems @ _*) => elems.exists(canNarrow)
+      case TError(payload) => canNarrow(payload)
+      case _ => false
+    }
+  }
+
+  /**
    * States keep track of what has been added to the builder so far and what we
    * expect next, so that we can ensure that we produce valid labrad data.
    *
@@ -326,8 +372,9 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
   case class ConsumeCluster(elems: Seq[Type], caller: State) extends State {
     private val size = elems.length
+    private val types = elems.toArray
     private val consumers = elems.toArray.map(t => consume(t, caller = this))
-    private val t = TCluster(elems: _*)
+    private val narrowable = elems.toArray.map(canNarrow)
     private var i = 0
 
     def call(): State = {
@@ -336,6 +383,13 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
 
     def resume(t: Type): State = {
+      if (narrowable(i)) {
+        val (tt, narrowed) = narrow(types(i), t)
+        if (narrowed) {
+          types(i) = tt
+          consumers(i) = consume(tt, caller = this)
+        }
+      }
       i += 1
       if (i < size) {
         consumers(i).call()
@@ -351,11 +405,11 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
     override def clusterEnd(): State = {
       require(i == size, s"cannot end cluster. still expecting ${size - i} elements")
-      ret(t)
+      ret(TCluster(types: _*))
     }
 
     override def render(subState: String): String = {
-      val elemStrs = for ((elem, idx) <- elems.zipWithIndex) yield {
+      val elemStrs = for ((elem, idx) <- types.zipWithIndex) yield {
         if (idx == i) {
           subState
         } else {
@@ -376,6 +430,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
     private var i: Int = 0
     private var elem: Type = null
+    private var narrowable = false
     private val anyConsumer = ConsumeAny(caller = this) // for first element
     private var consumer: State = null // for later elements when type is known
 
@@ -393,8 +448,17 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
     def resume(t: Type): State = {
       if (i == 0) {
+        require(t != TNone)
         elem = t
+        narrowable = canNarrow(t)
         consumer = consume(elem, caller = this)
+      } else if (narrowable) {
+        val (tt, narrowed) = narrow(elem, t)
+        if (narrowed) {
+          elem = tt
+          narrowable = canNarrow(t)
+          consumer = consume(elem, caller = this)
+        }
       }
       i += 1
       if (i < size) {
@@ -410,8 +474,15 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
   }
 
-  case class ConsumeArray(elem: Type, depth: Int, caller: State) extends State {
-    private val consumer = consume(elem, caller = this)
+  case class ConsumeArray(t: Type, depth: Int, caller: State) extends State {
+    private var elem: Type = t
+    private var narrowable = canNarrow(elem)
+    private var consumer = if (elem == TNone) {
+      ConsumeAny(caller = this)
+    } else {
+      consume(elem, caller = this)
+    }
+
     private var shape: Array[Int] = null
     private var size: Int = 0
     private var i: Int = 0
@@ -423,6 +494,19 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
 
     def resume(t: Type): State = {
+      if (elem == TNone) {
+        require(t != TNone)
+        elem = t
+        narrowable = canNarrow(elem)
+        consumer = consume(elem, caller = this)
+      } else if (narrowable) {
+        val (tt, narrowed) = narrow(elem, t)
+        if (narrowed) {
+          elem = tt
+          narrowable = canNarrow(elem)
+          consumer = consume(elem, caller = this)
+        }
+      }
       i += 1
       if (i < size) {
         consumer.call()
@@ -466,7 +550,8 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
 
     def resume(t: Type): State = {
-      ret(TError(t))
+      val (tt, narrowed) = narrow(payload, t)
+      ret(TError(tt))
     }
 
     override def error(code: Int, message: String): State = {
