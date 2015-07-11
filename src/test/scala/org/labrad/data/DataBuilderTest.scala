@@ -115,4 +115,20 @@ class DataBuilderTest extends FunSuite {
     intercept[Exception] { b.int(31) }
     b.result()
   }
+
+  test("empty array should get type *_") {
+    val d = DataBuilder().array(0).result()
+    assert(d.t == TArr(TNone, depth = 1))
+
+    val d2 = DataBuilder().array(1, 0).result()
+    assert(d2.t == TArr(TNone, depth = 2))
+  }
+
+  test("empty array of known type is allowed") {
+    val d = DataBuilder("*s").array(0).result()
+    assert(d.t == TArr(TStr, depth = 1))
+
+    val d2 = DataBuilder("*2s").array(1, 0).result()
+    assert(d2.t == TArr(TStr, depth = 2))
+  }
 }

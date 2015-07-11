@@ -383,8 +383,12 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
       for (dim <- shape) {
         buf.writeInt(dim)
       }
-      i = 0
-      anyConsumer.call()
+      if (size == 0) {
+        ret(TArr(TNone, depth))
+      } else {
+        i = 0
+        anyConsumer.call()
+      }
     }
 
     def resume(t: Type): State = {
@@ -435,7 +439,11 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
       for (dim <- shape) {
         buf.writeInt(dim)
       }
-      consumer.call()
+      if (size == 0) {
+        ret(TArr(elem, depth))
+      } else {
+        consumer.call()
+      }
     }
 
     override def render(subState: String): String = {
