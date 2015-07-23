@@ -53,4 +53,32 @@ object TestUtils extends {
       try s.stop() catch { case _: Throwable => }
     }
   }
+
+  def withTempFile[T](body: File => T) = {
+    val f = File.createTempFile("labrad-test", "")
+    try {
+      body(f)
+    } finally {
+      f.delete()
+    }
+  }
+
+  def withTempDir[T](body: File => T) = {
+    val f = File.createTempFile("labrad-test", "")
+    f.delete()
+    f.mkdir()
+    try {
+      body(f)
+    } finally {
+      def delete(f: File) {
+        if (f.isDirectory) {
+          for (child <- f.listFiles()) {
+            delete(child)
+          }
+        }
+        f.delete()
+      }
+      delete(f)
+    }
+  }
 }

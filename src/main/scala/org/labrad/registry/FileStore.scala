@@ -4,26 +4,37 @@ import java.io.{ByteArrayOutputStream, File, FileInputStream, FileOutputStream}
 import java.net.{URLDecoder, URLEncoder}
 import java.nio.ByteOrder.BIG_ENDIAN
 import java.nio.charset.StandardCharsets.UTF_8
-
-import scala.annotation.tailrec
-
 import org.labrad.data._
 import org.labrad.types._
+import scala.annotation.tailrec
 
-object FileStore {
-  val DIR_EXT = ".dir"
-  val KEY_EXT = ".key"
-}
-
-class FileStore(rootDir: File) extends RegistryStore {
-
-  import FileStore._
-
-  implicit val byteOrder = BIG_ENDIAN
+/**
+ * Base class for registry stores that use a separate file for each key.
+ *
+ * Concrete implementations must specify how to encode and decode key and
+ * directory names, and also how to encode and decode labrad data.
+ */
+abstract class FileStore(rootDir: File) extends RegistryStore {
 
   type Dir = File
 
   val root = rootDir.getAbsoluteFile
+  require(root.isDirectory, s"registry root is not a directory: $root")
+
+  def DIR_EXT = ".dir"
+  def KEY_EXT = ".key"
+
+  /**
+   * Encode and decode strings for use as filenames.
+   */
+  def encode(segment: String): String
+  def decode(segment: String): String
+
+  /**
+   * Encode and decode data for storage in individual key files.
+   */
+  def encodeData(data: Data): Array[Byte]
+  def decodeData(bytes: Array[Byte]): Data
 
   /**
    * Convert the given directory into a registry path.
@@ -123,6 +134,15 @@ class FileStore(rootDir: File) extends RegistryStore {
   }
 
   private def keyFile(dir: File, key: String) = new File(dir, encode(key) + KEY_EXT)
+}
+
+/**
+ * File store implementation that uses url encoding for file and key names
+ * and stores data in binary format.
+ */
+class BinaryFileStore(rootDir: File) extends FileStore(rootDir) {
+
+  implicit val byteOrder = BIG_ENDIAN
 
   /**
    * Encode arbitrary string in a format suitable for use as a filename.
@@ -133,22 +153,22 @@ class FileStore(rootDir: File) extends RegistryStore {
    * it is properly decoded by the URLDecoder, so no special handling
    * is needed there.
    */
-  private def encode(segment: String): String = {
+  override def encode(segment: String): String = {
     URLEncoder.encode(segment, UTF_8.name).replace("*", "%2A")
   }
 
-  private def decode(segment: String): String = {
+  override def decode(segment: String): String = {
     URLDecoder.decode(segment, UTF_8.name)
   }
 
   /**
    * Encode and decode data for storage in individual key files.
    */
-  private def encodeData(data: Data): Array[Byte] = {
+  override def encodeData(data: Data): Array[Byte] = {
     Cluster(Str(data.t.toString), Bytes(data.toBytes)).toBytes
   }
 
-  private def decodeData(bytes: Array[Byte]): Data = {
+  override def decodeData(bytes: Array[Byte]): Data = {
     val (typ, data) = Data.fromBytes(Type("ss"), bytes).get[(String, Array[Byte])]
     Data.fromBytes(Type(typ), data)
   }

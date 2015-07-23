@@ -1,7 +1,7 @@
 package org.labrad.util
 
 import java.io.IOException
-import java.net.{DatagramSocket, ServerSocket}
+import java.net.{DatagramSocket, ServerSocket, URI}
 
 class Counter(min: Long, max: Long) {
   require(max >= min)
@@ -140,5 +140,12 @@ object Util {
         sys.error(s"unknown argument: $arg")
       }
     }.toMap
+  }
+
+  /**
+   * Drop the query and fragment from a URI.
+   */
+  def bareUri(uri: URI): URI = {
+    new URI(uri.getScheme, uri.getHost, uri.getPath, uri.getFragment)
   }
 }

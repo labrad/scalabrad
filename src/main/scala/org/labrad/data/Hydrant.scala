@@ -104,7 +104,14 @@ object Hydrant {
 
   def randomArr(t: TArr) = {
     val arr = Data(t)
-    val shape = Seq.tabulate(t.depth) { i => random.nextInt(math.pow(2, 5 - t.depth).toInt) }
+    val emptyShape = Seq.tabulate(t.depth) { i => if (i < t.depth - 1) 1 else 0 }
+    val shape = if (t.elem == TNone) {
+      emptyShape
+    } else {
+      val shape = Seq.tabulate(t.depth) { i => random.nextInt(math.pow(2, 5 - t.depth).toInt) }
+      val size = shape.product
+      if (size == 0) emptyShape else shape
+    }
     arr.setArrayShape(shape: _*)
     arr.flatIterator.foreach { elem =>
       elem.set(randomData(t.elem))

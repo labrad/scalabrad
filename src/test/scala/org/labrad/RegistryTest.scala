@@ -2,6 +2,8 @@ package org.labrad
 
 import org.labrad.annotations._
 import org.labrad.data._
+import org.labrad.registry._
+import org.labrad.types._
 import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
@@ -12,6 +14,79 @@ import scala.concurrent.ExecutionContext.Implicits.global
 class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   import TestUtils._
+
+  def testAllBackends(testName: String)(func: (RegistryStore, Boolean) => Unit): Unit = {
+    test(s"BinaryFileStore: $testName") {
+      withTempDir { dir => func(new BinaryFileStore(dir), true) }
+    }
+
+    test(s"DelphiFileStore: $testName", Tag("delphi")) {
+      withTempDir { dir => func(new DelphiFileStore(dir), false) }
+    }
+
+    test(s"SQLiteStore: $testName") {
+      withTempFile { file => func(SQLiteStore(file), true) }
+    }
+  }
+
+  testAllBackends("registry can store and retrieve arbitrary data") { (backend, exact) =>
+    val (loc, _) = backend.child(backend.root, "test", create = true)
+    for (i <- 0 until 1000) {
+      val tpe = Hydrant.randomType
+      val data = Hydrant.randomData(tpe)
+      backend.setValue(loc, "a", data)
+      val resp = backend.getValue(loc, "a", default = None)
+      backend.delete(loc, "a")
+
+      // Inexact matching function used for semi-lossy registry backends (e.g. delphi).
+      // Uses approximate equality for floats, and also allows for the loss of
+      // element type information in empty lists.
+      def matches(in: Data, out: Data): Boolean = {
+        (in.t, out.t) match {
+          // if array is empty, it may come out as *_ instead of *x
+          case (TArr(e1, d1), TArr(TNone, d2)) if d1 == d2 =>
+            in.arrayShape.product == 0
+
+          case (TArr(e1, d1), TArr(e2, d2)) if d1 == d2 =>
+            (in.arrayShape.toSeq == out.arrayShape.toSeq) &&
+            (in.flatIterator zip out.flatIterator).forall { case (e1, e2) =>
+              matches(e1, e2)
+            }
+
+          case (TCluster(elems1 @ _*), TCluster(elems2 @ _*)) if elems1.size == elems2.size =>
+            (in.clusterIterator zip out.clusterIterator).forall { case (e1, e2) =>
+              matches(e1, e2)
+            }
+
+          case _ =>
+            in ~== out
+        }
+      }
+
+      if (exact) {
+        assert(resp == data, s"output ${resp} (type=${resp.t}) does not equal input ${data} (type=${data.t})")
+      } else {
+        assert(matches(in=data, out=resp), s"output ${resp} (type=${resp.t}) does not match input ${data} (type=${data.t})")
+      }
+    }
+  }
+
+  testAllBackends("registry can deal with unicode and strange characters in directory names") { (backend, exact) =>
+    val dir = "<\u03C0|\u03C1>??+*\\/:|"
+    backend.child(backend.root, dir, create = true)
+    val (dirs, _) = backend.dir(backend.root)
+    assert(dirs contains dir)
+  }
+
+  testAllBackends("registry can deal with unicode and strange characters in key names") { (backend, exact) =>
+    val key = "<\u03C0|\u03C1>??+*\\/:|"
+    val data = Str("Hello!")
+    backend.setValue(backend.root, key, data)
+    val (_, keys) = backend.dir(backend.root)
+    assert(keys contains key)
+    val result = backend.getValue(backend.root, key, default = None)
+    assert(result == data)
+  }
 
   test("registry can store and retrieve arbitrary data") {
     withManager { (host, port, password) =>

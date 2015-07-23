@@ -128,14 +128,30 @@ object Manager extends Logging {
         None
 
       case "file" =>
-        val registry = new File(registryUri)
+        val registry = new File(Util.bareUri(registryUri)).getAbsoluteFile
         log.info(s"registry location: $registry")
-        val dir = registry.getAbsoluteFile.getParentFile
-        if (!dir.exists) {
-          val ok = dir.mkdirs()
-          if (!ok) sys.error(s"failed to create registry directory: $dir")
+
+        def ensureDir(dir: File): Unit = {
+          if (!dir.exists) {
+            val ok = dir.mkdirs()
+            if (!ok) sys.error(s"failed to create registry directory: $dir")
+          }
         }
-        Some(SQLiteStore(registry))
+
+        if (registry.isDirectory) {
+          ensureDir(registry)
+          registryUri.getQuery match {
+            case null | "format=binary" => Some(new BinaryFileStore(registry))
+            case "format=delphi" => Some(new DelphiFileStore(registry))
+            case query => sys.error(s"invalid format for registry directory: $query")
+          }
+        } else {
+          ensureDir(registry.getParentFile)
+          registryUri.getQuery match {
+            case null | "format=sqlite" => Some(SQLiteStore(registry))
+            case query => sys.error(s"invalid format for registry file: $query")
+          }
+        }
 
       case "labrad" =>
         val remoteHost = registryUri.getHost

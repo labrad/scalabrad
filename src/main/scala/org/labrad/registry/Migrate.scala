@@ -4,9 +4,9 @@ import java.io.File
 import java.net.URI
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.Client
-import org.labrad.RegistryServerProxy
+import org.labrad.{Client, RegistryServerProxy}
 import org.labrad.data.Data
+import org.labrad.util.Util
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -23,19 +23,22 @@ object Migrate {
       valueName = "src",
       description = "Location of source registry. " +
         "Can be labrad://[<pw>@]<host>[:<port>] to connect to a running manager, " +
-        "or file://<path> to load data from a local file. " +
-        "If the path points to a directory, we assume it is in the " +
-        "legacy delphi format; if it points to a file, we assume it " +
-        "is in the new SQLite format.",
+        "or file://<path>[?format=<format>] to load data from a local file. " +
+        "If the path points to a directory, we assume it is in the binary " +
+        "one file per key format; if it points to a file, we assume it " +
+        "is in the new SQLite format. The default format can be overridden " +
+        "by adding a 'format=' query parameter to the URI, with the following " +
+        "options: binary (one file per key with binary data), " +
+        "delphi (one file per key with legacy delphi text-formatted data), " +
+        "sqlite (single sqlite file for entire registry).",
       optional = false
     )
     val dstOpt = parser.parameter[String](
       valueName = "dst",
       description = "Location of destination registry. " +
         "Can be labrad://[<pw>@]<host>[:<port>] to send data to a running manager, " +
-        "or file://<path> to write data to a local file. " +
-        "If writing to a file, you must specify a file, not a directory, " +
-        "and the data will be stored in the new SQLite format. " +
+        "or file://<path>[?format=<format>] to write data to a local file. " +
+        "If writing to a file, the URI will be interpreted as for the src param. " +
         "If sending the data to a running manager, the data will be stored " +
         "in whatever format that manager uses. " +
         "If not specified, we traverse the source registry but do not " +
@@ -57,40 +60,35 @@ object Migrate {
         return
     }
 
-    val srcReg: RegistrySrc = {
-      val uri = new URI(srcOpt.value.get)
+    def getRegistry(uriStr: String, source: Boolean): Registry = {
+      val uri = new URI(uriStr)
 
       uri.getScheme match {
         case "labrad" =>
           new RemoteRegistry(connectToUri(uri))
 
         case "file" =>
-          val file = new File(uri)
-          require(file.exists, "source file does not exist")
+          val file = new File(Util.bareUri(uri)).getAbsoluteFile
+          if (source) {
+            require(file.exists, s"source file does not exist: $file")
+          }
           if (file.isDirectory) {
-            new DelphiRegistry(file)
+            uri.getQuery match {
+              case null | "format=binary" => new BinaryRegistry(file)
+              case "format=delphi" => new DelphiRegistry(file)
+              case query => sys.error(s"invalid format for registry directory: $query")
+            }
           } else {
-            new SQLiteRegistry(file)
+            uri.getQuery match {
+              case null | "format=sqlite" => new SQLiteRegistry(file)
+              case query => sys.error(s"invalid format for registry file: $query")
+            }
           }
       }
     }
 
-    val dstRegOpt: Option[RegistrySink] = dstOpt.value.map { srcUriStr =>
-      val uri = new URI(srcUriStr)
-
-      uri.getScheme match {
-        case "labrad" =>
-          new RemoteRegistry(connectToUri(uri))
-
-        case "file" =>
-          val file = new File(uri)
-          if (file.isDirectory) {
-            sys.error("cannot use directory as destination uri")
-          } else {
-            new SQLiteRegistry(file)
-          }
-      }
-    }
+    val srcReg = getRegistry(srcOpt.value.get, source = true)
+    val dstRegOpt = dstOpt.value.map(uri => getRegistry(uri, source = false))
 
     val noisy = verbose.value.getOrElse(false)
 
@@ -158,23 +156,17 @@ object Migrate {
   val failures = Seq.newBuilder[String]
 
   /**
-   * Interface to the source registry
+   * Interface to the source and destination registries
    */
-  trait RegistrySrc {
+  trait Registry {
     def get(path: Seq[String]): (Seq[String], Map[String, Data])
-  }
-
-  /**
-   * Interface to the destination registry
-   */
-  trait RegistrySink {
     def set(path: Seq[String], keys: Map[String, Data]): Unit
   }
 
   /**
    * Remote registry that we connect to over the network (source or sink).
    */
-  class RemoteRegistry(cxn: Client) extends RegistrySrc with RegistrySink {
+  class RemoteRegistry(cxn: Client) extends Registry {
     val reg = new RegistryServerProxy(cxn)
 
     def get(path: Seq[String]): (Seq[String], Map[String, Data]) = {
@@ -208,88 +200,10 @@ object Migrate {
   }
 
   /**
-   * Legacy delphi registry format on disk (source only).
-   */
-  class DelphiRegistry(root: File) extends RegistrySrc {
-    val decoded = """%/\:*?"<>|."""
-    val encoded = """pfbcaqQlgPd"""
-    val dirSuffix = ".dir"
-    val keySuffix = ".key"
-
-    def encodeFilename(s: String): String = {
-      val result = new StringBuilder
-      for (c <- s) {
-        if (decoded.contains(c)) {
-          result ++= ("%" + encoded(decoded.indexOf(c)))
-        } else {
-          result += c
-        }
-      }
-      result.toString
-    }
-
-    def decodeFilename(s: String): String = {
-      val result = new StringBuilder
-      var escape = false
-      for (c <- s) {
-        if (c == '%') {
-          escape = true
-        } else if (escape) {
-          result += decoded(encoded.indexOf(c))
-          escape = false
-        } else {
-          result += c
-        }
-      }
-      result.toString
-    }
-
-    def dirFile(path: Seq[String]): File = {
-      var file = root
-      for (d <- path; if d.nonEmpty) {
-        file = new File(file, encodeFilename(d) + dirSuffix)
-      }
-      file
-    }
-
-    def get(path: Seq[String]): (Seq[String], Map[String, Data]) = {
-      val loc = dirFile(path)
-
-      val dirs = Seq.newBuilder[String]
-      val values = Map.newBuilder[String, Data]
-      for {
-        f <- loc.listFiles
-        name = f.getName
-      } {
-        if (f.isDirectory && name.endsWith(dirSuffix)) {
-          dirs += decodeFilename(name.stripSuffix(dirSuffix))
-        } else if (f.isFile && name.endsWith(keySuffix)) {
-          val key = decodeFilename(name.stripSuffix(keySuffix))
-          val src = Source.fromFile(f)
-          val s = src.mkString
-          src.close()
-          try {
-            val data = DelphiParsers.parseData(s)
-            values += key -> data
-          } catch {
-            case e: Exception =>
-              println(s"failed to parse $f: $s")
-              failures += s
-              //throw e
-          }
-        }
-      }
-      (dirs.result, values.result)
-    }
-  }
-
-  /**
    * SQLite registry format on disk (source or sink).
    */
-  class SQLiteRegistry(file: File) extends RegistrySrc with RegistrySink {
-    val store = SQLiteStore(file)
-
-    def find(path: Seq[String], create: Boolean = false): store.Dir = {
+  class LocalRegistry(store: RegistryStore) extends Registry {
+    private def find(path: Seq[String], create: Boolean = false): store.Dir = {
       var loc = store.root
       for (dir <- path; if dir.nonEmpty) {
         loc = store.child(loc, dir, create = create)._1
@@ -316,6 +230,15 @@ object Migrate {
       }
     }
   }
+
+  /** SQLite registry format on disk in a single file. */
+  class SQLiteRegistry(file: File) extends LocalRegistry(SQLiteStore(file))
+
+  /** Delphi registry format on disk. */
+  class DelphiRegistry(file: File) extends LocalRegistry(new DelphiFileStore(file))
+
+  /** Binary registry format on disk. */
+  class BinaryRegistry(file: File) extends LocalRegistry(new BinaryFileStore(file))
 
   /**
    * Wait for a future to complete; shorthand for Await.result

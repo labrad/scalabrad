@@ -1,29 +1,12 @@
 package org.labrad.registry
 
+import anorm._
+import anorm.SqlParser._
 import java.io.{ByteArrayInputStream, File}
 import java.nio.ByteOrder.BIG_ENDIAN
 import java.sql.{Connection, DriverManager, PreparedStatement}
-
-import anorm._
-import anorm.SqlParser._
-
 import org.labrad.data.Data
 import org.labrad.types.Type
-
-trait RegistryStore {
-  type Dir
-
-  def root: Dir
-  def pathTo(dir: Dir): Seq[String]
-  def parent(dir: Dir): Dir
-  def child(parent: Dir, name: String, create: Boolean): (Dir, Boolean)
-  def dir(curDir: Dir): (Seq[String], Seq[String])
-  def rmDir(dir: Dir, name: String): Unit
-
-  def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): Data
-  def setValue(dir: Dir, key: String, value: Data): Unit
-  def delete(dir: Dir, key: String): Unit
-}
 
 case class SqlDir(id: Long, name: String, parents: List[SqlDir]) {
   def parent: SqlDir = {
