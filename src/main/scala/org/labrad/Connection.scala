@@ -74,8 +74,8 @@ trait Connection {
           while (!Thread.interrupted)
             handlePacket(inputStream.readPacket)
         } catch {
-          case e: IOException => if (!Thread.interrupted) close(e)
-          case e: Exception => close(e)
+          case e: IOException => if (!Thread.interrupted) closeNoWait(e)
+          case e: Exception => closeNoWait(e)
         }
       }
     }, s"${name}-reader")
@@ -87,8 +87,8 @@ trait Connection {
             outputStream.writePacket(writeQueue.read)
         } catch {
           case e: InterruptedException => // connection closed
-          case e: IOException => close(e)
-          case e: Exception => close(e)
+          case e: IOException => closeNoWait(e)
+          case e: Exception => closeNoWait(e)
         }
       }
     }, s"${name}-writer")
@@ -143,14 +143,23 @@ trait Connection {
   def close(): Unit = close(new IOException("Connection closed."))
 
   private def close(cause: Throwable): Unit = {
+    closeNoWait(cause)
+
+    try { writer.join() } catch { case e: InterruptedException => }
+
+    try { socket.close() } catch { case e: IOException => }
+    try { reader.join() } catch { case e: InterruptedException => }
+  }
+
+  private def closeNoWait(cause: Throwable): Unit = {
     val listeners = synchronized {
       if (connected) {
         connected = false
         requestDispatcher.failAll(cause)
         executor.shutdown
 
-        writer.interrupt
-        reader.interrupt
+        writer.interrupt()
+        reader.interrupt()
 
         connectionListeners.map(_.lift)
       } else {
@@ -158,11 +167,6 @@ trait Connection {
       }
     }
     for (listener <- listeners) listener(false)
-
-    try { writer.join } catch { case e: InterruptedException => }
-
-    try { socket.close } catch { case e: IOException => }
-    try { reader.join } catch { case e: InterruptedException => }
   }
 
   def send(target: String, records: (String, Data)*): Future[Seq[Data]] =
