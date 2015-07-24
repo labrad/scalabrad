@@ -49,6 +49,7 @@ libraryDependencies ++= Seq(
   "org.scalatest" %% "scalatest" % "2.2.4" % "test"
 )
 
+fork in Test := true
 parallelExecution in Test := false
 
 
