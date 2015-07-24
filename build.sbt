@@ -37,6 +37,12 @@ libraryDependencies ++= Seq(
   "org.xerial" % "sqlite-jdbc" % "3.8.7"
 )
 
+// When running, connect std in and tell manager to stop on EOF (ctrl+D).
+// This allows us to stop the manager without using ctrl+C, which kills sbt.
+fork in run := true
+connectInput in run := true
+javaOptions += "-Dorg.labrad.stopOnEOF=true"
+
 
 // testing
 libraryDependencies ++= Seq(

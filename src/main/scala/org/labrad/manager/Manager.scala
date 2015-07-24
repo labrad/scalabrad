@@ -176,7 +176,21 @@ object Manager extends Logging {
     }
 
     val centralNode = new CentralNode(port, password, storeOpt)
-    Util.awaitEOF()
-    centralNode.stop()
+
+    // Optionally wait for EOF to stop the manager.
+    // This is a convenience feature when developing in sbt, allowing the
+    // manager to be stopped without killing sbt. However, this is generally
+    // not desired when deployed; for example, start-stop-daemon detaches
+    // from the process, so that stdin gets EOF, but we want the manager
+    // to continue to run.
+    val stopOnEOF = sys.props.get("org.labrad.stopOnEOF") == Some("true")
+    if (stopOnEOF) {
+      Util.awaitEOF()
+      centralNode.stop()
+    } else {
+      sys.addShutdownHook {
+        centralNode.stop()
+      }
+    }
   }
 }
