@@ -101,10 +101,10 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
       Await.result(Future.sequence(expirations), 60.seconds)
       shutdown()
       cxn.close()
-      shutdownPromise.success(())
+      shutdownPromise.trySuccess(())
     } catch {
       case e: Exception =>
-        shutdownPromise.failure(e)
+        shutdownPromise.tryFailure(e)
     }
   }
 
