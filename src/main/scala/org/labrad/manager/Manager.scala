@@ -129,7 +129,6 @@ object Manager extends Logging {
 
       case "file" =>
         val registry = new File(Util.bareUri(registryUri)).getAbsoluteFile
-        log.info(s"registry location: $registry")
 
         def ensureDir(dir: File): Unit = {
           if (!dir.exists) {
@@ -138,20 +137,22 @@ object Manager extends Logging {
           }
         }
 
-        if (registry.isDirectory) {
+        val (store, format) = if (registry.isDirectory) {
           ensureDir(registry)
           registryUri.getQuery match {
-            case null | "format=binary" => Some(new BinaryFileStore(registry))
-            case "format=delphi" => Some(new DelphiFileStore(registry))
+            case null | "format=binary" => (new BinaryFileStore(registry), "binary")
+            case "format=delphi" => (new DelphiFileStore(registry), "delphi")
             case query => sys.error(s"invalid format for registry directory: $query")
           }
         } else {
           ensureDir(registry.getParentFile)
           registryUri.getQuery match {
-            case null | "format=sqlite" => Some(SQLiteStore(registry))
+            case null | "format=sqlite" => (SQLiteStore(registry), "sqlite")
             case query => sys.error(s"invalid format for registry file: $query")
           }
         }
+        log.info(s"registry location: $registry, format=$format")
+        Some(store)
 
       case "labrad" =>
         val remoteHost = registryUri.getHost
