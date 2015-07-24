@@ -1,6 +1,7 @@
 package org.labrad
 
 import java.io.{PrintWriter, StringWriter}
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
 import org.labrad.annotations.IsServer
 import org.labrad.data._
@@ -25,6 +26,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   val doc: String
 
   private var _cxn: ServerConnection = _
+  private val shutdownCalled = new AtomicBoolean(false)
 
   /**
    * Allow subclasses to access (but not modify) the server connection
@@ -91,20 +93,22 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
    * Stop this server
    */
   def stop(): Unit = {
-    try {
-      val ctxs = contexts.synchronized {
-        val ctxs = contexts.values.toVector
-        contexts.clear()
-        ctxs
+    if (shutdownCalled.compareAndSet(false, true)) {
+      try {
+        val ctxs = contexts.synchronized {
+          val ctxs = contexts.values.toVector
+          contexts.clear()
+          ctxs
+        }
+        val expirations = ctxs.map { _.expire() }
+        Await.result(Future.sequence(expirations), 10.seconds)
+        shutdown()
+        cxn.close()
+        shutdownPromise.trySuccess(())
+      } catch {
+        case e: Exception =>
+          shutdownPromise.tryFailure(e)
       }
-      val expirations = ctxs.map { _.expire() }
-      Await.result(Future.sequence(expirations), 60.seconds)
-      shutdown()
-      cxn.close()
-      shutdownPromise.trySuccess(())
-    } catch {
-      case e: Exception =>
-        shutdownPromise.tryFailure(e)
     }
   }
 
