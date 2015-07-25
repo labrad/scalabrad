@@ -5,6 +5,7 @@ name := "scalabrad"
 version := "0.3.2"
 
 scalaVersion := "2.11.7"
+javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
 
 scalacOptions ++= Seq(
   "-deprecation",
