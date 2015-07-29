@@ -103,4 +103,66 @@ class ServerConfigTest extends FunSuite {
     val Success(config) = ServerConfig.fromCommandLine(Array())
     assert(config.nameOpt == None)
   }
+
+
+  test("tls-port can be set from environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS_PORT" -> "7777"))
+    assert(config.tlsPort == 7777)
+  }
+
+  test("tls-port can be set from command line") {
+    val Success(config1) = ServerConfig.fromCommandLine(Array("--tls-port", "7777"))
+    assert(config1.tlsPort == 7777)
+
+    val Success(config2) = ServerConfig.fromCommandLine(Array("--tls-port=7878"))
+    assert(config2.tlsPort == 7878)
+  }
+
+  test("tls-port command line arg overrides environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(
+      Array("--tls-port=1234"),
+      env = Map("LABRAD_TLS_PORT" -> "2345"))
+    assert(config.tlsPort == 1234)
+  }
+
+  test("tls-port env var must be an integer") {
+    val tryConfig = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS_PORT" -> "foo"))
+    assert(tryConfig.isInstanceOf[Failure[_]])
+  }
+
+  test("tls-port command line must be an integer") {
+    val tryConfig = ServerConfig.fromCommandLine(Array("--tls-port=foo"))
+    assert(tryConfig.isInstanceOf[Failure[_]])
+  }
+
+
+  test("tls mode can be set from environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS" -> "on"))
+    assert(config.tls == TlsMode.ON)
+  }
+
+  test("tls mode can be set from command line") {
+    val Success(config1) = ServerConfig.fromCommandLine(Array("--tls", "on"))
+    assert(config1.tls == TlsMode.ON)
+
+    val Success(config2) = ServerConfig.fromCommandLine(Array("--tls=on"))
+    assert(config2.tls == TlsMode.ON)
+  }
+
+  test("tls mode command line arg overrides environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(
+      Array("--tls=off"),
+      env = Map("LABRAD_TLS" -> "on"))
+    assert(config.tls == TlsMode.OFF)
+  }
+
+  test("tls mode env var must be a valid option") {
+    val tryConfig = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS" -> "foo"))
+    assert(tryConfig.isInstanceOf[Failure[_]])
+  }
+
+  test("tls mode command line must be a valid option") {
+    val tryConfig = ServerConfig.fromCommandLine(Array("--tls=foo"))
+    assert(tryConfig.isInstanceOf[Failure[_]])
+  }
 }

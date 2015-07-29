@@ -112,6 +112,19 @@ object Util {
   }
 
   /**
+   * Parse a command line arg into a boolean value.
+   *
+   * true values: on, yes, y, true, t, 1
+   * false values: off, no, n, false, f, 0
+   */
+  def parseBooleanOpt(arg: String): Boolean = {
+    arg.toLowerCase match {
+      case "on" | "yes" | "y" | "true" | "t" | "1" => true
+      case "off" | "no" | "n" | "false" | "f" | "0" => false
+    }
+  }
+
+  /**
    * Drop the query and fragment from a URI.
    */
   def bareUri(uri: URI): URI = {

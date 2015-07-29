@@ -1,15 +1,9 @@
 package org.labrad
 
+import java.io.File
 import org.labrad.data._
-import org.labrad.errors._
-import org.labrad.events._
-import org.labrad.util._
-import scala.collection._
-import scala.concurrent.{Await, Future, Promise}
-import scala.concurrent.duration._
-import scala.reflect.ClassTag
-import scala.reflect.runtime.currentMirror
-import scala.reflect.runtime.universe._
+import org.labrad.util.Logging
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 
@@ -19,6 +13,8 @@ class ServerConnection(
   val host: String,
   val port: Int,
   val password: Array[Char],
+  val tls: TlsMode = TlsMode.STARTTLS,
+  val tlsCerts: Map[String, File] = Map(),
   handler: Packet => Future[Packet]
 ) extends Connection with Logging {
 

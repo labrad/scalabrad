@@ -1,10 +1,14 @@
 package org.labrad.manager
 
+import io.netty.handler.ssl.{SslContext, SslContextBuilder}
+import io.netty.handler.ssl.util.SelfSignedCert
+import io.netty.util.DomainNameMapping
 import java.io.File
 import java.net.URI
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
-import java.security.MessageDigest
+import java.security.{MessageDigest, SecureRandom}
+import java.nio.file.Files
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.annotations._
@@ -12,6 +16,7 @@ import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.registry._
 import org.labrad.util._
+import org.labrad.util.Paths._
 import scala.annotation.tailrec
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -36,7 +41,12 @@ class AuthServiceImpl(password: Array[Char]) extends AuthService {
 }
 
 
-class CentralNode(port: Int, password: Array[Char], storeOpt: Option[RegistryStore]) extends Logging {
+class CentralNode(
+  password: Array[Char],
+  storeOpt: Option[RegistryStore],
+  listeners: Seq[(Int, TlsPolicy)],
+  tlsConfig: TlsHostConfig
+) extends Logging {
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
@@ -55,7 +65,7 @@ class CentralNode(port: Int, password: Array[Char], storeOpt: Option[RegistrySto
   }
 
   // start listening for incoming network connections
-  val listener = new Listener(auth, hub, tracker, messager, port)
+  val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig)
 
   def stop() {
     listener.stop()
@@ -129,13 +139,6 @@ object Manager extends Logging {
       case "file" =>
         val registry = new File(Util.bareUri(config.registryUri)).getAbsoluteFile
 
-        def ensureDir(dir: File): Unit = {
-          if (!dir.exists) {
-            val ok = dir.mkdirs()
-            if (!ok) sys.error(s"failed to create registry directory: $dir")
-          }
-        }
-
         val (store, format) = if (registry.isDirectory) {
           ensureDir(registry)
           config.registryUri.getQuery match {
@@ -174,7 +177,39 @@ object Manager extends Logging {
         sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")
     }
 
-    val centralNode = new CentralNode(config.port, config.password, storeOpt)
+    val tlsPolicy = (config.tlsRequired, config.tlsRequiredLocalhost) match {
+      case (false, _)    => TlsPolicy.STARTTLS_OPT
+      case (true, false) => TlsPolicy.STARTTLS
+      case (true, true)  => TlsPolicy.STARTTLS_FORCE
+    }
+    val listeners = Seq(
+      config.port -> tlsPolicy,
+      config.tlsPort -> TlsPolicy.ON
+    )
+
+    val hosts = config.tlsHosts.toSeq.map {
+      case (host, CertConfig.SelfSigned) =>
+        host -> sslContextForHost(host,
+                                  certPath = config.tlsCertPath,
+                                  keyPath = config.tlsKeyPath)
+
+      case (host, CertConfig.Files(cert, key, None)) =>
+        host -> (cert, SslContextBuilder.forServer(cert, key).build())
+
+      case (host, CertConfig.Files(cert, key, Some(interm))) =>
+        // concatenate cert and intermediates files
+        val allCerts = File.createTempFile("labrad-manager", "cert")
+        Files.write(allCerts.toPath,
+          Files.readAllBytes(cert.toPath) ++ Files.readAllBytes(interm.toPath))
+        allCerts.deleteOnExit()
+        host -> (cert, SslContextBuilder.forServer(allCerts, key).build())
+    }
+    val default = sslContextForHost("localhost",
+                                    certPath = config.tlsCertPath,
+                                    keyPath = config.tlsKeyPath)
+    val tlsHostConfig = TlsHostConfig(default, hosts: _*)
+
+    val centralNode = new CentralNode(config.password, storeOpt, listeners, tlsHostConfig)
 
     // Optionally wait for EOF to stop the manager.
     // This is a convenience feature when developing in sbt, allowing the
@@ -192,6 +227,51 @@ object Manager extends Logging {
       }
     }
   }
+
+  /**
+   * Create an SSL/TLS context for the given host, using self-signed certificates.
+   */
+  private def sslContextForHost(host: String, certPath: File, keyPath: File): (File, SslContext) = {
+    val certFile = certPath / s"${host}.cert"
+    val keyFile = keyPath / s"${host}.key"
+
+    if (!certFile.exists() || !keyFile.exists()) {
+      // if one exists but not the other, we have a problem
+      require(!certFile.exists(), s"found cert file $certFile but no matching key file $keyFile")
+      require(!keyFile.exists(), s"found key file $keyFile but no matching cert file $certFile")
+
+      log.info(s"Generating self-signed certificate for host '$host'. certFile=$certFile, keyFile=$keyFile")
+      val ssc = SelfSignedCert(host, bits = 2048)(secureRandom)
+      copy(ssc.certificate, certFile)
+      copy(ssc.privateKey, keyFile)
+    } else {
+      log.info(s"Using saved certificate for host '$host'. certFile=$certFile, keyFile=$keyFile")
+    }
+
+    (certFile, SslContextBuilder.forServer(certFile, keyFile).build())
+  }
+
+  // A shared SecureRandom instance. Only created if needed because entropy collection is costly.
+  private lazy val secureRandom = new SecureRandom()
+
+  /**
+   * Copy the given source file to the specified destination, creating
+   * destination directories as needed.
+   */
+  private def copy(src: File, dst: File): Unit = {
+    ensureDir(dst.getParentFile)
+    Files.copy(src.toPath, dst.toPath)
+  }
+
+  /**
+   * Create directories as needed to ensure that the specified location exists.
+   */
+  private def ensureDir(dir: File): Unit = {
+    if (!dir.exists) {
+      val ok = dir.mkdirs()
+      if (!ok) sys.error(s"failed to create directory: $dir")
+    }
+  }
 }
 
 /**
@@ -200,18 +280,27 @@ object Manager extends Logging {
 case class ManagerConfig(
   port: Int,
   password: Array[Char],
-  registryUri: URI
+  registryUri: URI,
+  tlsPort: Int,
+  tlsRequired: Boolean,
+  tlsRequiredLocalhost: Boolean,
+  tlsHosts: Map[String, CertConfig],
+  tlsCertPath: File,
+  tlsKeyPath: File
 )
 
-object ManagerConfig {
-  // helpers for dealing with paths
-  implicit class PathString(path: String) {
-    def / (file: String): File = new File(path, file)
-  }
+sealed trait CertConfig
 
-  implicit class PathFile(path: File) {
-    def / (file: String): File = new File(path, file)
-  }
+object CertConfig {
+  case object SelfSigned extends CertConfig
+  case class Files(
+    cert: File,
+    key: File,
+    intermediates: Option[File] = None
+  ) extends CertConfig
+}
+
+object ManagerConfig {
 
   /**
    * Create ManagerConfig from command line and map of environment variables.
@@ -263,6 +352,67 @@ object ManagerConfig {
         "variable, with the default being to store registry values in SQLite " +
         "format in $HOME/.labrad/registry.sqlite"
     )
+    val tlsPortOpt = parser.option[Int](
+      names = List("tls-port"),
+      valueName = "int",
+      description = "Port on which to listen for incoming TLS connections. " +
+        "If not provided, fallback to the value given in the LABRAD_TLS_PORT " +
+        "environment variable, with default value 7643."
+    )
+    val tlsRequiredOpt = parser.option[String](
+      names = List("tls-required"),
+      valueName = "bool",
+      description = "Whether to require TLS for incoming connections from " +
+        "remote hosts. If not provided, fallback to the value given in the " +
+        "LABRAD_TLS_REQUIRED environment variable, with default value true."
+    )
+    val tlsRequiredLocalhostOpt = parser.option[String](
+      names = List("tls-required-localhost"),
+      valueName = "bool",
+      description = "Whether to require TLS for incoming connections from " +
+        "localhost. If not provided, fallback to the value given in the " +
+        "LABRAD_TLS_REQUIRED_LOCALHOST environment variable, with default " +
+        "value false."
+    )
+    val tlsHostsOpt = parser.option[String](
+      names = List("tls-hosts"),
+      valueName = "string",
+      description = "A list of hostnames for which to use TLS. " +
+        "Clients can use server name indication (SNI) to specify which " +
+        "hostname they are connecting to when negotiating TLS, and the " +
+        "manager must use the appropriate certificate and key for each" +
+        "hostname. The config is a semicolon-separated list of hosts, where " +
+        "for each host we have either just <hostname>, in which case the " +
+        "manager will generate a self-signed certificate for this hostname, " +
+        "or <hostname>?cert=<cert-file>&key=<key-file>[&intermediates=<intermediates-file>], " +
+        "in which case the manager will use the given cert and key files " +
+        "(and optional file containing intermediate certs) for this " +
+        "hostname. If not provided, fallback to the value given in the " +
+        "LABRAD_TLS_HOSTS environment variable, we the default being to " +
+        "generate a single self-signed certificate for the 'localhost'."
+    )
+    val tlsCertPathOpt = parser.option[String](
+      names = List("tls-cert-path"),
+      valueName = "directory",
+      description = "Path to a directory where self-signed TLS certificates " +
+        "should be stored. If not given, fall back to the value in the " +
+        "LABRAD_TLS_CERT_PATH environment variable, with default value " +
+        "$HOME/.labrad/manager/certs. Within this directory, we will store " +
+        "one cert file for each hostname configured to use self-signed certs " +
+        "in the tls-hosts option, named <hostname>.cert. If this directory " +
+        "does not exist, it will be created."
+    )
+    val tlsKeyPathOpt = parser.option[String](
+      names = List("tls-key-path"),
+      valueName = "directory",
+      description = "Path to a directory where keys for self-signed TLS " +
+        "certificates should be stored. If not given, fall back to the value " +
+        "in the LABRAD_TLS_KEY_PATH environment variable, with default value " +
+        "$HOME/.labrad/manager/keys. Within this directory, we will store " +
+        "one key file for each hostname configured to use self-signed certs " +
+        "in the tls-hosts option, named <hostname>.key. If this directory " +
+        "does not exist, it will be created."
+    )
     val help = parser.flag[Boolean](List("h", "help"),
       "Print usage information and exit")
 
@@ -275,8 +425,95 @@ object ManagerConfig {
       val registryUri = registryOpt.value.orElse(env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
         (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
       }
+      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(7643)
+      val tlsRequired = tlsRequiredOpt.value.orElse(env.get("LABRAD_TLS_REQUIRED")).map(Util.parseBooleanOpt).getOrElse(true)
+      val tlsRequiredLocalhost = tlsRequiredLocalhostOpt.value.orElse(env.get("LABRAD_TLS_REQUIRED_LOCALHOST")).map(Util.parseBooleanOpt).getOrElse(false)
+      val tlsHosts = parseTlsHostsConfig(tlsHostsOpt.value.orElse(env.get("LABRAD_TLS_HOSTS")).getOrElse(""))
+      val tlsCertPath = tlsCertPathOpt.value.orElse(env.get("LABRAD_TLS_CERT_PATH")).map(new File(_)).getOrElse {
+        sys.props("user.home") / ".labrad" / "manager" / "certs"
+      }
+      val tlsKeyPath = tlsKeyPathOpt.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
+        sys.props("user.home") / ".labrad" / "manager" / "keys"
+      }
 
-      ManagerConfig(port, password, registryUri)
+      ManagerConfig(
+        port,
+        password,
+        registryUri,
+        tlsPort,
+        tlsRequired,
+        tlsRequiredLocalhost,
+        tlsHosts,
+        tlsCertPath,
+        tlsKeyPath)
+    }
+  }
+
+  /**
+   * Parse a string representing the tls host configuration.
+   *
+   * The config is a semicolon-separated list of hosts, where for each host we
+   * have either just:
+   * <hostname> (will use self-signed certificates for this hostname), or
+   * <hostname>?cert=<cert-file>&key=<key-file>[&intermediates=<intermediates-file>].
+   *
+   * For example, if we had the string:
+   *
+   * public.com?cert=/etc/ssl/certs/public.crt&key=/etc/ssl/private/public.key;private;private2
+   *
+   * Then we would configure TLS to use the given certificates in /etc/ssl for
+   * connections made to the hostname public.com, and our own self-signed certs
+   * for connections made to hostnames private and private2.
+   */
+  def parseTlsHostsConfig(hostsConfig: String): Map[String, CertConfig] = {
+    if (hostsConfig.isEmpty) {
+      Map()
+    } else {
+      hostsConfig.split(";").map(parseTlsHost).toMap
+    }
+  }
+
+  /**
+   * Parse hostname config for a single TLS host.
+   */
+  def parseTlsHost(hostConfig: String): (String, CertConfig) = {
+    require(hostConfig != "")
+
+    hostConfig.split('?') match {
+      case Array(host) =>
+        (host, CertConfig.SelfSigned)
+
+      case Array(host, paramStr) =>
+        val paramMap = paramStr.split('&').map { param =>
+          param.split('=') match { case Array(k, v) => k -> v }
+        }.toMap
+
+        val unknownParams = paramMap.keys.toSet -- Seq("cert", "intermediates", "key")
+        require(unknownParams.isEmpty, s"unknown parameters for host $host: ${unknownParams.mkString(", ")}")
+
+        val params = (paramMap.get("cert"),
+                      paramMap.get("key"),
+                      paramMap.get("intermediates"))
+
+        val certConfig = params match {
+          case (Some(cert), Some(key), None) =>
+            CertConfig.Files(cert = new File(cert), key = new File(key))
+
+          case (Some(cert), Some(key), Some(interm)) =>
+            CertConfig.Files(
+              cert = new File(cert),
+              key = new File(key),
+              intermediates = Some(new File(interm))
+            )
+
+          case (None, None, None) =>
+            CertConfig.SelfSigned
+
+          case _ =>
+            sys.error(s"must specify both cert and key for host $host")
+        }
+
+        (host, certConfig)
     }
   }
 }

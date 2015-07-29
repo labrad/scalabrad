@@ -1,6 +1,6 @@
 package org.labrad
 
-import java.io.{PrintWriter, StringWriter}
+import java.io.{File, PrintWriter, StringWriter}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
 import org.clapper.argot._
@@ -48,9 +48,16 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   /**
    * Start this server by connecting to the manager at the given location.
    */
-  def start(host: String, port: Int, password: Array[Char], nameOpt: Option[String] = None): Unit = {
+  def start(
+    host: String,
+    port: Int,
+    password: Array[Char],
+    nameOpt: Option[String] = None,
+    tls: TlsMode = TlsMode.STARTTLS,
+    tlsCerts: Map[String, File] = Map()
+  ): Unit = {
     val name = Util.interpolateEnvironmentVars(nameOpt.getOrElse(this.name))
-    _cxn = new ServerConnection(name, doc, host, port, password, packet => handleRequest(packet))
+    _cxn = new ServerConnection(name, doc, host, port, password, tls, tlsCerts, packet => handleRequest(packet))
     cxn.connect()
 
     // if the vm goes down or we lose the connection, shutdown
@@ -283,7 +290,7 @@ object Server {
     }
     s.start(
       config.host,
-      config.port,
+      if (config.tls == TlsMode.ON) config.tlsPort else config.port,
       config.password,
       config.nameOpt
     )
@@ -297,7 +304,9 @@ case class ServerConfig(
   host: String,
   port: Int,
   password: Array[Char],
-  nameOpt: Option[String]
+  nameOpt: Option[String],
+  tls: TlsMode,
+  tlsPort: Int
 )
 
 object ServerConfig {
@@ -342,6 +351,28 @@ object ServerConfig {
         "If not provided, fallback to the value given in the LABRADPORT " +
         "environment variable, with default value 7682."
     )
+    val tlsOpt = parser.option[String](
+      names = List("tls"),
+      valueName = "string",
+      description = "The TLS mode to use for secure connections to the " +
+        "labrad manager. Valid options are 'on', 'off', 'starttls', and " +
+        "'starttls-force'. If not provided, fallback to the value given in " +
+        "the LABRAD_TLS environment variable, with default value 'starttls'. " +
+        "If 'on', we connect to the manager's tls-port and encrypt the " +
+        "connection with TLS from the start. If 'starttls', the connection " +
+        "is initially unencrypted, but will then be upgraded to use TLS, " +
+        "unless connecting to a manager running on localhost; " +
+        "'starttls-force' will upgrade to TLS, even when connecting to " +
+        "localhost. Finally, 'off' will disable TLS entirely; this is " +
+        "recommended only for use with legacy managers."
+    )
+    val tlsPortOpt = parser.option[Int](
+      names = List("tls-port"),
+      valueName = "int",
+      description = "Port on which to connect to the labrad manager with " +
+        "TLS. If not provided, fallback to the value given in the " +
+        "LABRAD_TLS_PORT environment variable, with default value 7643."
+    )
     val passwordOpt = parser.option[String](
       names = List("password"),
       valueName = "string",
@@ -358,9 +389,11 @@ object ServerConfig {
 
       val host = hostOpt.value.orElse(env.get("LABRADHOST")).getOrElse("localhost")
       val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
+      val tls = tlsOpt.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(TlsMode.STARTTLS)
+      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(7643)
       val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
 
-      ServerConfig(host, port, password, nameOpt.value)
+      ServerConfig(host, port, password, nameOpt.value, tls, tlsPort)
     }
   }
 }

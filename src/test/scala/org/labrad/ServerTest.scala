@@ -193,10 +193,10 @@ class ServerTest extends FunSuite with AsyncAssertions {
   type FixtureParam = Fixture
 
   def withFixture(test: OneArgTest) = {
-    withManager { (host, port, password) =>
-      withServer(host, port, password) { server =>
-        withClient(host, port, password) { client =>
-          withFixture(test.toNoArgTest(Fixture(server, client, host, port, password)))
+    withManager() { m =>
+      withServer(m.host, m.port, m.password) { server =>
+        withClient(m.host, m.port, m.password) { client =>
+          withFixture(test.toNoArgTest(Fixture(server, client, m.host, m.port, m.password)))
         }
       }
     }

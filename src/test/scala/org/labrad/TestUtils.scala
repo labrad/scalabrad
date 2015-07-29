@@ -1,10 +1,12 @@
 package org.labrad
 
+import io.netty.handler.ssl.SslContextBuilder
+import io.netty.handler.ssl.util.SelfSignedCertificate
 import java.io.File
 import java.nio.ByteOrder
 import java.util.Date
 import org.labrad.data._
-import org.labrad.manager.CentralNode
+import org.labrad.manager.{CentralNode, TlsHostConfig, TlsPolicy}
 import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util.{Logging, Util}
@@ -13,29 +15,55 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
 
+case class ManagerInfo(
+  host: String,
+  port: Int,
+  password: Array[Char],
+  tlsPolicy: TlsPolicy,
+  tlsHosts: TlsHostConfig
+)
+
 object TestUtils extends {
 
   def await[A](future: Future[A]): A = Await.result(future, 30.seconds)
 
-  def withManager[T](f: (String, Int, Array[Char]) => T): T = {
+  def withManager[T](tlsPolicy: TlsPolicy = TlsPolicy.OFF)(f: ManagerInfo => T): T = {
     val host = "localhost"
-    val port = 10000 + Random.nextInt(50000) //Util.findAvailablePort()
+    val port = 10000 + Random.nextInt(50000)
+
     val password = "testPassword12345!@#$%".toCharArray
 
     val registryFile = File.createTempFile("labrad-registry", "")
 
     val registryStore = SQLiteStore(registryFile)
 
-    val manager = new CentralNode(port, password, Some(registryStore))
+    val ssc = new SelfSignedCertificate()
+    val sslCtx = SslContextBuilder.forServer(ssc.certificate, ssc.privateKey).build()
+    val tlsHosts = TlsHostConfig((ssc.certificate, sslCtx))
+    val listeners = Seq(port -> tlsPolicy)
+
+    val manager = new CentralNode(password, Some(registryStore), listeners, tlsHosts)
     try {
-      f(host, port, password)
+      f(ManagerInfo(host, port, password, tlsPolicy, tlsHosts))
     } finally {
       manager.stop()
     }
   }
 
-  def withClient[A](host: String, port: Int, password: Array[Char])(func: Client => A): A = {
-    val c = new Client(host = host, port = port, password = password)
+  def withClient[A](
+    host: String,
+    port: Int,
+    password: Array[Char],
+    tls: TlsMode = TlsMode.OFF,
+    tlsCerts: Map[String, File] = Map()
+  )(func: Client => A): A = {
+    val c = new Client(
+      host = host,
+      port = port,
+      password = password,
+      tls = tls,
+      tlsCerts = tlsCerts
+    )
     c.connect()
     try {
       func(c)

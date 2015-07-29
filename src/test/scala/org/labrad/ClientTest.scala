@@ -14,8 +14,8 @@ import scala.concurrent.duration._
 class ClientTests extends FunSuite /*with Logging*/ {
 
   def testWithClient(name: String)(func: Client => Unit) = test(name) {
-    TestUtils.withManager { (host, port, password) =>
-      TestUtils.withClient(host = host, port = port, password = password) { c =>
+    TestUtils.withManager() { m =>
+      TestUtils.withClient(host = m.host, port = m.port, password = m.password) { c =>
         func(c)
       }
     }
