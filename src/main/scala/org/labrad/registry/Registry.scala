@@ -98,6 +98,17 @@ extends ServerActor with Logging {
       store.dir(curDir)
     }
 
+    private def dirForPath(dirs: Seq[String], create: Boolean): store.Dir = {
+      var newDir = curDir
+      for ((dir, i) <- dirs.zipWithIndex) dir match {
+        case ""   => if (i == 0) newDir = store.root
+        case "."  =>
+        case ".." => newDir = store.parent(newDir)
+        case dir  => newDir = _mkDir(newDir, dir, create = create)
+      }
+      newDir
+    }
+
     @Setting(id=10,
              name="cd",
              doc="Change the current directory")
@@ -110,14 +121,7 @@ extends ServerActor with Logging {
         case Right(dirs) => dirs
       }
 
-      var newDir = curDir
-      for ((dir, i) <- dirs.zipWithIndex) dir match {
-        case ""   => if (i == 0) newDir = store.root
-        case "."  =>
-        case ".." => newDir = store.parent(newDir)
-        case dir  => newDir = _mkDir(newDir, dir, create = create)
-      }
-      curDir = newDir
+      curDir = dirForPath(dirs, create = create)
       store.pathTo(curDir)
     }
 
