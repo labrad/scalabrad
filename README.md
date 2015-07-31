@@ -1,17 +1,45 @@
-scalabrad
-=========
+# scalabrad
 
 [![Build Status](https://secure.travis-ci.org/labrad/scalabrad.png)](http://travis-ci.org/labrad/scalabrad)
 
 A scala interface to labrad.
 
-Contributing
-------------
+
+## Contributing
 
 For instructions on how to contribute to scalabrad, see [contributing.md](https://github.com/labrad/scalabrad/blob/master/contributing.md).
 
-Running Scalabrad
------------------
+
+## Code Style
+
+Code should follow the [scala style guide](http://docs.scala-lang.org/style/).
+
+Code should be documented with [scaladoc](http://docs.scala-lang.org/style/scaladoc.html). Note that we prefer the indentation style common in java where asterisks in multiline doc comments are aligned to the left, rather than to the right:
+
+```scala
+/**
+  * NO!!
+  */
+
+/**
+ * YES!!
+ */
+```
+
+The Google java style guide has some good [advice](http://google.github.io/styleguide/javaguide.html#s7-javadoc) about where comments should be included: 
+
+    At the minimum, Javadoc is present for every public class, and every public or protected member
+    of such a class.  Other classes and members still have Javadoc as needed. Whenever an
+    implementation comment would be used to define the overall purpose or behavior of a class, method
+    or field, that comment is written as Javadoc instead. (It's more uniform, and more tool-friendly.)
+
+    Javadoc is optional for "simple, obvious" methods like getFoo, in cases where there really and
+    truly is nothing else worthwhile to say but "Returns the foo".
+
+In scala a method like `getFoo` would probably just be called `foo`, or preferably you would just have public immutable member `foo`, but the principle is the same: completely obvious comments distract more than they inform.
+
+
+## Running Scalabrad
 
 Binary distributions of scalabrad are distributed via [bintray](https://bintray.com/labrad/generic/scalabrad).
 Simply download and install the archive file for the version you want and unpack it on your machine.
