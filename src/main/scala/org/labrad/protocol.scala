@@ -13,11 +13,16 @@ import org.labrad.util.Logging
 
 
 /**
- * Decoder that reads incoming LabRAD packets on a netty channel
+ * Decoder that reads incoming LabRAD packets on a netty channel.
+ *
+ * If forceByteOrder is null, the byte order will be detected from the first incoming
+ * packet, suitable for use by the manager. For client or server connections
+ * which send before they receive, forceByteOrder should instead be set to the
+ * desired byte order for the connection.
  */
-class PacketCodec extends ByteToMessageCodec[Packet] with Logging {
+class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[Packet] with Logging {
 
-  private var byteOrder: ByteOrder = null
+  private var byteOrder: ByteOrder = forceByteOrder
 
   protected override def decode(ctx: ChannelHandlerContext, in: ByteBuf, out: JList[AnyRef]): Unit = {
     // Wait until the full header is available

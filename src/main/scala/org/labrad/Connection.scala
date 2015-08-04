@@ -1,19 +1,23 @@
 package org.labrad
 
+import io.netty.bootstrap.Bootstrap
+import io.netty.channel.{Channel, ChannelHandlerContext, ChannelOption, ChannelInitializer, SimpleChannelInboundHandler}
+import io.netty.channel.nio.NioEventLoopGroup
+import io.netty.channel.socket.SocketChannel
+import io.netty.channel.socket.nio.NioSocketChannel
 import java.io.IOException
-import java.net.Socket
 import java.nio.ByteOrder
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
-import java.util.concurrent.{ExecutionException, Executors}
+import java.util.concurrent.{ExecutionException, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
 import org.labrad.manager.Manager
 import org.labrad.util.{Counter, LookupProvider}
-import scala.concurrent.{Await, Channel, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 trait Connection {
@@ -50,54 +54,39 @@ trait Connection {
   private val nextMessageId = new AtomicInteger(1)
   def getMessageId = nextMessageId.getAndIncrement()
 
-  protected val writeQueue: Channel[Packet] = new Channel[Packet]
+  // TODO: inject event loop group from outside so it can be shared between connections.
+  // This will mean that its lifecycle must be managed separately, since we won't be
+  // able to shut it down ourselves.
+  private val workerGroup: NioEventLoopGroup = new NioEventLoopGroup()
   protected val lookupProvider = new LookupProvider(this.send)
   protected val requestDispatcher = new RequestDispatcher(sendPacket)
-  protected val executor = Executors.newCachedThreadPool
-  implicit val executionContext = ExecutionContext.fromExecutor(executor)
+  implicit val executionContext = ExecutionContext.fromExecutor(workerGroup)
 
-  private var socket: Socket = _
-  private var reader: Thread = _
-  private var writer: Thread = _
+  private var channel: Channel = _
 
   def connect(): Unit = {
-    socket = new Socket(host, port)
-    socket.setTcpNoDelay(true)
-    socket.setKeepAlive(true)
-    implicit val byteOrder = ByteOrder.BIG_ENDIAN
-    val inputStream = new PacketInputStream(socket.getInputStream)
-    val outputStream = new PacketOutputStream(socket.getOutputStream)
+    val b = new Bootstrap()
+    b.group(workerGroup)
+     .channel(classOf[NioSocketChannel])
+     .option[java.lang.Boolean](ChannelOption.TCP_NODELAY, true)
+     .option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
+     .handler(new ChannelInitializer[SocketChannel] {
+         override def initChannel(ch: SocketChannel): Unit = {
+           val p = ch.pipeline
+           p.addLast("packetCodec", new PacketCodec(forceByteOrder = ByteOrder.BIG_ENDIAN))
+           p.addLast("packetHandler", new SimpleChannelInboundHandler[Packet] {
+             override protected def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+               handlePacket(packet)
+             }
 
-    reader = new Thread(new Runnable {
-      def run: Unit = {
-        try {
-          while (!Thread.interrupted)
-            handlePacket(inputStream.readPacket)
-        } catch {
-          case e: IOException => if (!Thread.interrupted) closeNoWait(e)
-          case e: Exception => closeNoWait(e)
-        }
-      }
-    }, s"${name}-reader")
+             override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
+               closeNoWait(cause)
+             }
+           })
+         }
+     })
 
-    writer = new Thread(new Runnable {
-      def run: Unit = {
-        try {
-          while (true)
-            outputStream.writePacket(writeQueue.read)
-        } catch {
-          case e: InterruptedException => // connection closed
-          case e: IOException => closeNoWait(e)
-          case e: Exception => closeNoWait(e)
-        }
-      }
-    }, s"${name}-writer")
-
-    reader.setDaemon(true)
-    writer.setDaemon(true)
-
-    reader.start()
-    writer.start()
+    channel = b.connect(host, port).sync().channel
 
     connected = true
     try {
@@ -145,10 +134,8 @@ trait Connection {
   private def close(cause: Throwable): Unit = {
     closeNoWait(cause)
 
-    try { writer.join() } catch { case e: InterruptedException => }
-
-    try { socket.close() } catch { case e: IOException => }
-    try { reader.join() } catch { case e: InterruptedException => }
+    channel.close().sync()
+    workerGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS).sync()
   }
 
   private def closeNoWait(cause: Throwable): Unit = {
@@ -156,10 +143,9 @@ trait Connection {
       if (connected) {
         connected = false
         requestDispatcher.failAll(cause)
-        executor.shutdown
 
-        writer.interrupt()
-        reader.interrupt()
+        channel.close()
+        workerGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS)
 
         connectionListeners.map(_.lift)
       } else {
@@ -190,7 +176,7 @@ trait Connection {
 
   protected def sendPacket(packet: Packet): Unit = {
     require(connected, "Not connected.")
-    writeQueue.write(packet)
+    channel.writeAndFlush(packet)
   }
 
 

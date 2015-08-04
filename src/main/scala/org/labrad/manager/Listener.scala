@@ -27,7 +27,7 @@ extends Logging {
      .childHandler(new ChannelInitializer[SocketChannel] {
          override def initChannel(ch: SocketChannel): Unit = {
            val p = ch.pipeline
-           p.addLast("packetCodec", new PacketCodec)
+           p.addLast("packetCodec", new PacketCodec())
            p.addLast("loginHandler", new LoginHandler(auth, hub, tracker, messager))
          }
      })
