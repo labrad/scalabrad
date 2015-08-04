@@ -41,7 +41,7 @@ In scala a method like `getFoo` would probably just be called `foo`, or preferab
 
 ## Running Scalabrad
 
-Binary distributions of scalabrad are distributed via [bintray](https://bintray.com/labrad/generic/scalabrad).
+Binary distributions of scalabrad are distributed via [bintray](https://bintray.com/labrad/generic/scalabrad#files).
 Simply download and install the archive file for the version you want and unpack it on your machine.
 For example, if you download [scalabrad-0.3.1.tar.gz](https://bintray.com/artifact/download/labrad/generic/scalabrad-0.3.1.tar.gz) and untar it in some directory `$PATH/`, then you can run `$PATH/scalabrad-0.3.1/bin/labrad` to start the manager. You'll need to have Java 8 installed on your system, but all other dependencies are included in the package. Windows `.bat` files are also included in the distribution, though you may need a tool like 7-Zip to extract the `.tar.gz` archive.
 
