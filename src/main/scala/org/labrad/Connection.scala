@@ -135,7 +135,7 @@ trait Connection {
     closeNoWait(cause)
 
     channel.close().sync()
-    workerGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS).sync()
+    workerGroup.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS).sync()
   }
 
   private def closeNoWait(cause: Throwable): Unit = {
@@ -145,7 +145,7 @@ trait Connection {
         requestDispatcher.failAll(cause)
 
         channel.close()
-        workerGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS)
+        workerGroup.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS)
 
         connectionListeners.map(_.lift)
       } else {
