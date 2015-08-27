@@ -11,15 +11,18 @@ import java.net.{InetAddress, InetSocketAddress}
 import java.nio.{ByteOrder, CharBuffer}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
-import java.security.MessageDigest
+import java.security.{MessageDigest, SecureRandom}
 import java.util.concurrent.{ExecutionException, Executors, ThreadFactory, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+import org.bouncycastle.crypto.agreement.srp._
+import org.bouncycastle.crypto.digests.SHA1Digest
 import org.labrad.Labrad.Manager
 import org.labrad.Labrad.Authenticator
+import org.labrad.crypto.{BigInts, SRP}
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
-import org.labrad.util.{Counter, LookupProvider, NettyUtil}
+import org.labrad.util.{Counter, LookupProvider, NettyUtil, Util}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -78,6 +81,7 @@ trait Connection {
   val tls: TlsMode
   val tlsCerts: Map[String, File]
   val workerGroup: EventLoopGroup
+  val requireSrp: Boolean
   implicit val executionContext: ExecutionContext
 
   def credential: Credential
@@ -212,21 +216,69 @@ trait Connection {
   ): Unit = {
     try {
       val loginResponse = credential match {
-        case Password("", password) =>
-          // send first ping packet; response is password challenge
-          val Bytes(challenge) = Await.result(sendManagerRequest(), timeout)
+        case Password(username @ "", password) =>
+          val useSrp = if (requireSrp) {
+            true
+          } else {
+            // We will use SRP if manager supports it, so we send a PING to get manager features.
+            val resp = Await.result(sendManagerRequest(2, "PING".toData), timeout)
+            val features: Set[String] = resp match {
+              case Cluster(_, Arr(features @ _*)) => Set(features.map(_.getString): _*)
+              case _ => Set()
+            }
+            features.contains("srp")
+          }
 
-          val md = MessageDigest.getInstance("MD5")
-          md.update(challenge)
-          md.update(UTF_8.encode(CharBuffer.wrap(password)))
-          val data = TreeData("s") // use s instead of y for backwards compatibility
-          data.setBytes(md.digest)
+          if (useSrp) {
+            // use SRP for login
+            val random = new SecureRandom()
+            val digest = new SHA1Digest()
+            val client = new SRP6Client()
 
-          // send password response; response is welcome message
-          try {
-            Await.result(sendManagerRequest(0, data), timeout)
-          } catch {
-            case e: ExecutionException => throw new IncorrectPasswordException
+            val Cluster(Str(groupName), Bytes(salt), Bytes(bBytes)) =
+              Await.result(sendManagerRequest(10, Str(username)), timeout)
+
+            val group = SRP.groupFromString(groupName)
+            client.init(group, digest, random)
+
+            val a = client.generateClientCredentials(salt, username.getBytes(UTF_8),
+                                                     Util.utf8Bytes(password))
+            val aBytes = BigInts.toUnsignedByteArray(a)
+
+            val b = BigInts.fromUnsignedByteArray(bBytes)
+            client.calculateSecret(b.bigInteger)
+
+            val m1 = client.calculateClientEvidenceMessage()
+            val m1Bytes = BigInts.toUnsignedByteArray(m1)
+
+            val Cluster(loginResponse, Bytes(m2Bytes)) = try {
+              Await.result(sendManagerRequest(11, (aBytes, m1Bytes).toData), timeout)
+            } catch {
+              case e: ExecutionException => throw new IncorrectPasswordException
+            }
+
+            val m2 = BigInts.fromUnsignedByteArray(m2Bytes)
+            if (!client.verifyServerEvidenceMessage(m2.bigInteger)) {
+              throw new Exception("unable to verify server SRP message M2")
+            }
+            loginResponse
+
+          } else {
+            // send first ping packet; response is password challenge
+            val Bytes(challenge) = Await.result(sendManagerRequest(), timeout)
+
+            val md = MessageDigest.getInstance("MD5")
+            md.update(challenge)
+            md.update(UTF_8.encode(CharBuffer.wrap(password)))
+            val data = TreeData("s") // use s instead of y for backwards compatibility
+            data.setBytes(md.digest)
+
+            // send password response; response is welcome message
+            try {
+              Await.result(sendManagerRequest(0, data), timeout)
+            } catch {
+              case e: ExecutionException => throw new IncorrectPasswordException
+            }
           }
 
         case Password(username, password) =>

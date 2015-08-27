@@ -2,6 +2,8 @@ package org.labrad.util
 
 import java.io.{File, IOException}
 import java.net.{DatagramSocket, ServerSocket, URI}
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets.UTF_8
 import java.util.regex.Pattern
 
 
@@ -179,5 +181,16 @@ object Util {
       val ok = dir.mkdirs()
       if (!ok) sys.error(s"failed to create directory: $dir")
     }
+  }
+
+  /**
+   * Get array of UTF-8 bytes from an array of Chars.
+   */
+  def utf8Bytes(chars: Array[Char]): Array[Byte] = {
+    val charBuffer = CharBuffer.wrap(chars)
+    val byteBuffer = UTF_8.encode(charBuffer)
+    val bytes = Array.ofDim[Byte](byteBuffer.remaining)
+    byteBuffer.get(bytes)
+    bytes
   }
 }

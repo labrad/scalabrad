@@ -5,16 +5,17 @@ import io.netty.handler.ssl.util.SelfSignedCert
 import io.netty.util.DomainNameMapping
 import java.io.File
 import java.net.{InetAddress, URI}
-import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
+import org.bouncycastle.crypto.agreement.srp._
+import org.bouncycastle.crypto.digests.SHA1Digest
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Labrad, Password, ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
 import org.labrad.concurrent.ExecutionContexts
-import org.labrad.crypto.{CertConfig, Certs}
+import org.labrad.crypto.{CertConfig, Certs, SRP}
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.auth._
@@ -29,17 +30,40 @@ import scala.concurrent.duration._
 
 trait AuthService {
   def authenticate(challenge: Array[Byte], response: Array[Byte]): Boolean
+  def srpInit(): (String, Array[Byte], SRP6Server)
 }
 
 class AuthServiceImpl(password: Array[Char]) extends AuthService {
   def authenticate(challenge: Array[Byte], response: Array[Byte]): Boolean = {
     val md = MessageDigest.getInstance("MD5")
     md.update(challenge)
-    md.update(UTF_8.encode(CharBuffer.wrap(password)))
+    md.update(passwordBytes)
     val expected = md.digest
     var same = expected.length == response.length
     for ((a, b) <- expected zip response) same = same & (a == b)
     same
+  }
+
+  private lazy val passwordBytes = Util.utf8Bytes(password)
+
+  private lazy val srpSalt: Array[Byte] = {
+    val random = new SecureRandom()
+    val bytes = Array.ofDim[Byte](32)
+    random.nextBytes(bytes)
+    bytes
+  }
+
+  private lazy val srpVerifier: BigInt = {
+    val digest = new SHA1Digest()
+    val gen = new SRP6VerifierGenerator()
+    gen.init(SRP.Group1024, digest)
+    gen.generateVerifier(srpSalt, "".getBytes(UTF_8), passwordBytes)
+  }
+
+  def srpInit(): (String, Array[Byte], SRP6Server) = {
+    val server = new SRP6Server()
+    server.init(SRP.Group1024, srpVerifier.bigInteger, new SHA1Digest(), new SecureRandom())
+    ("1024", srpSalt, server)
   }
 }
 
