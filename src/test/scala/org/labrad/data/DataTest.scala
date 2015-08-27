@@ -198,4 +198,11 @@ class DataTest extends FunSuite {
     val c2 = empty2.convertTo("*?")
     assert(c2.t == Type("*_"))
   }
+
+  test("can parse single- or double-quoted strings") {
+    assert(Data.parse(""" 'this is a test' """).get[String] == """this is a test""")
+    assert(Data.parse(""" "this is a test" """).get[String] == """this is a test""")
+    assert(Data.parse(""" 'no "escape".' """).get[String] == """no "escape".""")
+    assert(Data.parse(""" "no 'escape'." """).get[String] == """no 'escape'.""")
+  }
 }

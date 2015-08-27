@@ -1354,7 +1354,7 @@ object Parsers {
   val data: Parser[Data] = P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | string | cluster )
+    P( none | bool | complex | value | time | int | uint | string | singleQuotedString | cluster )
 
   val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
@@ -1370,8 +1370,10 @@ object Parsers {
     P( Re("""\d+""").! ).map { s => UInt(s.toLong) } // w8, w16, w64
 
   val string: Parser[Data] =
-    P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").! ).map { s => Bytes(Translate.stringToBytes(s)) }
-    //("\""+"""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*"""+"\"").r
+    P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").! ).map { s => Bytes(Translate.stringToBytes(s, quote = '"')) }
+
+  val singleQuotedString: Parser[Data] =
+    P( Re("'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\x[a-fA-F0-9]{2})*""" + "'").! ).map { s => Bytes(Translate.stringToBytes(s, quote = '\'')) }
 
   val time: Parser[Data] =
     P( Re("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""").! ).map { s => Time(new DateTime(s).toDate) }
@@ -1466,9 +1468,9 @@ object Translate {
   def bytesToString(bytes: Array[Byte]): String =
     '"' + bytes.flatMap(b => translation((b + 256) % 256)).mkString + '"'
 
-  def stringToBytes(s: String): Array[Byte] = {
-    require(s.head == '"')
-    require(s.last == '"')
+  def stringToBytes(s: String, quote: Char = '"'): Array[Byte] = {
+    require(s.head == quote)
+    require(s.last == quote)
     val trimmed = s.substring(1, s.length-1)
     var pos = 0
     val buf = Array.newBuilder[Byte]
