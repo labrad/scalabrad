@@ -111,38 +111,6 @@ object Util {
   }
 
   /**
-   * Parse an array of command-line arguments against the given allowed options.
-   *
-   * For example, if we specify "foo" and "bar" as allowed options, then we
-   * will accept command line arguments of the form "--foo=x" or "--bar=y".
-   * Any arguments not of this form will raise an exception.
-   *
-   * Returns a Map from allowed options to the provided values.
-   */
-  def parseArgs(args: Array[String], allowed: Seq[String]): Map[String, String] = {
-    def parseArg(arg: String, opt: String): Option[String] = {
-      val prefix = s"--$opt="
-      if (arg.startsWith(prefix)) {
-        Some(arg.stripPrefix(prefix))
-      } else {
-        None
-      }
-    }
-
-    args.map { arg =>
-      val values = for {
-        opt <- allowed
-        value <- parseArg(arg, opt)
-      } yield {
-        (opt, value)
-      }
-      values.headOption.getOrElse {
-        sys.error(s"unknown argument: $arg")
-      }
-    }.toMap
-  }
-
-  /**
    * Drop the query and fragment from a URI.
    */
   def bareUri(uri: URI): URI = {

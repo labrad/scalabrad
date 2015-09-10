@@ -6,7 +6,7 @@ import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Client, RegistryServerProxy}
 import org.labrad.data.Data
-import org.labrad.util.Util
+import org.labrad.util.{ArgParsing, Util}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -48,15 +48,18 @@ object Migrate {
     )
     val verbose = parser.flag[Boolean](List("v", "verbose"),
       "Print progress information during the migration")
+    val help = parser.flag[Boolean](List("h", "help"),
+      "Print usage information and exit")
 
     try {
-      parser.parse(args)
+      parser.parse(ArgParsing.expandLongArgs(args))
+      if (help.value.getOrElse(false)) parser.usage()
     } catch {
       case e: ArgotUsageException =>
         println(e.message)
         return
       case e: Exception =>
-        println(s"enexpected error: $e")
+        println(s"unexpected error: $e")
         return
     }
 

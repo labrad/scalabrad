@@ -5,6 +5,8 @@ import java.net.URI
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.MessageDigest
+import org.clapper.argot._
+import org.clapper.argot.ArgotConverters._
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
@@ -14,6 +16,7 @@ import scala.annotation.tailrec
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
 
 
 trait AuthService {
@@ -104,31 +107,27 @@ object Manager extends Logging {
     def msgData: Data = ctx.toData
   }
 
-  // helpers for dealing with paths
-  implicit class PathString(path: String) {
-    def / (file: String): File = new File(path, file)
-  }
-
-  implicit class PathFile(path: File) {
-    def / (file: String): File = new File(path, file)
-  }
-
   def main(args: Array[String]) {
-    val options = Util.parseArgs(args, Seq("port", "password", "registry"))
 
-    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
-    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
-    val registryUri = options.get("registry").orElse(sys.env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
-      (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
+    val config = ManagerConfig.fromCommandLine(args) match {
+      case Success(managerArgs) => managerArgs
+
+      case Failure(e: ArgotUsageException) =>
+        println(e.message)
+        return
+
+      case Failure(e: Throwable) =>
+        println(s"unexpected error: $e")
+        return
     }
 
-    val storeOpt = registryUri.getScheme match {
-      case null if registryUri == new URI("none") =>
+    val storeOpt = config.registryUri.getScheme match {
+      case null if config.registryUri == new URI("none") =>
         log.info("running with external registry")
         None
 
       case "file" =>
-        val registry = new File(Util.bareUri(registryUri)).getAbsoluteFile
+        val registry = new File(Util.bareUri(config.registryUri)).getAbsoluteFile
 
         def ensureDir(dir: File): Unit = {
           if (!dir.exists) {
@@ -139,14 +138,14 @@ object Manager extends Logging {
 
         val (store, format) = if (registry.isDirectory) {
           ensureDir(registry)
-          registryUri.getQuery match {
+          config.registryUri.getQuery match {
             case null | "format=binary" => (new BinaryFileStore(registry), "binary")
             case "format=delphi" => (new DelphiFileStore(registry), "delphi")
             case query => sys.error(s"invalid format for registry directory: $query")
           }
         } else {
           ensureDir(registry.getParentFile)
-          registryUri.getQuery match {
+          config.registryUri.getQuery match {
             case null | "format=sqlite" => (SQLiteStore(registry), "sqlite")
             case query => sys.error(s"invalid format for registry file: $query")
           }
@@ -155,15 +154,15 @@ object Manager extends Logging {
         Some(store)
 
       case "labrad" =>
-        val remoteHost = registryUri.getHost
-        val remotePort = registryUri.getPort match {
+        val remoteHost = config.registryUri.getHost
+        val remotePort = config.registryUri.getPort match {
           case -1 => 7682 // not specified; use default
           case port => port
         }
-        val remotePassword = registryUri.getUserInfo match {
-          case null => password
+        val remotePassword = config.registryUri.getUserInfo match {
+          case null => config.password
           case info => info.split(":") match {
-            case Array() => password
+            case Array() => config.password
             case Array(pw) => pw.toCharArray
             case Array(u, pw) => pw.toCharArray
           }
@@ -175,7 +174,7 @@ object Manager extends Logging {
         sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")
     }
 
-    val centralNode = new CentralNode(port, password, storeOpt)
+    val centralNode = new CentralNode(config.port, config.password, storeOpt)
 
     // Optionally wait for EOF to stop the manager.
     // This is a convenience feature when developing in sbt, allowing the
@@ -191,6 +190,93 @@ object Manager extends Logging {
       sys.addShutdownHook {
         centralNode.stop()
       }
+    }
+  }
+}
+
+/**
+ * Configuration for running the labrad manager.
+ */
+case class ManagerConfig(
+  port: Int,
+  password: Array[Char],
+  registryUri: URI
+)
+
+object ManagerConfig {
+  // helpers for dealing with paths
+  implicit class PathString(path: String) {
+    def / (file: String): File = new File(path, file)
+  }
+
+  implicit class PathFile(path: File) {
+    def / (file: String): File = new File(path, file)
+  }
+
+  /**
+   * Create ManagerConfig from command line and map of environment variables.
+   *
+   * @param args command line parameters
+   * @param env map of environment variables, which defaults to the actual
+   *        environment variables in scala.sys.env
+   * @return a Try containing a ManagerArgs instance (on success) or a Failure
+   *         in the case something went wrong. The Failure will contain an
+   *         ArgotUsageException if the command line parsing failed or the
+   *         -h or --help options were supplied.
+   */
+  def fromCommandLine(
+    args: Array[String],
+    env: Map[String, String] = scala.sys.env
+  ): Try[ManagerConfig] = {
+    val parser = new ArgotParser("labrad",
+      preUsage = Some("The labrad manager."),
+      sortUsage = false
+    )
+    val portOpt = parser.option[Int](
+      names = List("port"),
+      valueName = "int",
+      description = "Port on which to listen for incoming connections. " +
+        "If not provided, fallback to the value given in the LABRADPORT " +
+        "environment variable, with default value 7682."
+    )
+    val passwordOpt = parser.option[String](
+      names = List("password"),
+      valueName = "string",
+      description = "Password to use to authenticate incoming connections. " +
+        "If not provided, fallback to the value given in the LABRADPASSWORD " +
+        "environment variable, with default value '' (empty password)."
+    )
+    val registryOpt = parser.option[String](
+      names = List("registry"),
+      valueName = "uri",
+      description = "URI giving the registry storage location. " +
+        "Use labrad://[<pw>@]<host>[:<port>] to connect to a running manager, " +
+        "or file://<path>[?format=<format>] to load data from a local file. " +
+        "If the file path is a directory, we assume it is in the binary " +
+        "one file per key format; if it points to a file, we assume it " +
+        "is in the new SQLite format. The default format can be overridden " +
+        "by adding a 'format=' query parameter to the URI, with the following " +
+        "options: binary (one file per key with binary data), " +
+        "delphi (one file per key with legacy delphi text-formatted data), " +
+        "sqlite (single sqlite file for entire registry). If not provided, " +
+        "fallback to the value given in the LABRADREGISTRY environment " +
+        "variable, with the default being to store registry values in SQLite " +
+        "format in $HOME/.labrad/registry.sqlite"
+    )
+    val help = parser.flag[Boolean](List("h", "help"),
+      "Print usage information and exit")
+
+    Try {
+      parser.parse(ArgParsing.expandLongArgs(args))
+      if (help.value.getOrElse(false)) parser.usage()
+
+      val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
+      val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+      val registryUri = registryOpt.value.orElse(env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
+        (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
+      }
+
+      ManagerConfig(port, password, registryUri)
     }
   }
 }

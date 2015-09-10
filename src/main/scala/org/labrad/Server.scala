@@ -3,17 +3,19 @@ package org.labrad
 import java.io.{PrintWriter, StringWriter}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
+import org.clapper.argot._
+import org.clapper.argot.ArgotConverters._
 import org.labrad.annotations.IsServer
 import org.labrad.data._
 import org.labrad.errors.LabradException
-import org.labrad.util.{AsyncSemaphore, Logging, Util}
+import org.labrad.util.{ArgParsing, AsyncSemaphore, Logging, Util}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
-import scala.util.{Success, Failure}
+import scala.util.{Success, Failure, Try}
 
 trait ServerContext {
   def init(): Unit
@@ -268,13 +270,97 @@ object Server {
    * Includes basic parsing of command line options.
    */
   def run(s: Server[_, _], args: Array[String]): Unit = {
-    val options = Util.parseArgs(args, Seq("name", "host", "port", "password"))
+    val config = ServerConfig.fromCommandLine(args) match {
+      case Success(config) => config
 
-    val nameOpt = options.get("name")
-    val host = options.get("host").orElse(sys.env.get("LABRADHOST")).getOrElse("localhost")
-    val port = options.get("port").orElse(sys.env.get("LABRADPORT")).map(_.toInt).getOrElse(7682)
-    val password = options.get("password").orElse(sys.env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+      case Failure(e: ArgotUsageException) =>
+        println(e.message)
+        return
 
-    s.start(host, port, password, nameOpt)
+      case Failure(e: Throwable) =>
+        println(s"unexpected error: $e")
+        return
+    }
+    s.start(
+      config.host,
+      config.port,
+      config.password,
+      config.nameOpt
+    )
+  }
+}
+
+/**
+ * Configuration for running a labrad server.
+ */
+case class ServerConfig(
+  host: String,
+  port: Int,
+  password: Array[Char],
+  nameOpt: Option[String]
+)
+
+object ServerConfig {
+  /**
+   * Create ServerConfig from command line and map of environment variables.
+   *
+   * @param args command line parameters
+   * @param env map of environment variables, which defaults to the actual
+   *        environment variables in scala.sys.env
+   * @return a Try containing a ServerArgs instance (on success) or a Failure
+   *         in the case something went wrong. The Failure will contain an
+   *         ArgotUsageException if the command line parsing failed or the
+   *         -h or --help options were supplied.
+   */
+  def fromCommandLine(
+    args: Array[String],
+    env: Map[String, String] = scala.sys.env
+  ): Try[ServerConfig] = {
+    val parser = new ArgotParser("labrad-server",
+      preUsage = Some("Run a labrad server."),
+      sortUsage = false
+    )
+    val nameOpt = parser.option[String](
+      names = List("name"),
+      valueName = "string",
+      description = "The name to use for this server when connecting to the " +
+        "labrad manager. If given, this will override the default name. " +
+        "This is generally not needed, but can be useful in testing if you " +
+        "want to run several copies of a given server without name conflicts."
+    )
+    val hostOpt = parser.option[String](
+      names = List("host"),
+      valueName = "string",
+      description = "The hostname where the labrad manager is running. " +
+        "If not provided, fallback to the value given in the LABRADHOST " +
+        "environment variable, with default value 'localhost'."
+    )
+    val portOpt = parser.option[Int](
+      names = List("port"),
+      valueName = "int",
+      description = "Port on which to connect to the labrad manager. " +
+        "If not provided, fallback to the value given in the LABRADPORT " +
+        "environment variable, with default value 7682."
+    )
+    val passwordOpt = parser.option[String](
+      names = List("password"),
+      valueName = "string",
+      description = "Password to use to authenticate to the manager. " +
+        "If not provided, fallback to the value given in the LABRADPASSWORD " +
+        "environment variable, with default value '' (empty password)."
+    )
+    val help = parser.flag[Boolean](List("h", "help"),
+      "Print usage information and exit")
+
+    Try {
+      parser.parse(ArgParsing.expandLongArgs(args))
+      if (help.value.getOrElse(false)) parser.usage()
+
+      val host = hostOpt.value.orElse(env.get("LABRADHOST")).getOrElse("localhost")
+      val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
+      val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+
+      ServerConfig(host, port, password, nameOpt.value)
+    }
   }
 }
