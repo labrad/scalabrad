@@ -133,7 +133,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
 
   private var settingsById: Map[Long, SettingInfo] = Map.empty
   private var settingsByName: Map[String, SettingInfo] = Map.empty
-  private var contextExpirationInfo: Option[(Long, Boolean)] = None
+  private var contextExpirationInfo: Option[(Long, Context, Boolean)] = None
 
 
   override def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = {
@@ -208,7 +208,7 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
   }
 
   override def startNotifications(r: RequestContext, settingId: Long, expireAll: Boolean): Unit = synchronized {
-    contextExpirationInfo = Some((settingId, expireAll))
+    contextExpirationInfo = Some((settingId, r.context, expireAll))
   }
 
   override def stopNotifications(r: RequestContext): Unit = synchronized {
@@ -219,9 +219,9 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     var messages = Seq.newBuilder[Packet]
     val result = synchronized {
       contextExpirationInfo match {
-        case Some((settingId, _)) =>
+        case Some((settingId, msgContext, _)) =>
           if (contexts contains ctx) {
-            messages += Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData)))
+            messages += Packet(0, 1, msgContext, Seq(Record(settingId, ctx.toData)))
             contexts -= ctx
             1L
           } else {
@@ -241,14 +241,14 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
     val messages = Seq.newBuilder[Packet]
     val result = synchronized {
       contextExpirationInfo match {
-        case Some((settingId, expireAll)) =>
+        case Some((settingId, msgContext, expireAll)) =>
           val expired = contexts.filter(_.high == high)
           if (!expired.isEmpty) {
             if (expireAll) {
-              messages += Packet(0, 1, Context(high, 0), Seq(Record(settingId, UInt(high))))
+              messages += Packet(0, 1, msgContext, Seq(Record(settingId, UInt(high))))
             } else {
               for (ctx <- expired)
-                messages += Packet(0, 1, ctx, Seq(Record(settingId, ctx.toData)))
+                messages += Packet(0, 1, msgContext, Seq(Record(settingId, ctx.toData)))
             }
             contexts --= expired
             1L

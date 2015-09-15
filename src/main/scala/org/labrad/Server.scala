@@ -58,10 +58,16 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     init()
 
     val msgId = cxn.getMessageId
+    val msgCtx = cxn.newContext
     cxn.addMessageListener {
-      case Message(`msgId`, context, _, _) =>
+      case Message(`msgId`, `msgCtx`, _, Cluster(UInt(high), UInt(low))) =>
+        val context = Context(high, low)
         val stateOpt = contexts.synchronized { contexts.remove(context) }
-        stateOpt.foreach { _.expire() }
+        stateOpt.foreach { state =>
+          state.expire().onFailure { case e =>
+            log.error(s"error expiring $context", e)
+          }
+        }
     }
 
     val registrations = settings.sortBy(_.id).map(s =>
