@@ -305,3 +305,42 @@ object RegistryTest {
     }
   }
 }
+
+object PopulateRegistry {
+  def main(args: Array[String]): Unit = {
+    val cxn = new Client()
+    cxn.connect()
+    val reg = new RegistryServerProxy(cxn)
+    val fs = Seq.newBuilder[Future[Unit]]
+
+    @scala.annotation.tailrec
+    def randomData(): Data = {
+      val x = Hydrant.randomData()
+      if (x.isNone) randomData() else x
+    }
+
+    def makeDir(path: Seq[String], level: Int): Unit = {
+      if (level > 0) {
+        println(path)
+        for (i <- 1 to 10) {
+          makeDir(path :+ s"dir$i", level - 1)
+        }
+        val p = reg.packet()
+        p.cd(path, create = true)
+        for (i <- 1 to 100) {
+          p.set(s"key$i", randomData())
+        }
+        fs += p.send()
+        //Await.result(p.send(), 10.seconds)
+      }
+    }
+
+    makeDir(Seq("", "blah7"), 3)
+
+    for (f <- fs.result) {
+      Await.result(f, 10.seconds)
+    }
+
+    cxn.close()
+  }
+}
