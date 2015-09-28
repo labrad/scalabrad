@@ -49,7 +49,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
    * Start this server by connecting to the manager at the given location.
    */
   def start(host: String, port: Int, password: Array[Char], nameOpt: Option[String] = None): Unit = {
-    val name = nameOpt.getOrElse(this.name)
+    val name = Util.interpolateEnvironmentVars(nameOpt.getOrElse(this.name))
     _cxn = new ServerConnection(name, doc, host, port, password, packet => handleRequest(packet))
     cxn.connect()
 

@@ -2,6 +2,7 @@ package org.labrad.util
 
 import java.io.IOException
 import java.net.{DatagramSocket, ServerSocket, URI}
+import java.util.regex.Pattern
 
 class Counter(min: Long, max: Long) {
   require(max >= min)
@@ -115,5 +116,35 @@ object Util {
    */
   def bareUri(uri: URI): URI = {
     new URI(uri.getScheme, uri.getHost, uri.getPath, uri.getFragment)
+  }
+
+  /**
+   * Interpolate environment variables in the given string.
+   *
+   * Tokens of the form %ENV_VAR_NAME% in the string will be replaced with the value of
+   * ENV_VAR_NAME in the given environment map.
+   *
+   * @param str The string to interpolate
+   * @param env Map from environment variable names to values. Defaults to the system environment.
+   */
+  def interpolateEnvironmentVars(str: String, env: Map[String, String] = scala.sys.env): String = {
+    var result: String = str
+
+    // find all environment vars in the string
+    val p = Pattern.compile("%([^%]*)%")
+    val m = p.matcher(str)
+    val keys = {
+      val keys = Set.newBuilder[String]
+      while (m.find) keys += m.group(1)
+      keys.result
+    }
+
+    // substitute environment variable into string
+    for (key <- keys.toSeq) {
+      require(env.contains(key), s"Cannot interpolate '$str': '$key' not defined in environment")
+      result = result.replaceAll("%" + key + "%", env(key))
+    }
+
+    result
   }
 }
