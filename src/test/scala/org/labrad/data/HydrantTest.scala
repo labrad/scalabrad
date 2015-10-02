@@ -26,6 +26,7 @@ class HydrantTest extends FunSuite {
     "c",
     "t",
     "s",
+    "y",
     "ii",
     "cvtiwsbb",
     "*(is)",

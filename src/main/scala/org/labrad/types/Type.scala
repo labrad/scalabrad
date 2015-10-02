@@ -46,6 +46,7 @@ object Parsers {
 //     | "u32" ^^ { _ => TUInt }
 //     | "u64" ^^ { _ => TUInt64 }
      | Token("s").map { _ => TStr }
+     | Token("y").map { _ => TBytes }
      | Token("t").map { _ => TTime }
      | valueType
      | complexType
@@ -474,6 +475,12 @@ case object TUInt extends Type with ConcreteType {
 
 case object TStr extends Type with ConcreteType {
   override val toString = "s"
+  val fixedWidth = false
+  val dataWidth = 4
+}
+
+case object TBytes extends Type with ConcreteType {
+  override val toString = "y"
   val fixedWidth = false
   val dataWidth = 4
 }

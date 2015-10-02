@@ -12,7 +12,7 @@ object Hydrant {
 
   def randomType: Type = {
     def gen(nesting: Int, allowArray: Boolean = true): Type = {
-      var options = Seq('_, 'b, 'i, 'w, 's, 't, 'v, 'c)
+      var options = Seq('_, 'b, 'i, 'w, 's, 'y, 't, 'v, 'c)
       if (nesting < 4) {
         if (allowArray) options ++= Seq('array)
         options ++= Seq('cluster)
@@ -24,6 +24,7 @@ object Hydrant {
         case 'i => TInt
         case 'w => TUInt
         case 's => TStr
+        case 'y => TBytes
         case 't => TTime
         case 'v => TValue(randomUnits)
         case 'c => TComplex(randomUnits)
@@ -60,6 +61,7 @@ object Hydrant {
     case TInt => randomInt
     case TUInt => randomUInt
     case TStr => randomStr
+    case TBytes => randomBytes
     case TTime => randomTime
     case TValue(units) => randomValue(units)
     case TComplex(units) => randomComplex(units)
@@ -77,6 +79,20 @@ object Hydrant {
   def randomUInt = UInt(random.nextInt(2000000000).toLong)
 
   def randomStr = {
+    // return a random unicode character from the Basic Multilingual Plane (not a surrogate)
+    def randomBMPChar: Char = {
+      var c: Char = 0.toChar
+      do {
+        c = random.nextInt(0x10000).toChar
+      } while (c.isSurrogate)
+      c
+    }
+    val len = random.nextInt(100)
+    val chars = Array.fill[Char](len) { randomBMPChar }
+    Str(new String(chars))
+  }
+
+  def randomBytes = {
     val bytes = Array.ofDim[Byte](random.nextInt(100))
     random.nextBytes(bytes)
     Bytes(bytes)

@@ -36,6 +36,10 @@ object ToData {
     def pat = TStr
     def apply(b: DataBuilder, value: String): Unit = b.string(value)
   }
+  implicit val bytesToData = new ToData[Array[Byte]] {
+    def pat = TBytes
+    def apply(b: DataBuilder, value: Array[Byte]): Unit = b.bytes(value)
+  }
   implicit val dateToData = new ToData[Date] {
     def pat = TTime
     def apply(b: DataBuilder, value: Date): Unit = { val t = TimeStamp(value); b.time(t.seconds, t.fraction) }
