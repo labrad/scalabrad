@@ -81,7 +81,7 @@ object DelphiParsers {
     P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | string | cluster )
+    P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
 
   val none: Parser[Data] =
     P( "_" ).map { _ => Data.NONE }
@@ -102,8 +102,14 @@ object DelphiParsers {
   val unsignedInt: Parser[Long] =
     P( number.!.map(_.toLong) )
 
+  val bytes: Parser[Data] =
+    P( "b" ~ bytesLiteral ).map { bytes => Bytes(bytes) }
+
   val string: Parser[Data] =
-    P( Re("""('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""").! ).map { s => Bytes(DelphiFormat.stringToBytes(s)) }
+    P( bytesLiteral ).map { bytes => Str(new String(bytes, UTF_8)) }
+
+  val bytesLiteral: Parser[Array[Byte]] =
+    P( Re("""('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""").! ).map { s => DelphiFormat.stringToBytes(s) }
 
   val time: Parser[Data] =
     P( Re("""\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""").! ~ Re("""\d*(E-\d+)?""") ).map { s => Time(DelphiFormat.DateFormat.parseDateTime(s).toDate) }
@@ -209,7 +215,8 @@ object DelphiFormat {
       case TTime =>
         DateFormat.print(data.getTime.toDateTime)
 
-      case TStr => bytesToString(data.getBytes)
+      case TStr => bytesToString(data.getString.getBytes(UTF_8))
+      case TBytes => "b" + bytesToString(data.getBytes)
 
       case TArr(elem, depth) =>
         val shape = data.arrayShape

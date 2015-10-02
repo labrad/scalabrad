@@ -113,7 +113,9 @@ trait Data {
 
     case TTime => getTime.toDateTime.withZone(DateTimeZone.UTC).toString
 
-    case TStr => Translate.bytesToString(getBytes)
+    case TStr => Translate.toStringLiteral(getString)
+
+    case TBytes => Translate.toBytesLiteral(getBytes)
 
     case TArr(elem, depth) =>
       val shape = arrayShape
@@ -150,7 +152,7 @@ trait Data {
   def isBool = t == TBool
   def isInt = t == TInt
   def isUInt = t == TUInt
-  def isBytes = t == TStr
+  def isBytes = t == TBytes
   def isString = t == TStr
   def isValue = t.isInstanceOf[TValue]
   def isComplex = t.isInstanceOf[TComplex]
@@ -250,9 +252,9 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
       case TNone | TBool | TInt | TUInt | TValue(_) | TComplex(_) | TTime =>
         t.dataWidth
 
-      case TStr =>
-        val strLen = buf.getInt(ofs)
-        4 + strLen
+      case TStr | TBytes =>
+        val len = buf.getInt(ofs)
+        4 + len
 
       case TArr(elem, depth) =>
         val size = _arrayShape(depth).product
@@ -311,10 +313,10 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
           os.writeLong(buf.getLong(ofs))
           os.writeLong(buf.getLong(ofs + 8))
 
-        case TStr =>
-          val strLen = buf.getInt(ofs)
-          os.writeInt(strLen)
-          os.writeBytes(buf, ofs + 4, strLen)
+        case TStr | TBytes =>
+          val len = buf.getInt(ofs)
+          os.writeInt(len)
+          os.writeBytes(buf, ofs + 4, len)
 
         case TArr(elem, depth) =>
           // write arr shape and compute total number of elements in the list
@@ -545,8 +547,17 @@ extends Data with Serializable with Cloneable {
   def getBool: Boolean = { require(isBool); buf.getBool(ofs) }
   def getInt: Int = { require(isInt); buf.getInt(ofs) }
   def getUInt: Long = { require(isUInt); buf.getUInt(ofs) }
-  def getBytes: Array[Byte] = { require(isBytes); val len = buf.getInt(ofs); buf.slice(ofs + 4, ofs + 4 + len) }
-  def getString: String = new String(getBytes, UTF_8)
+  def getBytes: Array[Byte] = {
+    // TODO: when bytes/string separation is complete, require isBytes only
+    require(isBytes || isString)
+    val len = buf.getInt(ofs)
+    buf.slice(ofs + 4, ofs + 4 + len)
+  }
+  def getString: String = {
+    require(isString)
+    val len = buf.getInt(ofs)
+    new String(buf.slice(ofs + 4, ofs + 4 + len), UTF_8)
+  }
   def getValue: Double = { require(isValue); buf.getDouble(ofs) }
   def getReal: Double = { require(isComplex); buf.getDouble(ofs) }
   def getImag: Double = { require(isComplex); buf.getDouble(ofs + 8) }
@@ -580,11 +591,15 @@ extends Data with Serializable with Cloneable {
   }
 
   def setBytes(bytes: Array[Byte]): Unit = {
-    require(isString)
+    // TODO: when bytes/string separation is complete, require isBytes only
+    require(isBytes || isString)
     sys.error("unable to set bytes on flat data")
   }
 
-  def setString(s: String): Unit = setBytes(s.getBytes(UTF_8))
+  def setString(s: String): Unit = {
+    require(isString)
+    sys.error("unable to set string on flat data")
+  }
 
   def setValue(d: Double): Unit = {
     require(isValue)
@@ -618,7 +633,7 @@ object FlatData {
         t.dataWidth
       } else {
         t match {
-          case TStr =>
+          case TStr | TBytes =>
             val len = in.getInt(ofs)
             4 + len
 
@@ -701,7 +716,7 @@ extends Data with Serializable with Cloneable {
           os.writeLong(buf.getLong(ofs))
           os.writeLong(buf.getLong(ofs + 8))
 
-        case TStr =>
+        case TStr | TBytes =>
           val strBuf = heap(buf.getInt(ofs))
           os.writeInt(strBuf.length)
           os.writeBytes(strBuf)
@@ -853,8 +868,15 @@ extends Data with Serializable with Cloneable {
   def getBool: Boolean = { require(isBool); buf.getBool(ofs) }
   def getInt: Int = { require(isInt); buf.getInt(ofs) }
   def getUInt: Long = { require(isUInt); buf.getUInt(ofs) }
-  def getBytes: Array[Byte] = { require(isBytes); heap(buf.getInt(ofs)) }
-  def getString: String = new String(getBytes, UTF_8)
+  def getBytes: Array[Byte] = {
+    // TODO: when bytes/string separation is complete, require isBytes only
+    require(isBytes || isString)
+    heap(buf.getInt(ofs))
+  }
+  def getString: String = {
+    require(isString)
+    new String(heap(buf.getInt(ofs)), UTF_8)
+  }
   def getValue: Double = { require(isValue); buf.getDouble(ofs) }
   def getReal: Double = { require(isComplex); buf.getDouble(ofs) }
   def getImag: Double = { require(isComplex); buf.getDouble(ofs + 8) }
@@ -888,7 +910,8 @@ extends Data with Serializable with Cloneable {
   }
 
   def setBytes(bytes: Array[Byte]): Unit = {
-    require(isString)
+    // TODO: when bytes/string separation is complete, require isBytes only
+    require(isBytes || isString)
     var heapIndex = buf.getInt(ofs)
     if (heapIndex == -1) {
       // not yet set in the heap
@@ -900,7 +923,19 @@ extends Data with Serializable with Cloneable {
     }
   }
 
-  def setString(s: String): Unit = setBytes(s.getBytes(UTF_8))
+  def setString(s: String): Unit = {
+    require(isString)
+    val bytes = s.getBytes(UTF_8)
+    var heapIndex = buf.getInt(ofs)
+    if (heapIndex == -1) {
+      // not yet set in the heap
+      buf.setInt(ofs, heap.size)
+      heap += bytes
+    } else {
+      // already set in the heap, reuse old spot
+      heap(heapIndex) = bytes
+    }
+  }
 
   def setValue(d: Double): Unit = {
     require(isValue)
@@ -944,7 +979,7 @@ object TreeData {
         in.readBytes(buf, ofs, t.dataWidth)
       else
         t match {
-          case TStr =>
+          case TStr | TBytes =>
             val len = in.readInt
             val strBuf = Array.ofDim[Byte](len)
             buf.setInt(ofs, heap.size)
@@ -1004,7 +1039,8 @@ object Data {
       case TValue(_) => dst.setValue(src.getValue)
       case TComplex(_) => dst.setComplex(src.getReal, src.getImag)
       case TTime => dst.setTime(src.getTime)
-      case TStr => dst.setBytes(src.getBytes)
+      case TStr => dst.setString(src.getString)
+      case TBytes => dst.setBytes(src.getBytes)
 
       case TArr(elem, depth) =>
         val shape = src.arrayShape
@@ -1047,7 +1083,8 @@ object Data {
         case _: TValue => a.getValue == b.getValue
         case _: TComplex => a.getReal == b.getReal && a.getImag == b.getImag
         case TTime => a.getSeconds == b.getSeconds && a.getFraction == b.getFraction
-        case TStr => a.getBytes.toSeq == b.getBytes.toSeq
+        case TStr => a.getString == b.getString
+        case TBytes => a.getBytes.toSeq == b.getBytes.toSeq
         case _: TArr =>
           a.arrayShape.toSeq == b.arrayShape.toSeq &&
             (a.flatIterator zip b.flatIterator).forall { case (a, b) => a == b }
@@ -1275,9 +1312,9 @@ object Str {
 }
 
 object Bytes {
-  def apply(s: Array[Byte]): Data = { val d = Data(TStr); d.setBytes(s); d }
+  def apply(s: Array[Byte]): Data = { val d = Data(TBytes); d.setBytes(s); d }
   def unapply(data: Data): Option[Array[Byte]] =
-    if (data.isBytes) Some(data.getBytes)
+    if (data.isBytes || data.isString) Some(data.getBytes)
     else None
 }
 
@@ -1354,7 +1391,7 @@ object Parsers {
   val data: Parser[Data] = P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | string | singleQuotedString | cluster )
+    P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
 
   val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
@@ -1369,11 +1406,15 @@ object Parsers {
   val uint: Parser[Data] =
     P( Re("""\d+""").! ).map { s => UInt(s.toLong) } // w8, w16, w64
 
-  val string: Parser[Data] =
-    P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").! ).map { s => Bytes(Translate.stringToBytes(s, quote = '"')) }
+  val bytes: Parser[Data] =
+    P( Re("b\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '"')) }
+     | Re("b'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\x[a-fA-F0-9]{2})*""" + "'").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '\'')) }
+     )
 
-  val singleQuotedString: Parser[Data] =
-    P( Re("'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\x[a-fA-F0-9]{2})*""" + "'").! ).map { s => Bytes(Translate.stringToBytes(s, quote = '\'')) }
+  val string: Parser[Data] =
+    P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\u[a-fA-F0-9]{4})*""" + "\"").!.map { s => Str(Translate.parseStringLiteral(s, quote = '"')) }
+     | Re("'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\u[a-fA-F0-9]{4})*""" + "'").!.map { s => Str(Translate.parseStringLiteral(s, quote = '\'')) }
+     )
 
   val time: Parser[Data] =
     P( Re("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""").! ).map { s => Time(new DateTime(s).toDate) }
@@ -1457,21 +1498,67 @@ object Translate {
     for (c <- ASCII_CHARS) translate(c.toByte, c.toString)
 
     // escape characters are preceded by a backslash
-    translate('\\', """\\""")
-    translate('\n', """\n""")
-    translate('\t', """\t""")
     translate('"',  """\"""")
+    translate('\\', """\\""")
+    translate('\b', """\b""")
+    translate('\f', """\f""")
+    translate('\n', """\n""")
+    translate('\r', """\r""")
+    translate('\t', """\t""")
 
     lut
   }
 
-  def bytesToString(bytes: Array[Byte]): String =
-    '"' + bytes.flatMap(b => translation((b + 256) % 256)).mkString + '"'
+  def toBytesLiteral(bytes: Array[Byte], quote: Char = '"'): String = {
+    val buf = new StringBuilder
+    buf += 'b'
+    buf += quote
+    for (b <- bytes) {
+      b.toChar match {
+        case `quote` => buf ++= s"\\$quote"
+        case '\\' => buf ++= """\\"""
+        case '\n' => buf ++= """\n"""
+        case '\r' => buf ++= """\r"""
+        case '\t' => buf ++= """\t"""
+        case c if isASCIIPrintable(c) => buf += c
+        case c => buf ++= "\\x%02X".format(b) // byte escape
+      }
+    }
+    buf += quote
+    buf.toString
+  }
 
-  def stringToBytes(s: String, quote: Char = '"'): Array[Byte] = {
-    require(s.head == quote)
+  def toStringLiteral(str: String, quote: Char = '"'): String = {
+    val buf = new StringBuilder
+    buf += quote
+    for (c <- str) {
+      c match {
+        case `quote` => buf ++= s"\\$quote"
+        case '\\' => buf ++= """\\"""
+        case '\n' => buf ++= """\n"""
+        case '\r' => buf ++= """\r"""
+        case '\t' => buf ++= """\t"""
+        case c if isUnicodePrintable(c) => buf += c
+        case c => buf ++= "\\u%04X".format(c.toInt) // generic unicode escape
+      }
+    }
+    buf += quote
+    buf.toString
+  }
+
+  def isASCIIPrintable(c: Char): Boolean = {
+    c >= 32 && c < 127
+  }
+
+  def isUnicodePrintable(c: Char): Boolean = {
+    c >= 32 && c < 127  // TODO: include more printable unicode chars from BMP
+  }
+
+  def parseBytesLiteral(s: String, quote: Char = '"'): Array[Byte] = {
+    require(s(0) == 'b')
+    require(s(1) == quote)
     require(s.last == quote)
-    val trimmed = s.substring(1, s.length-1)
+    val trimmed = s.substring(2, s.length-1)
     var pos = 0
     val buf = Array.newBuilder[Byte]
     while (pos < trimmed.length) {
@@ -1501,6 +1588,41 @@ object Translate {
     }
     buf.result
   }
+
+  def parseStringLiteral(s: String, quote: Char = '"'): String = {
+    require(s.head == quote)
+    require(s.last == quote)
+    val trimmed = s.substring(1, s.length-1)
+    var pos = 0
+    val buf = new StringBuilder
+    while (pos < trimmed.length) {
+      buf += (trimmed(pos) match {
+        case '\\' =>
+          pos += 1
+          trimmed(pos) match {
+            case 'u' =>
+              pos += 1
+              val str = trimmed.substring(pos, pos+4)
+              val char = java.lang.Integer.parseInt(str, 16).toChar
+              pos += 3
+              char
+            case 'b' => 8
+            case 't' => 9
+            case 'n' => 10
+            case 'v' => 11 // NOTE: this escape is not in standard java
+            case 'f' => 12
+            case 'r' => 13
+            case '\\' => 92
+            case c => c.toChar
+          }
+        case c =>
+          c.toChar
+      })
+      pos += 1
+    }
+    buf.toString
+  }
+
 }
 
 

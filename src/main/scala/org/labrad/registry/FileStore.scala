@@ -171,7 +171,7 @@ class BinaryFileStore(rootDir: File) extends FileStore(rootDir) {
   }
 
   override def decodeData(bytes: Array[Byte]): Data = {
-    val (typ, data) = Data.fromBytes(Type("ss"), bytes).get[(String, Array[Byte])]
+    val (typ, data) = Data.fromBytes(Type("sy"), bytes).get[(String, Array[Byte])]
     Data.fromBytes(Type(typ), data)
   }
 }

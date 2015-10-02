@@ -77,7 +77,7 @@ class Primitives extends Testable("simple primitive input/output types") {
     (4L, "d", "v", "v"),
     (5L, "e", "t", "t"),
     (6L, "f", "s", "s"),
-    (7L, "g", "s", "s")
+    (7L, "g", "y", "y")
   )
 }
 
@@ -479,7 +479,7 @@ class InferenceTest extends FunSuite with Logging {
   testInference[Boolean](Pattern("b"), true, false)
   testInference[Int](Pattern("i"), 0, 1, Int.MaxValue, Int.MinValue)
   testInference[String](Pattern("s"), "", "a", "\n\t")
-  testInference[Seq[Byte]](Pattern("s"), Seq.tabulate[Byte](256)(_.toByte))
+  testInference[Seq[Byte]](Pattern("y"), Seq.tabulate[Byte](256)(_.toByte))
   testInference[Seq[Data]](Pattern("*?"), Seq(Str("abc")))
   testInference[Seq[String]](Pattern("*s"), Seq("abc"))
   testInference[Seq[Int]](Pattern("*i"), Seq(-2, -1, 0, 1, 2))
@@ -489,7 +489,7 @@ class InferenceTest extends FunSuite with Logging {
   testInference[(Int, String)](Pattern("is"), (1, ""), (-1, "a"))
   testInference[(Int, String, Option[Boolean])](Pattern("isb"), (1, "", None), (-1, "a", Some(true)))
 
-  testInferenceArray[Array[Byte]](Pattern("s"), Array.tabulate[Byte](256)(_.toByte))
+  testInferenceArray[Array[Byte]](Pattern("y"), Array.tabulate[Byte](256)(_.toByte))
   testInferenceArray[Array[Data]](Pattern("*?"), Array(Str("abc")), Array())
   testInferenceArray[Array[String]](Pattern("*s"), Array("abc"), Array())
 }

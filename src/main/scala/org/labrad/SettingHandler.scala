@@ -263,7 +263,7 @@ object SettingHandler extends Logging {
     case tpe if tpe =:= typeOf[String]  => Pattern("s")
     case tpe if tpe =:= typeOf[Data]    => Pattern("?")
 
-    case TypeRef(_, Sym("Array") | Sym("Seq"), Seq(t)) => if (t =:= typeOf[Byte]) Pattern("s") else PArr(patternFor(t))
+    case TypeRef(_, Sym("Array") | Sym("Seq"), Seq(t)) => if (t =:= typeOf[Byte]) Pattern("y") else PArr(patternFor(t))
 
     case TypeRef(_, Sym("Option"), Seq(t)) => patternFor(t)
 

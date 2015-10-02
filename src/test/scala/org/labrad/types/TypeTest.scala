@@ -11,8 +11,8 @@ class TypeTest extends FunSuite {
       "b" -> TBool,
       "i" -> TInt,
       "w" -> TUInt,
-      "is" -> PCluster(TInt, TStr),
-      "*(is)" -> PArr(PCluster(TInt, TStr)),
+      "isy" -> PCluster(TInt, TStr, TBytes),
+      "*(isy)" -> PArr(PCluster(TInt, TStr, TBytes)),
       "v" -> PValue(),
       "v[]" -> PValue(""),
       "v[m/s]" -> PValue("m/s"),
@@ -39,8 +39,8 @@ class TypeTest extends FunSuite {
       "b" -> TBool,
       "i" -> TInt,
       "w" -> TUInt,
-      "is" -> TCluster(TInt, TStr),
-      "*(is)" -> TArr(TCluster(TInt, TStr)),
+      "isy" -> TCluster(TInt, TStr, TBytes),
+      "*(isy)" -> TArr(TCluster(TInt, TStr, TBytes)),
       "v" -> TValue(),
       "v[]" -> TValue(""),
       "v[m/s]" -> TValue("m/s"),
@@ -67,8 +67,8 @@ class TypeTest extends FunSuite {
 
   test("cluster elements can be separated by commas") {
     val tests = Seq(
-      "s,s" -> TCluster(TStr, TStr),
-      "(s,s)" -> TCluster(TStr, TStr)
+      "s,y" -> TCluster(TStr, TBytes),
+      "(s,y)" -> TCluster(TStr, TBytes)
     )
     for ((s, t) <- tests)
       assert(Type(s) == t)
@@ -90,8 +90,8 @@ class TypeTest extends FunSuite {
   test("types can have embedded comments") {
     val tests = Seq(
       // comments
-      "ss{embedded comment}is" -> TCluster(TStr, TStr, TInt, TStr),
-      "{embedded comment}ssis" -> TCluster(TStr, TStr, TInt, TStr)
+      "ss{embedded comment}iy" -> TCluster(TStr, TStr, TInt, TBytes),
+      "{embedded comment}ssiy" -> TCluster(TStr, TStr, TInt, TBytes)
     )
 
     for ((s, t) <- tests)
@@ -101,8 +101,8 @@ class TypeTest extends FunSuite {
   test("embedded comments can contain a colon") {
     val tests = Seq(
       // comments
-      "ss{embedded comment: this is a test}is" -> TCluster(TStr, TStr, TInt, TStr),
-      "{embedded comment: this, too}ssis" -> TCluster(TStr, TStr, TInt, TStr)
+      "ss{embedded comment: this is a test}iy" -> TCluster(TStr, TStr, TInt, TBytes),
+      "{embedded comment: this, too}ssiy" -> TCluster(TStr, TStr, TInt, TBytes)
     )
 
     for ((s, t) <- tests)

@@ -142,7 +142,11 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   private def handleLogin(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
     case Packet(req, 1, _, Seq()) if req > 0 =>
       handle = handleChallengeResponse
-      Bytes(challenge)
+      // For compatibility, send 's' here, even though challenge is binary.
+      //Bytes(challenge)
+      val d = TreeData("s")
+      d.setBytes(challenge)
+      d
 
     case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
       Str("PONG")

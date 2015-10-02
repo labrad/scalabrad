@@ -49,7 +49,8 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
       case TInt => int(data.getInt)
       case TUInt => uint(data.getUInt)
       case TTime => time(data.getSeconds, data.getFraction)
-      case TStr => bytes(data.getBytes)
+      case TStr => string(data.getString)
+      case TBytes => bytes(data.getBytes)
       case TValue(unitOpt) => value(data.getValue, unitOpt.getOrElse(""))
       case TComplex(unitOpt) => complex(data.getReal, data.getImag, unitOpt.getOrElse(""))
       case _: TArr =>
@@ -286,9 +287,9 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
       ret(TUInt)
     }
     override def bytes(x: Array[Byte]): State = {
-      check(TStr)
+      check(TBytes)
       buf.writeLen { buf.writeBytes(x) }
-      ret(TStr)
+      ret(TBytes)
     }
     override def string(s: String): State = {
       check(TStr)

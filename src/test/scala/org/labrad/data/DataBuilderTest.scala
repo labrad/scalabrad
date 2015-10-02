@@ -27,11 +27,21 @@ class DataBuilderTest extends FunSuite {
   testBothEndian("string") { implicit bo: ByteOrder =>
     val s = "This is a test."
     val d1 = DataBuilder().string(s).result()
-    val d2 = DataBuilder().string(s).result()
+    val d2 = DataBuilder("s").string(s).result()
     assert(d1.t == TStr)
     assert(d2.t == TStr)
     assert(d1.getString == s)
     assert(d2.getString == s)
+  }
+
+  testBothEndian("bytes") { implicit bo: ByteOrder =>
+    val bs = Array[Byte](0, 1, 2, 3, 4, 5, 127, -128, -1)
+    val d1 = DataBuilder().bytes(bs).result()
+    val d2 = DataBuilder("y").bytes(bs).result()
+    assert(d1.t == TBytes)
+    assert(d2.t == TBytes)
+    assert(d1.getBytes.toSeq == bs.toSeq)
+    assert(d2.getBytes.toSeq == bs.toSeq)
   }
 
   testBothEndian("date") { implicit bo: ByteOrder =>
