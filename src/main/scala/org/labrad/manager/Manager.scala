@@ -11,6 +11,7 @@ import java.security.{MessageDigest, SecureRandom}
 import java.nio.file.Files
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
+import org.labrad.TlsMode
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
@@ -170,8 +171,14 @@ object Manager extends Logging {
             case Array(u, pw) => pw.toCharArray
           }
         }
-        log.info(s"remote registry location: $remoteHost:$remotePort")
-        Some(RemoteStore(remoteHost, remotePort, remotePassword))
+        val TlsModeParam = "tls=(.+)".r
+        val tls = config.registryUri.getQuery match {
+          case null => TlsMode.STARTTLS
+          case TlsModeParam(mode) => TlsMode.fromString(mode)
+          case query => sys.error(s"invalid params for registry config: $query")
+        }
+        log.info(s"remote registry location: $remoteHost:$remotePort, tls=$tls")
+        Some(RemoteStore(remoteHost, remotePort, remotePassword, tls))
 
       case scheme =>
         sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")
@@ -339,7 +346,7 @@ object ManagerConfig {
       names = List("registry"),
       valueName = "uri",
       description = "URI giving the registry storage location. " +
-        "Use labrad://[<pw>@]<host>[:<port>] to connect to a running manager, " +
+        "Use labrad://[<pw>@]<host>[:<port>][?tls=<mode>] to connect to a running manager, " +
         "or file://<path>[?format=<format>] to load data from a local file. " +
         "If the file path is a directory, we assume it is in the binary " +
         "one file per key format; if it points to a file, we assume it " +

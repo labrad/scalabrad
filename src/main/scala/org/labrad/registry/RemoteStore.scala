@@ -1,14 +1,14 @@
 package org.labrad.registry
 
-import org.labrad.{Client, RegistryServerPacket, RegistryServerProxy}
+import org.labrad.{Client, RegistryServerPacket, RegistryServerProxy, TlsMode}
 import org.labrad.data.Data
 import org.labrad.types.Type
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 object RemoteStore {
-  def apply(host: String, port: Int, password: Array[Char]): RemoteStore = {
-    new RemoteStore(host, port, password)
+  def apply(host: String, port: Int, password: Array[Char], tls: TlsMode): RemoteStore = {
+    new RemoteStore(host, port, password, tls)
   }
 }
 
@@ -18,7 +18,7 @@ object RemoteStore {
  * to this backend will not be notified of changes made by other
  * clients that connect to the same remote registry.
  */
-class RemoteStore(host: String, port: Int, password: Array[Char]) extends RegistryStore {
+class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) extends RegistryStore {
 
   type Dir = Seq[String]
 
@@ -34,7 +34,7 @@ class RemoteStore(host: String, port: Int, password: Array[Char]) extends Regist
   private def connect(): Unit = {
     lock.synchronized {
       if (reg == null) {
-        val cxn = new Client(name = "Registry Proxy", host = host, port = port, password = password)
+        val cxn = new Client(name = "Registry Proxy", host = host, port = port, password = password, tls=tls)
         cxn.connect()
         cxn.addConnectionListener { case false =>
           lock.synchronized {
