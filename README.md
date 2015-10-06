@@ -7,7 +7,7 @@ A scala interface to labrad.
 
 ## Contributing
 
-For instructions on how to contribute to scalabrad, see [contributing.md](https://github.com/labrad/scalabrad/blob/master/contributing.md).
+For instructions on how to contribute to scalabrad, see [contributing.md](https://github.com/labrad/labrad/blob/master/contributing.md).
 
 
 ## Code Style
