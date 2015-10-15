@@ -194,6 +194,30 @@ object Pattern {
       case ps => PChoice(ps: _*)
     }
   }
+
+  /**
+   * Determine whether a given pattern accepts another pattern.
+   *
+   * This handles correctly the case where either pattern is a PChoice, which
+   * the accepts methods on individual Pattern subclasses do not.
+   * TODO: refactor accepts methods on Pattern subclasses to use this, so they
+   * will work against all patterns, including PChoice.
+   */
+  def accepts(a: Pattern, b: Pattern): Boolean = {
+    (a, b) match {
+      case (PChoice(as @ _*), PChoice(bs @ _*)) =>
+        bs.forall(b => as.exists(a => a.accepts(b)))
+
+      case (PChoice(as @ _*), b) =>
+        as.exists(a => a.accepts(b))
+
+      case (a, PChoice(bs @ _*)) =>
+        bs.forall(b => a.accepts(b))
+
+      case (a, b) =>
+        a.accepts(b)
+    }
+  }
 }
 
 

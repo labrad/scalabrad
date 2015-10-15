@@ -121,9 +121,17 @@ class Eithers extends Testable("translate Either into type alternatives") {
   )
 }
 
-class Options extends Testable("translate Option into type or None") {
+class Options extends Testable("allow trailing Option parameters to be omitted") {
+
+  var lastA: Option[String] = null
+  var lastD: (String, Option[Int], Option[String], Option[Long]) = null
+
+
   @Setting(id=1, name="a", doc="")
-  def a(r: RequestContext, name: Option[String]): Data = Data.NONE
+  def a(r: RequestContext, name: Option[String]): Data = {
+    lastA = name
+    Data.NONE
+  }
 
   @Setting(id=2, name="b", doc="")
   def b(r: RequestContext, name: String, create: Option[Boolean]): Data = Data.NONE
@@ -131,10 +139,21 @@ class Options extends Testable("translate Option into type or None") {
   @Setting(id=3, name="c", doc="")
   def c(r: RequestContext, name: String, create: Option[Either[Long, String]]): Data = Data.NONE
 
+  @Setting(id=4, name="d", doc="")
+  def d(r: RequestContext, name: String, foo: Option[Int], bar: Option[String], baz: Option[Long]): Data = {
+    lastD = (name, foo, bar, baz)
+    Data.NONE
+  }
+
+  @Setting(id=5, name="e", doc="")
+  def e(r: RequestContext, name: String, foo: Option[Int], bar: String, baz: Option[Long]): Data = Data.NONE
+
   val settings = Seq(
     (1L, "a", "s|_", "?"),
-    (2L, "b", "s|s<b|_>", "?"),
-    (3L, "c", "s|s<w|s|_>", "?")
+    (2L, "b", "s|sb", "?"),
+    (3L, "c", "s|s<w|s>", "?"),
+    (4L, "d", "s|si|sis|sisw", "?"),
+    (5L, "e", "sis|sisw", "?")
   )
 }
 
@@ -172,15 +191,22 @@ object Container {
 
     val settings = Seq(
       (1L, "a", "s|_", "?"),
-      (2L, "b", "s|s<b|_>", "?"),
-      (3L, "c", "s|s<w|s|_>", "?")
+      (2L, "b", "s|sb", "?"),
+      (3L, "c", "s|s<w|s>", "?")
     )
   }
 }
 
 class DefaultArgs extends Testable("allow parameters with default values to be omitted") {
+
+  var lastA: (String, String, Long) = null
+  var lastD: (Seq[String], Boolean) = null
+
   @Setting(id=1, name="a", doc="")
-  def a(r: RequestContext, required: String, name: String = "test", value: Long = 5): Data = Data.NONE
+  def a(r: RequestContext, required: String, name: String = "test", value: Long = 5): Data = {
+    lastA = (required, name, value)
+    Data.NONE
+  }
 
   @Setting(id=2, name="b", doc="")
   def b(r: RequestContext, required: String, name: String = "test", value: Long): Data = Data.NONE
@@ -189,13 +215,16 @@ class DefaultArgs extends Testable("allow parameters with default values to be o
   def c(r: RequestContext, name: Option[String] = None): Data = Data.NONE
 
   @Setting(id=4, name="d", doc="")
-  def d(path: Seq[String] = Nil, create: Boolean = false): Seq[String] = path
+  def d(path: Seq[String] = Nil, create: Boolean = false): Seq[String] = {
+    lastD = (path, create)
+    path
+  }
 
   val settings = Seq(
-    (1L, "a", "s | s<s|_> | s<s|_><w|_>", "?"),
-    (2L, "b", "s<s|_>w", "?"),
+    (1L, "a", "s | ss | ssw", "?"),
+    (2L, "b", "ssw", "?"),
     (3L, "c", "s | _", "?"),
-    (4L, "d", "_ | *s | <*s|_><b|_>", "*s")
+    (4L, "d", "_ | *s | *sb", "*s")
   )
 }
 
@@ -203,8 +232,20 @@ class AcceptAnnotations extends Testable("allow parameters to be annotated with 
   @Setting(id=1, name="a", doc="")
   def a(r: RequestContext, @Accept("v[s]") timeout: Double): Data = Data.NONE
 
+  @Setting(id=2, name="b", doc="")
+  def b(r: RequestContext, @Accept("s|ss") id: Data): Data = Data.NONE
+
+  @Setting(id=3, name="c", doc="")
+  def c(r: RequestContext, @Accept("s|ss") id: Data, @Accept("s|ss") id2: Data): Data = Data.NONE
+
+  @Setting(id=4, name="d", doc="")
+  def d(r: RequestContext, @Accept("*(ss)") ids: Seq[Data]): Data = Data.NONE
+
   val settings = Seq(
-    (1L, "a", "v[s]", "?")
+    (1L, "a", "v[s]", "?"),
+    (2L, "b", "s|ss", "?"),
+    (3L, "c", "<s|(ss)><s|(ss)>", "?"),
+    (4L, "d", "*(ss)", "?")
   )
 }
 
@@ -213,8 +254,23 @@ class ReturnAnnotations extends Testable("allow return types to be annotated") {
   @Return("v[s]")
   def a(r: RequestContext, data: Data): Double = 0
 
+  @Setting(id=2, name="b", doc="")
+  @Return("(ii)")
+  def b(r: RequestContext, data: Data): Data = Data.NONE
+
+  @Setting(id=3, name="c", doc="")
+  @Return("*(ii)")
+  def c(r: RequestContext, data: Data): Array[Data] = Array()
+
+  @Setting(id=4, name="d", doc="")
+  @Return("*(siv[GHz])")
+  def d(r: RequestContext, data: Data): Array[(String, Int, Double)] = Array()
+
   val settings = Seq(
-    (1L, "a", "?", "v[s]")
+    (1L, "a", "?", "v[s]"),
+    (2L, "b", "?", "(ii)"),
+    (3L, "c", "?", "*(ii)"),
+    (4L, "d", "?", "*(siv[GHz])")
   )
 }
 
@@ -320,6 +376,56 @@ class ReflectTests extends FunSuite with Logging {
     val result = getServers(reqCtx).asInstanceOf[Seq[(Long, String)]]
     assert(result == Seq((1L, "Manager"), (2L, "Registry")))
   }
+
+  test("handler can call setting with default args") {
+    val inst = new DefaultArgs
+    val (_, bind) = Reflect.makeHandler[DefaultArgs]
+    val handler = bind(inst)
+
+    handler(RequestContext(1, Context(1, 1), 1, Cluster(Str("foo"), Str("bar"), UInt(0))))
+    assert(inst.lastA == ("foo", "bar", 0L))
+
+    handler(RequestContext(1, Context(1, 1), 1, Cluster(Str("foo"), Str("bar"))))
+    assert(inst.lastA == ("foo", "bar", 5L))
+
+    handler(RequestContext(1, Context(1, 1), 1, Str("foo")))
+    assert(inst.lastA == ("foo", "test", 5L))
+
+
+    handler(RequestContext(1, Context(1, 1), 4, Cluster(Arr(Str("foo")), Bool(true))))
+    assert(inst.lastD == (Seq("foo"), true))
+
+    handler(RequestContext(1, Context(1, 1), 4, Arr(Str("foo"))))
+    assert(inst.lastD == (Seq("foo"), false))
+
+    handler(RequestContext(1, Context(1, 1), 4, Data.NONE))
+    assert(inst.lastD == (Seq(), false))
+  }
+
+  test("handler can call setting with Option args") {
+    val inst = new Options
+    val (_, bind) = Reflect.makeHandler[Options]
+    val handler = bind(inst)
+
+    handler(RequestContext(1, Context(1, 1), 1, Str("foo")))
+    assert(inst.lastA == Some("foo"))
+
+    handler(RequestContext(1, Context(1, 1), 1, Data.NONE))
+    assert(inst.lastA == None)
+
+
+    handler(RequestContext(1, Context(1, 1), 4, Cluster(Str("a"), Integer(-1), Str("b"), UInt(2))))
+    assert(inst.lastD == ("a", Some(-1), Some("b"), Some(2L)))
+
+    handler(RequestContext(1, Context(1, 1), 4, Cluster(Str("a"), Integer(-1), Str("b"))))
+    assert(inst.lastD == ("a", Some(-1), Some("b"), None))
+
+    handler(RequestContext(1, Context(1, 1), 4, Cluster(Str("a"), Integer(-1))))
+    assert(inst.lastD == ("a", Some(-1), None, None))
+
+    handler(RequestContext(1, Context(1, 1), 4, Str("a")))
+    assert(inst.lastD == ("a", None, None, None))
+  }
 }
 
 class Adder {
@@ -366,11 +472,11 @@ class TypeTests extends FunSuite with Logging {
   testInference[Seq[Data]](Pattern("*?"), Seq(Str("abc")))
   testInference[Seq[String]](Pattern("*s"), Seq("abc"))
   testInference[Seq[Int]](Pattern("*i"), Seq(-2, -1, 0, 1, 2))
-  testInference[Option[Boolean]](Pattern("b|_"), Some(true), Some(false), None)
+  testInference[Option[Boolean]](Pattern("b"), Some(true), Some(false), None)
   testInference[Either[Int, String]](Pattern("i|s"), Left(-1), Right("test"))
   testInference[Tuple1[Int]](Pattern("(i)"), Tuple1(1))
   testInference[(Int, String)](Pattern("is"), (1, ""), (-1, "a"))
-  testInference[(Int, String, Option[Boolean])](Pattern("is<b|_>"), (1, "", None), (-1, "a", Some(true)))
+  testInference[(Int, String, Option[Boolean])](Pattern("isb"), (1, "", None), (-1, "a", Some(true)))
 
   testInferenceArray[Array[Byte]](Pattern("s"), Array.tabulate[Byte](256)(_.toByte))
   testInferenceArray[Array[Data]](Pattern("*?"), Array(Str("abc")), Array())

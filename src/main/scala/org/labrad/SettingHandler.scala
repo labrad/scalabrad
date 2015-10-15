@@ -75,15 +75,20 @@ object SettingHandler extends Logging {
     val defaultPatterns = for ((p, defaultOpt) <- patterns zip defaults) yield
       if (defaultOpt.isDefined) Pattern.reduce(p, TNone) else p
 
-    // create patterns for combined arguments, including with trailing optional args dropped
-    // each pattern is combined in a tuple with the number of function arguments included in
-    // the pattern and the number of function arguments omitted from the pattern
-    val acceptPats = defaultPatterns match {
-      case Seq()  => Seq((TNone, 0, 0))
-      case Seq(p) => Seq((p, 1, 0))
-      case ps     =>
+    // Create patterns for combined arguments, including with trailing optional
+    // args dropped. Each pattern is combined in a tuple with the number of
+    // function arguments included in the pattern and the number of function
+    // arguments omitted from the pattern.
+    val acceptPats = patterns match {
+      case Seq() => Seq((TNone, 0, 0))
+      case ps    =>
+        // trailing parameters are omittable if they have a default or take Option
+        val omittable = (defaults zip unpackTypes).reverse.takeWhile {
+          case (defaultOpt, t) =>
+            defaultOpt.isDefined || isOptionType(t.typeSignature)
+        }.length
+
         // create additional patterns with trailing optional arguments omitted
-        val omittable = defaultPatterns.reverse.takeWhile(_ accepts TNone).length
         val patterns = for (omitted <- omittable to 0 by -1) yield {
           val pattern = ps.dropRight(omitted) match {
             case Seq()  => TNone
@@ -92,6 +97,7 @@ object SettingHandler extends Logging {
           }
           (pattern, ps.length - omitted, omitted)
         }
+
         // ensure that patterns with omitted arguments are unambiguous
         // ambiguity can occur if the first argument accepts a cluster
         // that matches another pattern with multiple arguments
@@ -100,7 +106,9 @@ object SettingHandler extends Logging {
           (pn, n, _) <- patterns
           if n > 1
           p <- pn.expand
-        } require(!p1.accepts(p), s"ambiguous patterns: $p accepted with either 1 or $n arguments")
+        } require(!p1.accepts(p),
+              s"ambiguous patterns: $p accepted with either 1 or $n arguments")
+
         patterns
     }
     val acceptPat = Pattern.reduce(acceptPats.map(_._1): _*)
@@ -154,20 +162,48 @@ object SettingHandler extends Logging {
 
   /** infer the pattern and create an unpacker for a method parameter */
   def inferParamType(tpe: Type, annots: Seq[Annotation]): (Pattern, Data => Any) = {
-    val annotated = for {
+    val annotatedPatternOpt = for {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Accept])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    (patternFor(tpe.dealias, annotated), unpacker(tpe.dealias, annotated))
+    val typePattern = patternFor(tpe.dealias, annotatedPatternOpt)
+
+    // if we have an annotated type, make sure that it is more specific that the
+    // type inferred from the scala type signature
+    val pattern = annotatedPatternOpt match {
+      case Some(annotatedPattern) =>
+        require(Pattern.accepts(typePattern, annotatedPattern),
+            s"inferred type $typePattern is not compatible with annotated type $annotatedPattern")
+        annotatedPattern
+
+      case None =>
+        typePattern
+    }
+
+    (pattern, unpacker(tpe.dealias))
   }
 
   /** infer the pattern and create a repacker for a method return type */
   def inferReturnType(tpe: Type, annots: Seq[Annotation]): (Pattern, Any => Data) = {
-    val annotated = for {
+    val annotatedPatternOpt = for {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Return])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    (patternFor(tpe.dealias, annotated), packer(tpe.dealias, annotated))
+    val typePattern = patternFor(tpe.dealias, annotatedPatternOpt)
+
+    // if we have an annotated type, make sure that it is more specific that the
+    // type inferred from the scala type signature
+    val pattern = annotatedPatternOpt match {
+      case Some(annotatedPattern) =>
+        require(Pattern.accepts(typePattern, annotatedPattern),
+            s"inferred type $typePattern is not compatible with annotated type $annotatedPattern")
+        annotatedPattern
+
+      case None =>
+        typePattern
+    }
+
+    (pattern, packer(tpe.dealias, annotatedPatternOpt))
   }
 
   implicit class RichAnnotation(a: Annotation) {
@@ -176,6 +212,16 @@ object SettingHandler extends Logging {
       a.tree.children.tail.collectFirst {
         case AssignOrNamedArg(Ident(TermName(`name`)), Literal(c)) => c
       }
+    }
+  }
+
+  /**
+   * Determine whether or not the given type is an Option type.
+   */
+  def isOptionType(tpe: Type): Boolean = {
+    tpe match {
+      case TypeRef(_, Sym("Option"), Seq(t)) => true
+      case _ => false
     }
   }
 
@@ -219,7 +265,7 @@ object SettingHandler extends Logging {
 
     case TypeRef(_, Sym("Array") | Sym("Seq"), Seq(t)) => if (t =:= typeOf[Byte]) Pattern("s") else PArr(patternFor(t))
 
-    case TypeRef(_, Sym("Option"), Seq(t)) => Pattern.reduce(PChoice(patternFor(t), Pattern("_")))
+    case TypeRef(_, Sym("Option"), Seq(t)) => patternFor(t)
 
     case TypeRef(_, Sym("Either"), Seq(aL, aR)) => PChoice(patternFor(aL), patternFor(aR))
 
@@ -237,7 +283,7 @@ object SettingHandler extends Logging {
 
   def unpacker[T: TypeTag]: Data => T = unpacker(typeOf[T]).asInstanceOf[Data => T]
 
-  def unpacker(tpe: Type, pat: Option[Pattern] = None): Data => Any = tpe match {
+  def unpacker(tpe: Type): Data => Any = tpe match {
     case tpe if tpe =:= typeOf[Unit]    => (d: Data) => ()
     case tpe if tpe =:= typeOf[Boolean] => (d: Data) => d.getBool
     case tpe if tpe =:= typeOf[Int]     => (d: Data) => d.getInt

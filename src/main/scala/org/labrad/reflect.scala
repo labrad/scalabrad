@@ -20,19 +20,24 @@ object Reflect {
       annots = methods.flatMap(settingAnnotation)
       if annots.length > 0
     } yield {
-      require(annots.length == 1, s"Multiple overloads of '$methodName' have @Setting annotation")
-      val (id, name, doc) = annots(0)
+      try {
+        require(annots.length == 1, s"Multiple overloads of '$methodName' have @Setting annotation")
+        val (id, name, doc) = annots(0)
 
-      val methodsWithDefaults = for (m <- methods) yield {
-        val defaults = allMethods.filter(_.name.decodedName.toString.startsWith(m.name.decodedName.toString + "$default$"))
-        (m, defaults)
+        val methodsWithDefaults = for (m <- methods) yield {
+          val defaults = allMethods.filter(_.name.decodedName.toString.startsWith(m.name.decodedName.toString + "$default$"))
+          (m, defaults)
+        }
+        val (accepts, returns, binder) = SettingHandler.forMethods(methodsWithDefaults)
+        val acceptsInfo = TypeInfo(accepts, accepts.expand.map(_.toString))
+        val returnsInfo = TypeInfo(returns, returns.expand.map(_.toString))
+        val settingInfo = SettingInfo(id, name, doc.stripMargin, acceptsInfo, returnsInfo)
+
+        (settingInfo, binder)
+      } catch {
+        case e: Exception =>
+          throw new Exception(s"error making handler for method $methodName", e)
       }
-      val (accepts, returns, binder) = SettingHandler.forMethods(methodsWithDefaults)
-      val acceptsInfo = TypeInfo(accepts, accepts.expand.map(_.toString))
-      val returnsInfo = TypeInfo(returns, returns.expand.map(_.toString))
-      val settingInfo = SettingInfo(id, name, doc.stripMargin, acceptsInfo, returnsInfo)
-
-      (settingInfo, binder)
     }
 
     val infos = handlers.map { case (info, _) => info }.sortBy(_.id)
