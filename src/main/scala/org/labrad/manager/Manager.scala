@@ -4,7 +4,7 @@ import io.netty.handler.ssl.{SslContext, SslContextBuilder}
 import io.netty.handler.ssl.util.SelfSignedCert
 import io.netty.util.DomainNameMapping
 import java.io.File
-import java.net.URI
+import java.net.{InetAddress, URI}
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.{MessageDigest, SecureRandom}
@@ -194,7 +194,13 @@ object Manager extends Logging {
       config.tlsPort -> TlsPolicy.ON
     )
 
-    val hosts = config.tlsHosts.toSeq.map {
+    // By default, make a self-signed cert for the hostname of this machine.
+    // If the config includes this hostname as well, that will override the
+    // default configuration.
+    val hostname = InetAddress.getLocalHost.getHostName()
+    val hostMap = Map(hostname -> CertConfig.SelfSigned) ++ config.tlsHosts
+
+    val hosts = hostMap.toSeq.map {
       case (host, CertConfig.SelfSigned) =>
         host -> sslContextForHost(host,
                                   certPath = config.tlsCertPath,
