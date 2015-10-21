@@ -13,6 +13,7 @@ import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.TlsMode
 import org.labrad.annotations._
+import org.labrad.crypto.Certs
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.registry._
@@ -221,6 +222,11 @@ object Manager extends Logging {
                                     certPath = config.tlsCertPath,
                                     keyPath = config.tlsKeyPath)
     val tlsHostConfig = TlsHostConfig(default, hosts: _*)
+
+    log.info(s"localhost: sha1=${Certs.fingerprintSHA1(default._1)}")
+    for ((host, (cert, _)) <- hosts.toSeq.sortBy(_._1)) {
+      log.info(s"$host: sha1=${Certs.fingerprintSHA1(cert)}")
+    }
 
     val centralNode = new CentralNode(config.password, storeOpt, listeners, tlsHostConfig)
 
