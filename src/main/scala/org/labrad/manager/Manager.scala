@@ -62,8 +62,9 @@ class CentralNode(
     val name = Registry.NAME
     val id = hub.allocateServerId(name)
     val externalConfig = ServerConfig("", 0, password)
-    val registry = new Registry(id, name, store, hub, tracker, externalConfig)
-    hub.connectServer(id, name, new RegistryActor(registry, hub))
+    val registry = new Registry(id, name, regStore, externalConfig)
+    hub.setServerInfo(ServerInfo(registry.id, registry.name, registry.doc, registry.settings))
+    hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker))
   }
 
   // start listening for incoming network connections
