@@ -18,7 +18,7 @@ import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
 import org.labrad.manager.Manager
-import org.labrad.util.{Counter, LookupProvider}
+import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -43,6 +43,37 @@ object TlsMode {
       case "starttls-force" => STARTTLS_FORCE
       case _ => sys.error(s"Invalid tls mode '$s'. Expected 'on', 'off', or 'starttls'.")
     }
+  }
+}
+
+object Connection {
+  object Defaults {
+    val CertsDirectory = sys.props("user.home") / ".labrad" / "client" / "certs"
+    def certFile(hostname: String) = CertsDirectory / s"${hostname}.cert"
+  }
+
+  /**
+   * Create an SSL context for the given hostname.
+   *
+   * We look for trusted certificate files first in the tlsCerts map, then
+   * by calling the provided certFile function, which by default just looks
+   * in the default location on disk. If no appropriate certificate is found
+   * in either of those locations, the resulting SSL context will instead use
+   * the system-default trust roots to validate the server certificate, which
+   * will only work if the server uses a certificate issued by a well-known
+   * certificate authority.
+   */
+  def makeSslContext(
+    hostname: String,
+    tlsCerts: Map[String, File] = Map.empty,
+    certFile: String => File = Defaults.certFile
+  ): SslContext = {
+    val sslContextBuilder = SslContextBuilder.forClient()
+    val file = tlsCerts.getOrElse(hostname, certFile(hostname))
+    if (file.exists) {
+      sslContextBuilder.trustManager(file)
+    }
+    sslContextBuilder.build()
   }
 }
 
@@ -95,31 +126,6 @@ trait Connection {
 
   private var channel: Channel = _
 
-  private def certsDirectory = sys.props("user.home") / ".labrad" / "client" / "certs"
-  private def certFile(hostname: String): File = certsDirectory / s"${hostname}.cert"
-
-  /**
-   * Create an SSL context for the given hostname.
-   *
-   * We look for trusted certificate files first in the tlsCerts map, then
-   * in the default location on disk. If no appropriate certificate is found
-   * in either of those locations, the resulting SSL context will instead use
-   * the system-default trust roots to validate the server certificate, which
-   * will only work if the server uses a certificate issued by a well-known
-   * certificate authority.
-   */
-  private def makeSslContext(hostname: String): SslContext = {
-    val sslContextBuilder = SslContextBuilder.forClient()
-    val file = tlsCerts.get(hostname) match {
-      case Some(file) => file
-      case None => certFile(hostname)
-    }
-    if (file.exists) {
-      sslContextBuilder.trustManager(file)
-    }
-    sslContextBuilder.build()
-  }
-
   def connect(): Unit = {
     val b = new Bootstrap()
     b.group(workerGroup)
@@ -130,7 +136,8 @@ trait Connection {
         override def initChannel(ch: SocketChannel): Unit = {
           val p = ch.pipeline
           if (tls == TlsMode.ON) {
-            p.addLast("sslContext", makeSslContext(host).newHandler(ch.alloc(), host, port))
+            val sslContext = Connection.makeSslContext(host)
+            p.addLast("sslContext", sslContext.newHandler(ch.alloc(), host, port))
           }
           p.addLast("packetCodec", new PacketCodec(forceByteOrder = ByteOrder.BIG_ENDIAN))
           p.addLast("packetHandler", new SimpleChannelInboundHandler[Packet] {
@@ -152,12 +159,7 @@ trait Connection {
     connected = true
 
     try {
-      val isLocalConnection = (channel.remoteAddress, channel.localAddress) match {
-        case (remote: InetSocketAddress, local: InetSocketAddress) =>
-          remote.getAddress.isLoopbackAddress || remote.getAddress == local.getAddress
-
-        case _ => false
-      }
+      val isLocalConnection = NettyUtil.isLocalConnection(channel)
 
       val useStartTls = tls match {
         case TlsMode.STARTTLS_FORCE => true
@@ -169,7 +171,8 @@ trait Connection {
         val startTls = Request(Manager.ID, records = Seq(Record(1, Cluster(Str("STARTTLS"), Str(host)))))
         val Str(cert) = Await.result(send(startTls), 10.seconds)(0)
 
-        var handler = makeSslContext(host).newHandler(channel.alloc(), host, port)
+        val sslContext = Connection.makeSslContext(host)
+        var handler = sslContext.newHandler(channel.alloc(), host, port)
         channel.pipeline.addFirst("sslHandler", handler)
         Await.result(handler.handshakeFuture.toScala, 10.seconds)
       }

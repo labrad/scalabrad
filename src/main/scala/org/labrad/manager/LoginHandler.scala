@@ -68,13 +68,7 @@ class LoginHandler(
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
   override def channelActive(ctx: ChannelHandlerContext): Unit = {
-    isLocalConnection = (ctx.channel.remoteAddress, ctx.channel.localAddress) match {
-      case (remote: InetSocketAddress, local: InetSocketAddress) =>
-        remote.getAddress.isLoopbackAddress || remote.getAddress == local.getAddress
-
-      case _ =>
-        false
-    }
+    isLocalConnection = NettyUtil.isLocalConnection(ctx.channel)
     log.info(s"remote=${ctx.channel.remoteAddress}, local=${ctx.channel.localAddress}, isLocalConnection=$isLocalConnection")
   }
 

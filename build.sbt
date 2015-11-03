@@ -66,6 +66,7 @@ packSettings
 packMain := Map(
   "labrad" -> "org.labrad.manager.Manager",
   "labrad-migrate-registry" -> "org.labrad.registry.Migrate",
+  "labrad-proxy" -> "org.labrad.proxy.Proxy",
   "labrad-sql-test" -> "org.labrad.registry.SQLTest"
 )
 
