@@ -136,7 +136,7 @@ trait Connection {
         override def initChannel(ch: SocketChannel): Unit = {
           val p = ch.pipeline
           if (tls == TlsMode.ON) {
-            val sslContext = Connection.makeSslContext(host)
+            val sslContext = Connection.makeSslContext(host, tlsCerts = tlsCerts)
             p.addLast("sslContext", sslContext.newHandler(ch.alloc(), host, port))
           }
           p.addLast("packetCodec", new PacketCodec(forceByteOrder = ByteOrder.BIG_ENDIAN))
@@ -171,7 +171,7 @@ trait Connection {
         val startTls = Request(Manager.ID, records = Seq(Record(1, Cluster(Str("STARTTLS"), Str(host)))))
         val Str(cert) = Await.result(send(startTls), 10.seconds)(0)
 
-        val sslContext = Connection.makeSslContext(host)
+        val sslContext = Connection.makeSslContext(host, tlsCerts = tlsCerts)
         var handler = sslContext.newHandler(channel.alloc(), host, port)
         channel.pipeline.addFirst("sslHandler", handler)
         Await.result(handler.handshakeFuture.toScala, 10.seconds)
