@@ -125,7 +125,7 @@ trait Data {
         sb += '['
         for (i <- 0 until shape(k)) {
           idx(k) = i
-          if (i > 0) sb += ','
+          if (i > 0) sb ++= ", "
           if (k == shape.length - 1)
             sb ++= it.next.toString
           else
@@ -137,7 +137,7 @@ trait Data {
       sb.toString
 
     case TCluster(_*) =>
-      "(" + clusterIterator.mkString(",") + ")"
+      "(" + clusterIterator.mkString(", ") + ")"
 
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
