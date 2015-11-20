@@ -256,6 +256,34 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
       }
     }
   }
+
+  test("creating a registry directory with empty name should fail", Tag("empties")) {
+    withManager() { m =>
+      withClient(m.host, m.port, m.password) { c =>
+
+        val reg = new RegistryServerProxy(c)
+        await(reg.cd(Seq("test"), true))
+
+        an[Exception] should be thrownBy {
+          await(reg.mkDir(""))
+        }
+      }
+    }
+  }
+
+  test("creating a registry key with empty name should fail", Tag("empties")) {
+    withManager() { m =>
+      withClient(m.host, m.port, m.password) { c =>
+
+        val reg = new RegistryServerProxy(c)
+        await(reg.cd(Seq("test"), true))
+
+        an[Exception] should be thrownBy {
+          await(reg.set("", Str("not allowed")))
+        }
+      }
+    }
+  }
 }
 
 object RegistryTest {

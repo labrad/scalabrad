@@ -142,6 +142,7 @@ extends ServerActor with Logging {
      * Make a directory and send a message to all interested listeners.
      */
     private def _mkDir(dir: store.Dir, name: String, create: Boolean): store.Dir = {
+      if (create) require(name.nonEmpty, "Cannot create a directory with an empty name")
       val (newDir, created) = store.child(dir, name, create)
       if (created) {
         messageContexts(dir, name, isDir=true, addOrChange=true)
@@ -175,6 +176,7 @@ extends ServerActor with Logging {
              name="set",
              doc="Set the content of the given key in the current directory to the given data")
     def setValue(key: String, value: Data): Unit = {
+      require(key.nonEmpty, "Cannot create a key with empty name")
       store.setValue(curDir, key, value)
       messageContexts(curDir, key, isDir=false, addOrChange=true)
     }
