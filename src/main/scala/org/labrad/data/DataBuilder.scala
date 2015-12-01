@@ -34,6 +34,9 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
   def clusterStart(): this.type = { state = state.clusterStart(); this }
   def clusterEnd(): this.type = { state = state.clusterEnd(); this }
 
+  def mapStart(): this.type = { state = state.mapStart(); this }
+  def mapEnd(): this.type = { state = state.mapEnd(); this }
+
   def error(code: Int, message: String): this.type = { state = state.error(code, message); this }
 
   /**
@@ -193,6 +196,8 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     def array(shape: Array[Int]): State = fail("add array")
     def clusterStart(): State = fail("start cluster")
     def clusterEnd(): State = fail("end cluster")
+    def mapStart(): State = fail("start map")
+    def mapEnd(): State = fail("end map")
     def error(code: Int, message: String): State = fail("add error")
 
     private def fail(msg: String) = {
@@ -326,6 +331,8 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     override def array(shape: Array[Int]): State = ConsumeArrayAny(shape, caller = caller).call()
     override def clusterStart(): State = ConsumeClusterAny(caller = caller).call()
     override def clusterEnd(): State = caller.clusterEnd()
+    override def mapStart(): State = ConsumeMapAny(caller = caller).call()
+    override def mapEnd(): State = caller.mapEnd()
     override def error(code: Int, message: String): State = ConsumeErrorPayload(code, message, caller = caller).call()
 
     override def render(subState: String): String = "<?>"
@@ -371,6 +378,88 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
   }
 
   case class ConsumeCluster(elems: Seq[Type], caller: State) extends State {
+    private val size = elems.length
+    private val types = elems.toArray
+    private val consumers = elems.toArray.map(t => consume(t, caller = this))
+    private val narrowable = elems.toArray.map(canNarrow)
+    private var i = 0
+
+    def call(): State = {
+      i = 0
+      this
+    }
+
+    def resume(t: Type): State = {
+      if (narrowable(i)) {
+        val (tt, narrowed) = narrow(types(i), t)
+        if (narrowed) {
+          types(i) = tt
+          consumers(i) = consume(tt, caller = this)
+        }
+      }
+      i += 1
+      if (i < size) {
+        consumers(i).call()
+      } else {
+        this
+      }
+    }
+
+    override def clusterStart(): State = {
+      require(i == 0, s"cannot start cluster in state $this")
+      consumers(i).call()
+    }
+
+    override def clusterEnd(): State = {
+      require(i == size, s"cannot end cluster. still expecting ${size - i} elements")
+      ret(TCluster(types: _*))
+    }
+
+    override def render(subState: String): String = {
+      val elemStrs = for ((elem, idx) <- types.zipWithIndex) yield {
+        if (idx == i) {
+          subState
+        } else {
+          elem.toString
+        }
+      }
+      s"(${elemStrs.mkString})"
+    }
+  }
+
+  case class ConsumeMapAny(caller: State) extends State {
+    private val consumer = ConsumeAny(caller = this)
+    private var i = 0
+    private var elems: mutable.Buffer[Type] = _
+
+    def call(): State = {
+      i = 0
+      elems = mutable.Buffer.empty[Type]
+      consumer.call()
+    }
+
+    def resume(t: Type): State = {
+      i += 1
+      elems += t
+      consumer.call()
+    }
+
+    override def mapEnd(): State = {
+      val typ = elems.toSet.toSeq match {
+        case Seq() => TMap(TStr, TNone)
+        case Seq(t) => TMap(TStr, t)
+        case _ => THMap(TStr, elems: _*)
+      }
+      ret(typ)
+    }
+
+    override def render(subState: String): String = {
+      val elemStrs = elems.map(_.toString).mkString
+      s"($elemStrs$subState...)"
+    }
+  }
+
+  case class ConsumeMap(elems: Seq[Type], caller: State) extends State {
     private val size = elems.length
     private val types = elems.toArray
     private val consumers = elems.toArray.map(t => consume(t, caller = this))

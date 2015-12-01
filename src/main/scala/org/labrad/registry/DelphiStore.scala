@@ -72,14 +72,14 @@ object DelphiParsers extends RegexParsers {
   def parseData(s: String): Data =
     parseAll(data, s) match {
       case Success(d, _) => d
-      case NoSuccess(msg, _) => sys.error(msg)
+      case NoSuccess(msg, _) => sys.error(s"unable to parse data '$s': $msg")
     }
 
   def data: Parser[Data] =
     ( nonArrayData | array )
 
   def nonArrayData: Parser[Data] =
-    ( none | bool | complex | value | time | int | uint | string | cluster )
+    ( none | bool | complex | value | time | int | uint | string | cluster | map )
 
   def none: Parser[Data] =
       "_" ^^ { _ => Data.NONE }
@@ -184,6 +184,39 @@ object DelphiParsers extends RegexParsers {
     )
 
   def cluster = "(" ~> repsep(data, ",") <~ ")" ^^ { elems => Cluster(elems: _*) }
+
+  def map = "{" ~> repsep(data ~ (":" ~> data), ",") <~ "}" ^^ { items =>
+    if (items.isEmpty) {
+      val result = Data(TMap(TNone, TNone))
+      result.setMapSize(0)
+      result
+    } else {
+      val (keys, values) = items.map { case k ~ v => (k, v) }.unzip
+      val keyType = keys.map(_.t).toSet.toSeq match {
+        case Seq(keyType) => keyType
+        case _ => sys.error("map keys must all have the same type")
+      }
+      val valueTypes = keys.map(_.t)
+      val (result, it) = valueTypes.toSet.toSeq match {
+        case Seq(valueType) =>
+          val result = Data(TMap(keyType, valueType))
+          result.setMapSize(items.size)
+          val it = result.mapIterator
+          (result, it)
+
+        case valueTypes =>
+          val result = Data(THMap(keyType, valueTypes: _*))
+          val it = result.mapIterator
+          (result, it)
+      }
+      for ((k, v) <- keys zip values) {
+        val (keyData, valueData) = it.next()
+        keyData.set(k)
+        valueData.set(v)
+      }
+      result
+    }
+  }
 }
 
 object DelphiFormat {
@@ -251,6 +284,12 @@ object DelphiFormat {
 
       case TCluster(_*) =>
         "(" + data.clusterIterator.map(dataToString).mkString(",") + ")"
+
+      case _: TMap =>
+        "{" + data.mapIterator.map { case (k, v) => s"${dataToString(k)}: ${dataToString(v)}" }.mkString(",") + "}"
+
+      case _: THMap =>
+        "{" + data.mapIterator.map { case (k, v) => s"${dataToString(k)}: ${dataToString(v)}" }.mkString(",") + "}"
 
       case TError(_) =>
         sys.error("cannot to encode error in delphi text format")

@@ -5,9 +5,51 @@ import scala.util.parsing.combinator.RegexParsers
 
 object Parsers extends RegexParsers {
 
-  private def stripComments(tag: String): String =
-    tag.replaceAll("""\{[^\{\}]*\}""", "") // remove bracketed comments
-       .split(":")(0) // strip off any trailing comments
+  /*
+
+types:
+_ => none
+b => bool
+i8, i16, i32, i64 => int of various bit widths
+u8, u16, u32, u64 => unsigned int of various bit widths
+v[unit] => float (v == v[])
+c[unit] => complex (c == c[])
+y => byte string (binary)
+s => unicode string (text)
+t => time
+* => list
+() => cluster
+Ea => error, encoded like (isa)
+{K:V} => map, encoded like *(KV)
+{K::V1,V2,V3} => heterogeneous map, encoded like ((K,V1)(K,V2)(K,V3))
+
+patterns:
+? => any type (including none)
+# => any type (excluding none)
+v[?] => value with any unit
+c[?] => complex with any unit
+i => any integral type (signed or unsigned)
+(P...) => cluster of any number of elements, each of which matches pattern P
+<P1|P2|P3> => type matching one of P1, P2 or P3
+
+struct:
+{"x" 10: P1, "y" 20: P2 } => map with string keys x and y, matching P1 and P2, respectively
+  or integer keys 10 and 20. Can alternately specify just strings or just numbers.
+  Here, we're talking about data, not just type; so this kind of pattern is not
+  really the same sort of thing as the other patterns. Instead of sending None,
+  can just omit field.
+
+metadata api:
+- what servers exist?
+- what settings does a server have?
+- what is the id for a given server or setting?
+- what is the server info? (docstring; could add things like version)
+- what is the setting info? (docstring, accepted type; return type)
+
+accepted type is a struct (map from string name to
+
+
+   */
 
   private def parseOrThrow[A](p: Parser[A], s: String): A =
     parseAll(p, s) match {
@@ -15,25 +57,22 @@ object Parsers extends RegexParsers {
       case NoSuccess(msg, _) => sys.error(msg)
     }
 
-  def parsePattern(tag: String): Pattern = parseOrThrow(aPattern, stripComments(tag))
-  def parseType(tag: String): Type = parseOrThrow(aType, stripComments(tag))
+  def parsePattern(tag: String): Pattern = parseOrThrow(aPattern, tag)
+  def parseType(tag: String): Type = parseOrThrow(aType, tag)
   def parseUnit(s: String): Seq[(String, Ratio)] = parseOrThrow(unitStr, s)
 
 
   def aType: Parser[Type] =
-    ( errorType
-    | repsep(singleType, ",".?) ^^ {
-        case Seq()  => TNone
-        case Seq(t) => t
-        case ts     => TCluster(ts: _*)
-      }
-    )
+    repsep(singleType, ",".?) ^^ {
+      case Seq()  => TNone
+      case Seq(t) => t
+      case ts     => TCluster(ts: _*)
+    }
+
+  def singleType: Parser[Type] = noneType | someType
 
   def noneType: Parser[Type] =
       "_" ^^ { _ => TNone }
-
-  def errorType: Parser[Type] =
-      "E" ~> singleType.? ^^ { t => TError(t getOrElse TNone) }
 
   def someType: Parser[Type] =
     ( "b"   ^^ { _ => TBool }
@@ -53,9 +92,10 @@ object Parsers extends RegexParsers {
     | complexType
     | arrayType
     | clusterType
+    | errorType
+    | mapType
+    | hmapType
     )
-
-  def singleType: Parser[Type] = noneType | someType
 
   def valueType: Parser[Type] =
       "v" ~> units.? ^^ { u => TValue(u) }
@@ -73,6 +113,14 @@ object Parsers extends RegexParsers {
   def clusterType: Parser[Type] =
       "(" ~> repsep(singleType, ",".?) <~ ")" ^^ { ts => TCluster(ts: _*) }
 
+  def errorType: Parser[Type] =
+      "E" ~> singleType.? ^^ { t => TError(t getOrElse TNone) }
+
+  def mapType: Parser[Type] =
+      ("{" ~> singleType <~ ":") ~ (singleType <~ "}") ^^ { case k ~ v => TMap(k, v) }
+
+  def hmapType: Parser[Type] =
+      ("{" ~> singleType <~ "::") ~ (repsep(singleType, ",".?) <~ "}") ^^ { case k ~ vs => THMap(k, vs: _*) }
 
 
   def aPattern: Parser[Pattern] =
@@ -239,7 +287,14 @@ sealed trait Type extends Pattern {
 }
 
 object Type {
-  def apply(s: String): Type = Parsers.parseType(s)
+  def apply(s: String): Type = {
+    try {
+      Parsers.parseType(s)
+    } catch {
+      case e: Exception =>
+        sys.error(s"error while parsing tag '$s': $e")
+    }
+  }
 }
 
 
@@ -325,6 +380,63 @@ case class TCluster(override val elems: Type*) extends PCluster(elems: _*) with 
   def size = elems.size
   def apply(i: Int) = elems(i)
   def offset(i: Int) = offsets(i)
+}
+
+
+case class TMap(key: Type, value: Type) extends Type {
+
+  override def toString = s"{$key:$value}"
+
+  def accepts(pat: Pattern): Boolean = pat match {
+    case TMap(k, v) => key.accepts(k) && value.accepts(v)
+    case _ => false
+  }
+
+  def apply(typ: Type): Option[Type] = typ match {
+    case TMap(k, v) =>
+      for {
+        kk <- key(k)
+        vv <- value(v)
+      } yield TMap(kk, vv)
+
+    case _ => None
+  }
+
+  lazy val encodedType = TArr(TCluster(key, value))
+
+  lazy val dataWidth = encodedType.dataWidth
+  lazy val fixedWidth = encodedType.fixedWidth
+}
+
+
+case class THMap(key: Type, values: Type*) extends Type {
+
+  override def toString = s"{$key::${values.mkString}}"
+
+  def accepts(pat: Pattern): Boolean = pat match {
+    case THMap(k, vs @ _*) => key.accepts(k) && (values zip vs).forall { case (v1, v2) => v1.accepts(v2) }
+    case _ => false
+  }
+
+  def apply(typ: Type): Option[Type] = typ match {
+    case THMap(k, vs @ _*) =>
+      val vvsOpt = {
+        val vvOpts = (values zip vs).map { case (v1, v2) => v1(v2) }
+        if (vvOpts.exists(_.isEmpty)) None else Some(vvOpts.map(_.get))
+      }
+
+      for {
+        kk <- key(k)
+        vvs <- vvsOpt
+      } yield THMap(kk, vvs: _*)
+
+    case _ => None
+  }
+
+  lazy val encodedType = TCluster(values.map(v => TCluster(key, v)): _*)
+
+  lazy val dataWidth = encodedType.dataWidth
+  lazy val fixedWidth = encodedType.fixedWidth
 }
 
 

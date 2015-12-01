@@ -226,7 +226,10 @@ class HydrantTests extends FunSuite {
     "ii",
     "cvtiwsbb",
     "*(is)",
-    "*2(i*s)"
+    "*2(i*s)",
+    "{s:i}",
+    "{i:s}",
+    "{s:{s:*(ii)}}"
   )
 
   for (tag <- types)

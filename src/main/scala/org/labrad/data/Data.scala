@@ -70,6 +70,13 @@ trait Data {
   }
 
   private[data] def cast(newType: Type): Data
+  private[data] def castMap: Data = {
+    t match {
+      case t: TMap => cast(t.encodedType)
+      case t: THMap => cast(t.encodedType)
+      case _ => sys.error(s"cannot cast data of type $t to map or hmap")
+    }
+  }
   private[data] def castError: Data = {
     t match {
       case TError(payload) => cast(TCluster(TInt, TStr, payload))
@@ -139,6 +146,12 @@ trait Data {
     case TCluster(_*) =>
       "(" + clusterIterator.mkString(",") + ")"
 
+    case _: TMap =>
+      "{" + mapIterator.map { case (k, v) => s"$k: $v" }.mkString(",") + "}"
+
+    case _: THMap =>
+      "{" + mapIterator.map { case (k, v) => s"$k: $v" }.mkString(",") + "}"
+
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
   }
@@ -158,6 +171,8 @@ trait Data {
   def isTime = t == TTime
   def isArray = t.isInstanceOf[TArr]
   def isCluster = t.isInstanceOf[TCluster]
+  def isMap = t.isInstanceOf[TMap]
+  def isHMap = t.isInstanceOf[THMap]
   def isError = t.isInstanceOf[TError]
   def hasUnits = t match {
     case TValue(Some(_)) | TComplex(Some(_)) => true
@@ -185,6 +200,22 @@ trait Data {
 
   def clusterSize: Int
   def clusterIterator: Iterator[Data]
+
+  def mapSize: Int = t match {
+    case t: TMap => castMap.arraySize
+    case t: THMap => castMap.clusterSize
+    case _ =>
+      sys.error(s"mapSize is only defined for map and hmap types, not $t")
+  }
+
+  def mapIterator: Iterator[(Data, Data)] = t match {
+    case t: TMap => castMap.flatIterator.map(item => (item(0), item(1)))
+    case t: THMap => castMap.clusterIterator.map(item => (item(0), item(1)))
+    case _ =>
+      sys.error(s"mapIterator is only defined for map and hmap types, not $t")
+  }
+
+  def setMapSize(size: Int): Unit = castMap.setArraySize(size)
 
   // getters
   def getBool: Boolean
@@ -280,6 +311,12 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
         }
         len
 
+      case t: TMap =>
+        new Cursor(t.encodedType, buf, ofs).len
+
+      case t: THMap =>
+        new Cursor(t.encodedType, buf, ofs).len
+
       case TError(payload) =>
         _errorCursor.len
     }
@@ -343,6 +380,12 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
           while (iter.hasNext) {
             iter.next.flatten(os)
           }
+
+        case t: TMap =>
+          new Cursor(t.encodedType, buf, ofs).flatten(os)
+
+        case t: THMap =>
+          new Cursor(t.encodedType, buf, ofs).flatten(os)
 
         case TError(payload) =>
           _errorCursor.flatten(os)
@@ -642,6 +685,12 @@ object FlatData {
             }
             len
 
+          case t: TMap =>
+            traverse(t.encodedType, ofs)
+
+          case t: THMap =>
+            traverse(t.encodedType, ofs)
+
           case TError(payload) =>
             traverse(TCluster(TInt, TStr, payload), ofs)
 
@@ -730,6 +779,12 @@ extends Data with Serializable with Cloneable {
         case t: TCluster =>
           for ((elem, delta) <- t.elems zip t.offsets)
             flatten(os, elem, buf, ofs + delta)
+
+        case t: TMap =>
+          flatten(os, t.encodedType, buf, ofs)
+
+        case t: THMap =>
+          flatten(os, t.encodedType, buf, ofs)
 
         case TError(payload) =>
           flatten(os, TCluster(TInt, TStr, payload), buf, ofs)
@@ -972,6 +1027,12 @@ object TreeData {
             for ((elem, delta) <- t.elems zip t.offsets)
               unflatten(elem, buf, ofs + delta)
 
+          case t: TMap =>
+            unflatten(t.encodedType, buf, ofs)
+
+          case t: THMap =>
+            unflatten(t.encodedType, buf, ofs)
+
           case TError(payload) =>
             unflatten(TCluster(TInt, TStr, payload), buf, ofs)
 
@@ -1019,6 +1080,12 @@ object Data {
           copy(s, d)
         }
 
+      case t: TMap =>
+        copy(src.castMap, dst.castMap)
+
+      case t: THMap =>
+        copy(src.castMap, dst.castMap)
+
       case TError(_) =>
         dst.setError(src.getErrorCode, src.getErrorMessage, src.getErrorPayload)
     }
@@ -1055,6 +1122,10 @@ object Data {
         case _: TCluster =>
           a.clusterSize == b.clusterSize &&
             (a.clusterIterator zip b.clusterIterator).forall { case (a, b) => a == b }
+        case _: TMap =>
+          isEqual(a.castMap, b.castMap) // TODO: should ignore order here
+        case _: THMap =>
+          isEqual(a.castMap, b.castMap) // TODO: should ignore order here
         case _: TError =>
           a.getErrorCode == b.getErrorCode && a.getErrorMessage == b.getErrorMessage && a.getErrorPayload == b.getErrorPayload
       }
@@ -1354,7 +1425,7 @@ object Parsers extends RegexParsers {
     ( nonArrayData | array )
 
   def nonArrayData: Parser[Data] =
-    ( none | bool | complex | value | time | int | uint | string | cluster )
+    ( none | bool | complex | value | time | int | uint | string | cluster | map)
 
   def none: Parser[Data] =
       "_" ^^ { _ => Data.NONE }
@@ -1463,6 +1534,39 @@ object Parsers extends RegexParsers {
     )
 
   def cluster = "(" ~> repsep(data, ",") <~ ")" ^^ { elems => Cluster(elems: _*) }
+
+  def map = "{" ~> repsep(data ~ (":" ~> data), ",") <~ "}" ^^ { items =>
+    if (items.isEmpty) {
+      val result = Data(TMap(TNone, TNone))
+      result.setMapSize(0)
+      result
+    } else {
+      val (keys, values) = items.map { case k ~ v => (k, v) }.unzip
+      val keyType = keys.map(_.t).toSet.toSeq match {
+        case Seq(keyType) => keyType
+        case _ => sys.error("map keys must all have the same type")
+      }
+      val valueTypes = keys.map(_.t)
+      val (result, it) = valueTypes.toSet.toSeq match {
+        case Seq(valueType) =>
+          val result = Data(TMap(keyType, valueType))
+          result.setMapSize(items.size)
+          val it = result.mapIterator
+          (result, it)
+
+        case valueTypes =>
+          val result = Data(THMap(keyType, valueTypes: _*))
+          val it = result.mapIterator
+          (result, it)
+      }
+      for ((k, v) <- keys zip values) {
+        val (keyData, valueData) = it.next()
+        keyData.set(k)
+        valueData.set(v)
+      }
+      result
+    }
+  }
 }
 
 object Translate {

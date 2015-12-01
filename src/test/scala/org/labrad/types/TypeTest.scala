@@ -46,7 +46,9 @@ class TypeTests extends FunSuite {
       "v[m/s]" -> TValue("m/s"),
       "c" -> TComplex(),
       "c[]" -> TComplex(""),
-      "c[m/s]" -> TComplex("m/s")
+      "c[m/s]" -> TComplex("m/s"),
+      "{s:(ii)}" -> TMap(TStr, TCluster(TInt, TInt)),
+      "{s::iv}" -> THMap(TStr, TInt, TValue())
     )
 
     for ((s, t) <- tests)
@@ -70,41 +72,6 @@ class TypeTests extends FunSuite {
       "s,s" -> TCluster(TStr, TStr),
       "(s,s)" -> TCluster(TStr, TStr)
     )
-    for ((s, t) <- tests)
-      assert(Type(s) == t)
-  }
-
-  test("types can have a trailing comment") {
-    val tests = Seq(
-      // comments
-      ": this has a trailing comment" -> TNone,
-      " : this has a trailing comment" -> TNone,
-      "_: this has a trailing comment" -> TNone,
-      "s: this has a trailing comment" -> TStr
-    )
-
-    for ((s, t) <- tests)
-      assert(Type(s) == t)
-  }
-
-  test("types can have embedded comments") {
-    val tests = Seq(
-      // comments
-      "ss{embedded comment}is" -> TCluster(TStr, TStr, TInt, TStr),
-      "{embedded comment}ssis" -> TCluster(TStr, TStr, TInt, TStr)
-    )
-
-    for ((s, t) <- tests)
-      assert(Type(s) == t)
-  }
-
-  test("embedded comments can contain a colon") {
-    val tests = Seq(
-      // comments
-      "ss{embedded comment: this is a test}is" -> TCluster(TStr, TStr, TInt, TStr),
-      "{embedded comment: this, too}ssis" -> TCluster(TStr, TStr, TInt, TStr)
-    )
-
     for ((s, t) <- tests)
       assert(Type(s) == t)
   }

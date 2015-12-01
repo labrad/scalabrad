@@ -14,8 +14,8 @@ object Hydrant {
     def gen(nesting: Int, allowArray: Boolean = true): Type = {
       var options = Seq('_, 'b, 'i, 'w, 's, 't, 'v, 'c)
       if (nesting < 4) {
-        if (allowArray) options ++= Seq('array)
-        options ++= Seq('cluster)
+        if (allowArray) options ++= Seq('array, 'map)
+        options ++= Seq('cluster, 'hmap)
       }
       val choice = options(random.nextInt(options.size))
       choice match {
@@ -37,6 +37,17 @@ object Hydrant {
           val nDims = random.nextInt(3) + 1
           val elem = gen(nesting + nDims, allowArray = false)
           TArr(elem, nDims)
+
+        case 'map =>
+          val k = gen(nesting + 1, allowArray = false)
+          val v = gen(nesting + 1, allowArray = true)
+          TMap(k, v)
+
+        case 'hmap =>
+          val k = gen(nesting + 1, allowArray = false)
+          val size = random.nextInt(8) + 2
+          val values = Seq.fill(size) { gen(nesting + 1) }
+          THMap(k, values: _*)
 
         case _ =>
           sys.error("should not happen")
@@ -65,6 +76,8 @@ object Hydrant {
     case TComplex(units) => randomComplex(units)
     case t: TCluster => randomCluster(t)
     case t: TArr => randomArr(t)
+    case t: TMap => randomMap(t)
+    case t: THMap => randomHMap(t)
     case TError(t) => randomError(t)
   }
 
@@ -117,6 +130,26 @@ object Hydrant {
       elem.set(randomData(t.elem))
     }
     arr
+  }
+
+  def randomMap(t: TMap) = {
+    val map = Data(t)
+    val size = random.nextInt(math.pow(2, 5).toInt)
+    map.setMapSize(size)
+    for ((k, v) <- map.mapIterator) {
+      k.set(randomData(t.key))
+      v.set(randomData(t.value))
+    }
+    map
+  }
+
+  def randomHMap(t: THMap) = {
+    val hmap = Data(t)
+    for (((k, v), vType) <- hmap.mapIterator zip t.values.iterator) {
+      k.set(randomData(t.key))
+      v.set(randomData(vType))
+    }
+    hmap
   }
 
   def randomError(t: Type) = {
