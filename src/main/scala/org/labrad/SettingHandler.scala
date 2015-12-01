@@ -166,7 +166,7 @@ object SettingHandler extends Logging {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Accept])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    val typePattern = patternFor(tpe.dealias, annotatedPatternOpt)
+    val typePattern = patternFor(tpe, annotatedPatternOpt)
 
     // if we have an annotated type, make sure that it is more specific that the
     // type inferred from the scala type signature
@@ -180,7 +180,7 @@ object SettingHandler extends Logging {
         typePattern
     }
 
-    (pattern, unpacker(tpe.dealias))
+    (pattern, unpacker(tpe))
   }
 
   /** infer the pattern and create a repacker for a method return type */
@@ -189,7 +189,7 @@ object SettingHandler extends Logging {
       a <- annots.find(_.tree.tpe =:= typeOf[org.labrad.annotations.Return])
       t <- a.param("value").map { case Constant(t: String) => t }
     } yield Pattern(t)
-    val typePattern = patternFor(tpe.dealias, annotatedPatternOpt)
+    val typePattern = patternFor(tpe, annotatedPatternOpt)
 
     // if we have an annotated type, make sure that it is more specific that the
     // type inferred from the scala type signature
@@ -203,7 +203,7 @@ object SettingHandler extends Logging {
         typePattern
     }
 
-    (pattern, packer(tpe.dealias, annotatedPatternOpt))
+    (pattern, packer(tpe, annotatedPatternOpt))
   }
 
   implicit class RichAnnotation(a: Annotation) {
@@ -247,7 +247,7 @@ object SettingHandler extends Logging {
 
   def patternFor[T: TypeTag]: Pattern = patternFor(typeOf[T])
 
-  def patternFor(tpe: Type, pat: Option[Pattern] = None): Pattern = tpe match {
+  def patternFor(tpe: Type, pat: Option[Pattern] = None): Pattern = tpe.dealias match {
     case tpe if tpe =:= typeOf[Unit]    => Pattern("_")
     case tpe if tpe =:= typeOf[Boolean] => Pattern("b")
     case tpe if tpe =:= typeOf[Int]     => Pattern("i")
@@ -283,7 +283,7 @@ object SettingHandler extends Logging {
 
   def unpacker[T: TypeTag]: Data => T = unpacker(typeOf[T]).asInstanceOf[Data => T]
 
-  def unpacker(tpe: Type): Data => Any = tpe match {
+  def unpacker(tpe: Type): Data => Any = tpe.dealias match {
     case tpe if tpe =:= typeOf[Unit]    => (d: Data) => ()
     case tpe if tpe =:= typeOf[Boolean] => (d: Data) => d.getBool
     case tpe if tpe =:= typeOf[Int]     => (d: Data) => d.getInt
@@ -304,7 +304,7 @@ object SettingHandler extends Logging {
         case t if t =:= typeOf[Data]    => (d: Data) => d.get[Array[Data]]
         case _ =>
           val f = unpacker(t)
-          (data: Data) => data.flatIterator.toArray
+          (data: Data) => data.flatIterator.map(f).toArray
       }
 
     case TypeRef(_, Sym("Seq"), Seq(t)) =>
@@ -317,7 +317,7 @@ object SettingHandler extends Logging {
         case t if t =:= typeOf[Data]    => (d: Data) => d.get[Seq[Data]]
         case _ =>
           val f = unpacker(t)
-          (data: Data) => data.flatIterator.toSeq
+          (data: Data) => data.flatIterator.map(f).toVector
       }
 
     case TypeRef(_, Sym("Option"), Seq(t)) =>
@@ -373,7 +373,7 @@ object SettingHandler extends Logging {
 
   def packer[T: TypeTag]: PartialFunction[Any, Data] = packer(typeOf[T])
 
-  def packer(tpe: Type, pat: Option[Pattern] = None): PartialFunction[Any, Data] = tpe match {
+  def packer(tpe: Type, pat: Option[Pattern] = None): PartialFunction[Any, Data] = tpe.dealias match {
     case tpe if tpe =:= typeOf[Unit]    => { case _ => Data.NONE }
     case tpe if tpe =:= typeOf[Boolean] => { case x: Boolean => Bool(x) }
     case tpe if tpe =:= typeOf[Int]     => { case x: Int => Integer(x) }

@@ -171,10 +171,21 @@ class TypeAlias extends Testable("type aliases do not affect inference") {
   @Setting(id=3, name="c", doc="")
   def c(): Bar = Right("blah")
 
+  @Setting(id=4, name="d", doc="")
+  def d(names: Seq[Foo]): Data = Data.NONE
+
+  type ChannelDef = (String, (String, Seq[String]))
+  type DeviceDef = (String, Seq[ChannelDef])
+
+  @Setting(id=5, name="e", doc="")
+  def e(devices: Seq[DeviceDef]): Data = Data.NONE
+
   val settings = Seq(
     (1L, "a", "s", "?"),
     (2L, "b", "w|s", "?"),
-    (3L, "c", "", "w|s")
+    (3L, "c", "", "w|s"),
+    (4L, "d", "*s", "?"),
+    (5L, "e", "*(s, *(s, (s, *s)))", "?")
   )
 }
 
