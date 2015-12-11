@@ -26,11 +26,6 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
 
   private val lock = new Object
   private var reg: RegistryServerProxy = null
-  private var listenerOpt: Option[(Dir, String, Boolean, Boolean) => Unit] = None
-
-  override def notifyOnChange(listener: (Dir, String, Boolean, Boolean) => Unit): Unit = {
-    listenerOpt = Some(listener)
-  }
 
   /**
    * Connect to remote registry if we are not currently connected,
@@ -49,9 +44,7 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
         cxn.addMessageListener {
           case Message(_, _, `id`, data) =>
             val (path, name, isDir, addOrChange) = data.get[(Seq[String], String, Boolean, Boolean)]
-            for (listener <- listenerOpt) {
-              listener(path, name, isDir, addOrChange)
-            }
+            notifyContexts(path, name, isDir, addOrChange)
         }
         cxn.connect()
         val registry = new RegistryServerProxy(cxn)
@@ -78,7 +71,7 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
 
   def parent(dir: Dir): Dir = if (dir == root) dir else dir.dropRight(1)
 
-  def child(dir: Dir, name: String, create: Boolean): (Dir, Boolean) = {
+  def childImpl(dir: Dir, name: String, create: Boolean): (Dir, Boolean) = {
     val (dirs, keys) = call(dir) { _.dir() }
 
     val created = if (dirs.contains(name)) {
@@ -95,7 +88,7 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
     call(curDir) { _.dir() }
   }
 
-  def rmDir(dir: Dir, name: String): Unit = {
+  def rmDirImpl(dir: Dir, name: String): Unit = {
     call(dir) { _.rmDir(name) }
   }
 
@@ -103,11 +96,33 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
     call(dir) { _.get(key, default = default) }
   }
 
-  def setValue(dir: Dir, key: String, value: Data): Unit = {
+  def setValueImpl(dir: Dir, key: String, value: Data): Unit = {
     call(dir) { _.set(key, value) }
   }
 
-  def delete(dir: Dir, key: String): Unit = {
+  def deleteImpl(dir: Dir, key: String): Unit = {
     call(dir) { _.del(key) }
+  }
+
+
+  // Override methods that normally result in notifications being sent.
+  // We do not need to send notification because we are streaming changes from
+  // the remote registry, so we will get notifications via that mechanism
+  // instead.
+
+  override def child(dir: Dir, name: String, create: Boolean): Dir = {
+    childImpl(dir, name, create)._1
+  }
+
+  override def rmDir(dir: Dir, name: String): Unit = {
+    rmDirImpl(dir, name)
+  }
+
+  override def setValue(dir: Dir, key: String, value: Data): Unit = {
+    setValueImpl(dir, key, value)
+  }
+
+  override def delete(dir: Dir, key: String): Unit = {
+    deleteImpl(dir, key)
   }
 }

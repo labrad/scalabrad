@@ -209,7 +209,7 @@ object Migrate {
     private def find(path: Seq[String], create: Boolean = false): store.Dir = {
       var loc = store.root
       for (dir <- path; if dir.nonEmpty) {
-        loc = store.child(loc, dir, create = create)._1
+        loc = store.child(loc, dir, create = create)
       }
       loc
     }

@@ -18,15 +18,48 @@ trait RegistryStore {
   def root: Dir
   def pathTo(dir: Dir): Seq[String]
   def parent(dir: Dir): Dir
-  def child(parent: Dir, name: String, create: Boolean): (Dir, Boolean)
   def dir(curDir: Dir): (Seq[String], Seq[String])
-  def rmDir(dir: Dir, name: String): Unit
+
+  def child(parent: Dir, name: String, create: Boolean): Dir = {
+    val (newDir, created) = childImpl(parent, name, create)
+    if (created) {
+      notifyListener(parent, name, isDir=true, addOrChange=true)
+    }
+    newDir
+  }
+  def childImpl(parent: Dir, name: String, create: Boolean): (Dir, Boolean)
+
+  def rmDir(dir: Dir, name: String): Unit = {
+    rmDirImpl(dir, name)
+    notifyListener(dir, name, isDir=true, addOrChange=false)
+  }
+  def rmDirImpl(dir: Dir, name: String): Unit
 
   def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): Data
-  def setValue(dir: Dir, key: String, value: Data): Unit
-  def delete(dir: Dir, key: String): Unit
 
-  def notifyOnChange(listener: (Dir, String, Boolean, Boolean) => Unit): Unit = {}
+  def setValue(dir: Dir, key: String, value: Data): Unit = {
+    setValueImpl(dir, key, value)
+    notifyListener(dir, key, isDir=false, addOrChange=true)
+  }
+  def setValueImpl(dir: Dir, key: String, value: Data): Unit
+
+  def delete(dir: Dir, key: String): Unit = {
+    deleteImpl(dir, key)
+    notifyListener(dir, key, isDir=false, addOrChange=false)
+  }
+  def deleteImpl(dir: Dir, key: String): Unit
+
+  @volatile private var listenerOpt: Option[(Dir, String, Boolean, Boolean) => Unit] = None
+
+  def notifyOnChange(listener: (Dir, String, Boolean, Boolean) => Unit): Unit = {
+    listenerOpt = Some(listener)
+  }
+
+  protected def notifyListener(dir: Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+    for (listener <- listenerOpt) {
+      listener(dir, name, isDir, addOrChange)
+    }
+  }
 }
 
 class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
@@ -81,13 +114,15 @@ extends ServerActor with Logging {
   }
 
   // send a notification to all contexts that have listeners registered
-  private def notifyContexts(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean) = {
-    for ((ctx, _) <- contexts.values) {
-      ctx.notify(dir, name, isDir, addOrChange)
+  private def notifyContexts(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+    semaphore.map {
+      for ((ctx, _) <- contexts.values) {
+        ctx.notify(dir, name, isDir, addOrChange)
+      }
     }
   }
 
-  // tell the backend to call us if it detects changes that we didn't trigger
+  // tell the backend to call us when changes are made
   store.notifyOnChange(notifyContexts)
 
   // contains context-specific state and settings
@@ -149,11 +184,7 @@ extends ServerActor with Logging {
      */
     private def _mkDir(dir: store.Dir, name: String, create: Boolean): store.Dir = {
       if (create) require(name.nonEmpty, "Cannot create a directory with an empty name")
-      val (newDir, created) = store.child(dir, name, create)
-      if (created) {
-        notifyContexts(dir, name, isDir=true, addOrChange=true)
-      }
-      newDir
+      store.child(dir, name, create)
     }
 
     @Setting(id=16,
@@ -161,7 +192,6 @@ extends ServerActor with Logging {
              doc="Delete the given subdirectory from the current directory")
     def rmDir(name: String): Unit = {
       store.rmDir(curDir, name)
-      notifyContexts(curDir, name, isDir=true, addOrChange=false)
     }
 
     @Setting(id=20,
@@ -184,7 +214,6 @@ extends ServerActor with Logging {
     def setValue(key: String, value: Data): Unit = {
       require(key.nonEmpty, "Cannot create a key with empty name")
       store.setValue(curDir, key, value)
-      notifyContexts(curDir, key, isDir=false, addOrChange=true)
     }
 
     @Setting(id=40,
@@ -192,7 +221,6 @@ extends ServerActor with Logging {
              doc="Delete the given key from the current directory")
     def delete(key: String): Unit = {
       store.delete(curDir, key)
-      notifyContexts(curDir, key, isDir=false, addOrChange=false)
     }
 
     @Setting(id=50,

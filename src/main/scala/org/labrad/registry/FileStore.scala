@@ -61,7 +61,7 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     (dirs, keys)
   }
 
-  def child(parent: File, name: String, create: Boolean): (File, Boolean) = {
+  def childImpl(parent: File, name: String, create: Boolean): (File, Boolean) = {
     val dir = new File(parent, encode(name) + DIR_EXT)
     val created = if (dir.exists) {
       false
@@ -73,8 +73,8 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     (dir, created)
   }
 
-  def rmDir(dir: File, name: String): Unit = {
-    val (path, created) = child(dir, name, create = false)
+  def rmDirImpl(dir: File, name: String): Unit = {
+    val path = child(dir, name, create = false)
     if (!path.exists) sys.error(s"directory does not exist: $name")
     if (path.isFile) sys.error(s"found file instead of directory: $name")
     path.delete()
@@ -95,13 +95,13 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     }
   }
 
-  def setValue(dir: File, key: String, value: Data): Unit = {
+  def setValueImpl(dir: File, key: String, value: Data): Unit = {
     val path = keyFile(dir, key)
     val bytes = encodeData(value)
     writeFile(path, bytes)
   }
 
-  def delete(dir: File, key: String): Unit = {
+  def deleteImpl(dir: File, key: String): Unit = {
     val path = keyFile(dir, key)
     if (!path.exists) sys.error(s"key does not exist: $key")
     if (path.isDirectory) sys.error(s"found directory instead of file: $key")
