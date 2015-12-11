@@ -27,15 +27,19 @@ object TestUtils extends {
 
   def await[A](future: Future[A]): A = Await.result(future, 30.seconds)
 
-  def withManager[T](tlsPolicy: TlsPolicy = TlsPolicy.OFF)(f: ManagerInfo => T): T = {
+  def defaultStore(): RegistryStore = {
+    val registryFile = File.createTempFile("labrad-registry", "")
+    SQLiteStore(registryFile)
+  }
+
+  def withManager[T](
+    tlsPolicy: TlsPolicy = TlsPolicy.OFF,
+    registryStore: RegistryStore = defaultStore()
+  )(f: ManagerInfo => T): T = {
     val host = "localhost"
     val port = 10000 + Random.nextInt(50000)
 
     val password = "testPassword12345!@#$%".toCharArray
-
-    val registryFile = File.createTempFile("labrad-registry", "")
-
-    val registryStore = SQLiteStore(registryFile)
 
     val ssc = new SelfSignedCertificate()
     val sslCtx = SslContextBuilder.forServer(ssc.certificate, ssc.privateKey).build()

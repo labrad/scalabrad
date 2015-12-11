@@ -1,7 +1,7 @@
 package org.labrad.registry
 
 import org.labrad.{Client, RegistryServerPacket, RegistryServerProxy, TlsMode}
-import org.labrad.data.Data
+import org.labrad.data.{Data, Message}
 import org.labrad.types.Type
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
@@ -26,6 +26,11 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
 
   private val lock = new Object
   private var reg: RegistryServerProxy = null
+  private var listenerOpt: Option[(Dir, String, Boolean, Boolean) => Unit] = None
+
+  override def notifyOnChange(listener: (Dir, String, Boolean, Boolean) => Unit): Unit = {
+    listenerOpt = Some(listener)
+  }
 
   /**
    * Connect to remote registry if we are not currently connected,
@@ -35,13 +40,23 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
     lock.synchronized {
       if (reg == null) {
         val cxn = new Client(name = "Registry Proxy", host = host, port = port, password = password, tls=tls)
-        cxn.connect()
+        val id = 123456L
         cxn.addConnectionListener { case false =>
           lock.synchronized {
             reg = null
           }
         }
-        reg = new RegistryServerProxy(cxn)
+        cxn.addMessageListener {
+          case Message(_, _, `id`, data) =>
+            val (path, name, isDir, addOrChange) = data.get[(Seq[String], String, Boolean, Boolean)]
+            for (listener <- listenerOpt) {
+              listener(path, name, isDir, addOrChange)
+            }
+        }
+        cxn.connect()
+        val registry = new RegistryServerProxy(cxn)
+        Await.result(registry.streamChanges(id, true), 5.seconds)
+        reg = registry
       }
     }
   }
