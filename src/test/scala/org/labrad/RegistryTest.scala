@@ -30,7 +30,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
   }
 
   testAllBackends("registry can store and retrieve arbitrary data") { (backend, exact) =>
-    val (loc, _) = backend.child(backend.root, "test", create = true)
+    val loc = backend.child(backend.root, "test", create = true)
     for (i <- 0 until 100) {
       val tpe = Hydrant.randomType
       val data = Hydrant.randomData(tpe)
@@ -214,8 +214,8 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   testAllBackends("deleting a registry directory containing a dir should fail") { (backend, exact) =>
     val root = backend.root
-    val a = backend.child(root, "a", create = true)._1
-    val b = backend.child(a, "b", create = true)._1
+    val a = backend.child(root, "a", create = true)
+    val b = backend.child(a, "b", create = true)
 
     assert(backend.dir(root)._1 contains "a")
     assert(backend.dir(a)._1 contains "b")

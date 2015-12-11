@@ -104,7 +104,7 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
 
   def parent(dir: SqlDir): SqlDir = dir.parent
 
-  def child(dir: SqlDir, name: String, create: Boolean): (SqlDir, Boolean) = {
+  def childImpl(dir: SqlDir, name: String, create: Boolean): (SqlDir, Boolean) = {
     val idOpt = SQL"""
       SELECT id FROM dirs WHERE parent_id = ${dir.id} AND name = $name
     """.as(long("id").singleOpt)
@@ -125,7 +125,7 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
     (dirs, keys)
   }
 
-  def rmDir(dir: SqlDir, name: String): Unit = {
+  def rmDirImpl(dir: SqlDir, name: String): Unit = {
     SQL" DELETE FROM dirs WHERE parent_id = ${dir.id} AND name = $name ".execute()
   }
 
@@ -150,7 +150,7 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
     }
   }
 
-  def setValue(dir: SqlDir, key: String, value: Data): Unit = {
+  def setValueImpl(dir: SqlDir, key: String, value: Data): Unit = {
     val typ = value.t.toString
     val data = value.toBytes
 
@@ -161,7 +161,7 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
     }
   }
 
-  def delete(dir: SqlDir, key: String): Unit = {
+  def deleteImpl(dir: SqlDir, key: String): Unit = {
     // TODO: do we need to look at boolean return value here?
     SQL" DELETE FROM keys WHERE dir_id = ${dir.id} AND name = $key ".execute()
   }
