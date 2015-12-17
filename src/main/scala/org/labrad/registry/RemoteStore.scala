@@ -44,7 +44,7 @@ class RemoteStore(host: String, port: Int, password: Array[Char], tls: TlsMode) 
         cxn.addMessageListener {
           case Message(_, _, `id`, data) =>
             val (path, name, isDir, addOrChange) = data.get[(Seq[String], String, Boolean, Boolean)]
-            notifyContexts(path, name, isDir, addOrChange)
+            notifyListener(path, name, isDir, addOrChange)
         }
         cxn.connect()
         val registry = new RegistryServerProxy(cxn)
