@@ -436,7 +436,7 @@ object ManagerConfig {
       "Print usage information and exit")
 
     Try {
-      parser.parse(ArgParsing.expandLongArgs(args))
+      parser.parse(args)
       if (help.value.getOrElse(false)) parser.usage()
 
       val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)

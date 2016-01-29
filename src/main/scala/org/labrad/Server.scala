@@ -8,7 +8,7 @@ import org.clapper.argot.ArgotConverters._
 import org.labrad.annotations.IsServer
 import org.labrad.data._
 import org.labrad.errors.LabradException
-import org.labrad.util.{ArgParsing, AsyncSemaphore, Logging, Util}
+import org.labrad.util.{AsyncSemaphore, Logging, Util}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -384,7 +384,7 @@ object ServerConfig {
       "Print usage information and exit")
 
     Try {
-      parser.parse(ArgParsing.expandLongArgs(args))
+      parser.parse(args)
       if (help.value.getOrElse(false)) parser.usage()
 
       val host = hostOpt.value.orElse(env.get("LABRADHOST")).getOrElse("localhost")

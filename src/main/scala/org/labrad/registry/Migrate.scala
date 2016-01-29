@@ -6,7 +6,7 @@ import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Client, RegistryServerProxy}
 import org.labrad.data.Data
-import org.labrad.util.{ArgParsing, Util}
+import org.labrad.util.Util
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -52,7 +52,7 @@ object Migrate {
       "Print usage information and exit")
 
     try {
-      parser.parse(ArgParsing.expandLongArgs(args))
+      parser.parse(args)
       if (help.value.getOrElse(false)) parser.usage()
     } catch {
       case e: ArgotUsageException =>
