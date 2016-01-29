@@ -67,6 +67,14 @@ object ToData {
     }
   }
 
+  implicit def tuple1ToData[T1](implicit s1: ToData[T1]) = new ToData[Tuple1[T1]] {
+    def apply(b: DataBuilder, value: Tuple1[T1]): Unit = {
+      value match {
+        case Tuple1(v1) => b.clusterStart().add(v1).clusterEnd()
+      }
+    }
+  }
+
   implicit def tuple2ToData[T1, T2](implicit s1: ToData[T1], s2: ToData[T2]) = new ToData[(T1, T2)] {
     def apply(b: DataBuilder, value: (T1, T2)): Unit = {
       value match {

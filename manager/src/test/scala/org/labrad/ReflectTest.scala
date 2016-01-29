@@ -3,6 +3,7 @@ package org.labrad
 import java.util.Date
 import org.labrad.annotations.{Accept, Return, Setting}
 import org.labrad.data._
+import org.labrad.macros.Macros
 import org.labrad.manager.{ClientActor, Hub, ManagerImpl, ServerActor}
 import org.labrad.types.Pattern
 import org.labrad.util.Logging
@@ -27,6 +28,9 @@ class NoInput extends Testable("methods with no input params") {
     (2L, "noInput2", "", "?")
   )
 }
+object NoInput {
+  val handlers = Macros.makeHandler[NoInput]
+}
 
 class NoOutput extends Testable("methods with no output params") {
   @Setting(id=1, name="noOutput", doc="")
@@ -47,6 +51,9 @@ class NoOutput extends Testable("methods with no output params") {
     (3L, "noOutput3", "", ""),
     (4L, "noOutput4", "?", "")
   )
+}
+object NoOutput {
+  val handlers = Macros.makeHandler[NoOutput]
 }
 
 class Primitives extends Testable("simple primitive input/output types") {
