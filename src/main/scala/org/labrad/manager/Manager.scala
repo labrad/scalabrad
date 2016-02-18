@@ -59,8 +59,7 @@ class CentralNode(
   tracker.connectServer(Manager.ID, Manager.NAME)
 
   for (store <- storeOpt) {
-    // Registry gets id 2L
-    val name = "Registry"
+    val name = Registry.NAME
     val id = hub.allocateServerId(name)
     val server = new Registry(id, name, store, hub, tracker)
     hub.connectServer(id, name, server)

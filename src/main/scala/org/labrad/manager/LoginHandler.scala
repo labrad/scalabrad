@@ -7,6 +7,7 @@ import java.io.{ByteArrayOutputStream, File, FileInputStream}
 import java.net.{InetAddress, InetSocketAddress}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
+import java.util.concurrent.TimeoutException
 import org.labrad.ContextCodec
 import org.labrad.data._
 import org.labrad.errors._
@@ -185,6 +186,13 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
 
         case _ =>
           throw LabradException(1, "Invalid identification packet")
+      }
+
+      try {
+        Await.result(hub.registryConnected, 30.seconds)
+      } catch {
+        case _: TimeoutException =>
+          throw LabradException(3, "Timeout while waiting for registry to connect")
       }
 
       // logged in successfully; add new handler to channel pipeline

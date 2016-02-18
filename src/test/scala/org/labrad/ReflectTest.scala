@@ -7,6 +7,7 @@ import org.labrad.manager.{ClientActor, Hub, ManagerImpl, ServerActor}
 import org.labrad.types.Pattern
 import org.labrad.util.Logging
 import org.scalatest.FunSuite
+import scala.concurrent.Future
 import scala.reflect.ClassTag
 import scala.reflect.runtime.{ currentMirror => cm, universe => ru }
 
@@ -377,6 +378,8 @@ class ReflectTests extends FunSuite with Logging {
         ServerInfo(2L, "Registry", "the registry", Seq())
       )
       def serverInfo(id: Either[Long, String]): Option[ServerInfo] = None
+
+      def registryConnected = Future.successful(())
     }
 
     val inst = new ManagerImpl(1L, "Manager", hub, null, null, null)
