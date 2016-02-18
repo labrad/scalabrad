@@ -30,7 +30,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
   }
 
   testAllBackends("registry can store and retrieve arbitrary data") { (backend, exact) =>
-    val (loc, _) = backend.child(backend.root, "test", create = true)
+    val loc = backend.child(backend.root, "test", create = true)
     for (i <- 0 until 1000) {
       val tpe = Hydrant.randomType
       val data = Hydrant.randomData(tpe)

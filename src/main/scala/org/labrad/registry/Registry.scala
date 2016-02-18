@@ -18,13 +18,48 @@ trait RegistryStore {
   def root: Dir
   def pathTo(dir: Dir): Seq[String]
   def parent(dir: Dir): Dir
-  def child(parent: Dir, name: String, create: Boolean): (Dir, Boolean)
   def dir(curDir: Dir): (Seq[String], Seq[String])
-  def rmDir(dir: Dir, name: String): Unit
+
+  def child(parent: Dir, name: String, create: Boolean): Dir = {
+    val (newDir, created) = childImpl(parent, name, create)
+    if (created) {
+      notifyListener(parent, name, isDir=true, addOrChange=true)
+    }
+    newDir
+  }
+  def childImpl(parent: Dir, name: String, create: Boolean): (Dir, Boolean)
+
+  def rmDir(dir: Dir, name: String): Unit = {
+    rmDirImpl(dir, name)
+    notifyListener(dir, name, isDir=true, addOrChange=false)
+  }
+  def rmDirImpl(dir: Dir, name: String): Unit
 
   def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): Data
-  def setValue(dir: Dir, key: String, value: Data): Unit
-  def delete(dir: Dir, key: String): Unit
+
+  def setValue(dir: Dir, key: String, value: Data): Unit = {
+    setValueImpl(dir, key, value)
+    notifyListener(dir, key, isDir=false, addOrChange=true)
+  }
+  def setValueImpl(dir: Dir, key: String, value: Data): Unit
+
+  def delete(dir: Dir, key: String): Unit = {
+    deleteImpl(dir, key)
+    notifyListener(dir, key, isDir=false, addOrChange=false)
+  }
+  def deleteImpl(dir: Dir, key: String): Unit
+
+  @volatile private var listenerOpt: Option[(Dir, String, Boolean, Boolean) => Unit] = None
+
+  def notifyOnChange(listener: (Dir, String, Boolean, Boolean) => Unit): Unit = {
+    listenerOpt = Some(listener)
+  }
+
+  protected def notifyListener(dir: Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+    for (listener <- listenerOpt) {
+      listener(dir, name, isDir, addOrChange)
+    }
+  }
 }
 
 class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
@@ -79,17 +114,23 @@ extends ServerActor with Logging {
   }
 
   // send a notification to all contexts that have listeners registered
-  private def messageContexts(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean) = {
-    for ((ctx, _) <- contexts.values) {
-      ctx.message(dir, name, isDir, addOrChange)
+  private def notifyContexts(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+    semaphore.map {
+      for ((ctx, _) <- contexts.values) {
+        ctx.notify(dir, name, isDir, addOrChange)
+      }
     }
   }
+
+  // tell the backend to call us when changes are made
+  store.notifyOnChange(notifyContexts)
 
   // contains context-specific state and settings
   class RegistryContext(context: Context) {
 
     private var curDir = store.root
-    private var changeListener: Option[(Long, Long)] = None // TODO: allow a context to send notifications to more than one target
+    private var changeListener: Option[(Long, Long)] = None
+    private var allChangeListener: Option[(Long, Long)] = None
 
     @Setting(id=1,
              name="dir",
@@ -143,11 +184,7 @@ extends ServerActor with Logging {
      */
     private def _mkDir(dir: store.Dir, name: String, create: Boolean): store.Dir = {
       if (create) require(name.nonEmpty, "Cannot create a directory with an empty name")
-      val (newDir, created) = store.child(dir, name, create)
-      if (created) {
-        messageContexts(dir, name, isDir=true, addOrChange=true)
-      }
-      newDir
+      store.child(dir, name, create)
     }
 
     @Setting(id=16,
@@ -155,7 +192,6 @@ extends ServerActor with Logging {
              doc="Delete the given subdirectory from the current directory")
     def rmDir(name: String): Unit = {
       store.rmDir(curDir, name)
-      messageContexts(curDir, name, isDir=true, addOrChange=false)
     }
 
     @Setting(id=20,
@@ -178,7 +214,6 @@ extends ServerActor with Logging {
     def setValue(key: String, value: Data): Unit = {
       require(key.nonEmpty, "Cannot create a key with empty name")
       store.setValue(curDir, key, value)
-      messageContexts(curDir, key, isDir=false, addOrChange=true)
     }
 
     @Setting(id=40,
@@ -186,7 +221,6 @@ extends ServerActor with Logging {
              doc="Delete the given key from the current directory")
     def delete(key: String): Unit = {
       store.delete(curDir, key)
-      messageContexts(curDir, key, isDir=false, addOrChange=false)
     }
 
     @Setting(id=50,
@@ -194,6 +228,13 @@ extends ServerActor with Logging {
              doc="Requests notifications if the contents of the current directory change")
     def notifyOnChange(r: RequestContext, id: Long, enable: Boolean): Unit = {
       changeListener = if (enable) Some((r.source, id)) else None
+    }
+
+    @Setting(id=55,
+             name="Stream Changes",
+             doc="Requests notifications of all changes made in any directory")
+    def streamChanges(r: RequestContext, id: Long, enable: Boolean): Unit = {
+      allChangeListener = if (enable) Some((r.source, id)) else None
     }
 
     @Setting(id=100,
@@ -216,7 +257,13 @@ extends ServerActor with Logging {
      * the message, and has a message listener registered, then we will
      * send a message of the form (s{dirOrKeyName}, b{isDir}, b{addOrChange})
      */
-    private[registry] def message(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+    private[registry] def notify(dir: store.Dir, name: String, isDir: Boolean, addOrChange: Boolean): Unit = {
+      for ((target, msgId) <- allChangeListener) {
+        log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
+        val msg = Cluster(Arr(store.pathTo(dir).toArray), Str(name), Bool(isDir), Bool(addOrChange))
+        val pkt = Packet(0, target = id, context = context, records = Seq(Record(msgId, msg)))
+        hub.message(target, pkt)
+      }
       if (dir == curDir) {
         for ((target, msgId) <- changeListener) {
           log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
@@ -228,4 +275,3 @@ extends ServerActor with Logging {
     }
   }
 }
-
