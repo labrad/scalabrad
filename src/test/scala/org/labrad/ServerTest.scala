@@ -39,7 +39,7 @@ class TestSrv extends Server[TestSrv, TestCtx] with Logging {
 
 
 class TestCtx(
-  cxn: ServerConnection,
+  cxn: Connection,
   context: Context,
   expiredContexts: BlockingQueue[Context]
 ) extends ServerContext with Logging {

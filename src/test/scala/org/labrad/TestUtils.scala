@@ -74,7 +74,7 @@ object TestUtils extends {
 
   def withServer[T](host: String, port: Int, password: Array[Char])(body: TestSrv => T) = {
     val s = new TestSrv
-    s.start(host, port, password)
+    Server.start(s, ServerConfig(host, port, password))
     try {
       body(s)
     } finally {

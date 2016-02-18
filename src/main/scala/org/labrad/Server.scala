@@ -22,82 +22,40 @@ trait ServerContext {
   def expire(): Unit
 }
 
-abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends Logging {
+trait IServer {
+  val name: String
+  val doc: String
+  val settings: Seq[SettingInfo]
+
+  def connected(cxn: Connection)
+  def handleRequest(packet: Packet): Future[Packet]
+  def expire(context: Context)
+  def stop()
+}
+
+abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends IServer with Logging {
 
   val name: String
   val doc: String
 
-  private var _cxn: ServerConnection = _
+  private var _cxn: Connection = _
   private val shutdownCalled = new AtomicBoolean(false)
 
   /**
    * Allow subclasses to access (but not modify) the server connection
    */
-  protected def cxn: ServerConnection = _cxn
+  protected def cxn: Connection = _cxn
 
   protected val contexts = mutable.Map.empty[Context, ContextState]
 
   private val (srvSettings, srvHandlerFactory) = Reflect.makeHandler[S]
   private val (ctxSettings, ctxHandlerFactory) = Reflect.makeHandler[T]
-  private val settings = srvSettings ++ ctxSettings
   private val srvHandler = srvHandlerFactory(this.asInstanceOf[S])
 
   private val srvSettingIds = srvSettings.map(_.id).toSet
   private val ctxSettingIds = ctxSettings.map(_.id).toSet
 
-  /**
-   * Start this server by connecting to the manager at the given location.
-   */
-  def start(
-    host: String,
-    port: Int,
-    password: Array[Char],
-    nameOpt: Option[String] = None,
-    tls: TlsMode = TlsMode.STARTTLS,
-    tlsCerts: Map[String, File] = Map()
-  ): Unit = {
-    val name = Util.interpolateEnvironmentVars(nameOpt.getOrElse(this.name))
-    _cxn = new ServerConnection(name, doc, host, port, password, tls, tlsCerts, packet => handleRequest(packet))
-    cxn.connect()
-
-    // if the vm goes down or we lose the connection, shutdown
-    sys.ShutdownHookThread { stop() }
-    cxn.addConnectionListener { case false => stop() }
-
-    init()
-
-    val msgId = cxn.getMessageId
-    val msgCtx = cxn.newContext
-    cxn.addMessageListener {
-      case Message(`msgId`, `msgCtx`, _, Cluster(UInt(high), UInt(low))) =>
-        val context = Context(high, low)
-        val stateOpt = contexts.synchronized { contexts.remove(context) }
-        stateOpt.foreach { state =>
-          state.expire().onFailure { case e =>
-            log.error(s"error expiring $context", e)
-          }
-        }
-    }
-
-    val registrations = settings.sortBy(_.id).map(s =>
-      Cluster(
-        UInt(s.id),
-        Str(s.name),
-        Str(s.doc),
-        Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
-        Arr(s.returns.strs.map(Str(_))),
-        Str(""))
-    )
-
-    val registerF = for {
-      _ <- cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*)
-      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
-      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
-    } yield ()
-    Await.result(registerF, 30.seconds)
-
-    log.info("Now serving...")
-  }
+  val settings = srvSettings ++ ctxSettings
 
   /**
    * A promise that will be completed when this server shuts down.
@@ -134,6 +92,11 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     Await.result(shutdownPromise.future, timeout)
   }
 
+  def connected(cxn: Connection): Unit = {
+    _cxn = cxn
+    init()
+  }
+
   // user-overidden methods
   def init(): Unit
   def shutdown(): Unit
@@ -158,7 +121,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     }
   }
 
-  private def handleRequest(packet: Packet): Future[Packet] = {
+  def handleRequest(packet: Packet): Future[Packet] = {
     val contextState = contexts.synchronized {
       contexts.getOrElseUpdate(packet.context, new ContextState)
     }
@@ -198,16 +161,34 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   }
 
   /**
+   * Expire the given context from outside.
+   *
+   * This is called when we get a notification from the manager to expire the
+   * context. Since this notification is delivered asynchronously from outside,
+   * we must grab the context's lock before expiring it.
+   */
+  def expire(context: Context): Unit = {
+    val stateOpt = contexts.synchronized { contexts.remove(context) }
+    for (state <- stateOpt) {
+      state.expire().onFailure { case e =>
+        log.error(s"error expiring $context", e)
+      }
+    }
+  }
+
+  /**
    * Expire the given context.
    *
    * Does not attempt to acquire the context lock, so this can and should be
    * used only if the lock is already being held, for example while handling
    * a request in this context. Note that the setting method must have a
-   * different name from this function, in order not to confuse the
+   * different name from this function, in order not to confuse the reflection
+   * code which looks for setting methods.
    */
   protected def doExpireContext(context: Context): Unit = {
-    contexts.synchronized {
-      contexts.get(context).foreach(_.expireNoLock())
+    val stateOpt = contexts.synchronized { contexts.remove(context) }
+    for (state <- stateOpt) {
+      state.expireNoLock()
     }
   }
 }
@@ -276,7 +257,7 @@ object Server {
    *
    * Includes basic parsing of command line options.
    */
-  def run(s: Server[_, _], args: Array[String]): Unit = {
+  def run(s: IServer, args: Array[String]): Unit = {
     val config = ServerConfig.fromCommandLine(args) match {
       case Success(config) => config
 
@@ -288,12 +269,58 @@ object Server {
         println(s"unexpected error: $e")
         return
     }
-    s.start(
-      config.host,
-      if (config.tls == TlsMode.ON) config.tlsPort else config.port,
-      config.password,
-      config.nameOpt
+    start(s, config)
+  }
+
+  def start(server: IServer, config: ServerConfig): Connection = {
+
+    val shutdownCalled = new AtomicBoolean(false)
+
+    val name = Util.interpolateEnvironmentVars(config.nameOpt.getOrElse(server.name))
+    val port = if (config.tls == TlsMode.ON) config.tlsPort else config.port
+    val cxn = new ServerConnection(
+      name = name,
+      doc = server.doc,
+      host = config.host,
+      port = port,
+      password = config.password,
+      tls = config.tls,
+      tlsCerts = Map(),
+      handler = packet => server.handleRequest(packet)
     )
+    cxn.connect()
+
+    // if the vm goes down or we lose the connection, shutdown
+    sys.ShutdownHookThread { server.stop() }
+    cxn.addConnectionListener { case false => server.stop() }
+
+    server.connected(cxn)
+
+    val msgId = cxn.getMessageId
+    val msgCtx = cxn.newContext
+    cxn.addMessageListener {
+      case Message(`msgId`, `msgCtx`, _, Cluster(UInt(high), UInt(low))) =>
+        server.expire(Context(high, low))
+    }
+
+    val registrations = server.settings.sortBy(_.id).map(s =>
+      Cluster(
+        UInt(s.id),
+        Str(s.name),
+        Str(s.doc),
+        Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
+        Arr(s.returns.strs.map(Str(_))),
+        Str(""))
+    )
+
+    val registerF = for {
+      _ <- cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*)
+      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
+      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
+    } yield ()
+    Await.result(registerF, 30.seconds)
+
+    cxn
   }
 }
 
@@ -304,12 +331,17 @@ case class ServerConfig(
   host: String,
   port: Int,
   password: Array[Char],
-  nameOpt: Option[String],
-  tls: TlsMode,
-  tlsPort: Int
+  nameOpt: Option[String] = None,
+  tls: TlsMode = ServerConfig.Defaults.tls,
+  tlsPort: Int = ServerConfig.Defaults.tlsPort
 )
 
 object ServerConfig {
+  object Defaults {
+    val tls = TlsMode.STARTTLS
+    val tlsPort = 7643
+  }
+
   /**
    * Create ServerConfig from command line and map of environment variables.
    *
@@ -389,8 +421,8 @@ object ServerConfig {
 
       val host = hostOpt.value.orElse(env.get("LABRADHOST")).getOrElse("localhost")
       val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
-      val tls = tlsOpt.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(TlsMode.STARTTLS)
-      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(7643)
+      val tls = tlsOpt.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(ServerConfig.Defaults.tls)
+      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(ServerConfig.Defaults.tlsPort)
       val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
 
       ServerConfig(host, port, password, nameOpt.value, tls, tlsPort)
