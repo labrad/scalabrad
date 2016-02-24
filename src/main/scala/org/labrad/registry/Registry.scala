@@ -66,29 +66,45 @@ object Registry {
   val NAME = "Registry"
 }
 
-class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
-extends ServerActor with Logging {
+class RegistryActor(registry: Registry) extends ServerActor {
+  val srcId = ""
+
+  def message(packet: Packet): Unit = registry.message(srcId, packet)
+  def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = registry.request(srcId, packet)
+
+  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = registry.expireContext(srcId, ctx)
+  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = registry.expireAll(srcId, high)
+
+  def close(): Unit = {}
+}
+
+
+class Registry(id: Long, val name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
+extends Logging {
 
   // enforce doing one thing at a time using an async semaphore
   private val semaphore = new AsyncSemaphore(1)
 
-  private val contexts = mutable.Map.empty[Context, (RegistryContext, RequestContext => Data)]
+  type Src = String
+  private val contexts = mutable.Map.empty[(Src, Context), (RegistryContext, RequestContext => Data)]
 
-  private val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
-  private val (settings, bind) = Reflect.makeHandler[RegistryContext]
+  val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
+  private val (_settings, bind) = Reflect.makeHandler[RegistryContext]
+
+  val settings = _settings
 
   // send info about this server and its settings to the manager
   hub.setServerInfo(ServerInfo(id, name, doc, settings))
 
-  def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = semaphore.map {
-    expire(if (contexts.contains(ctx)) Seq(ctx) else Seq())
+  def expireContext(src: Src, ctx: Context)(implicit timeout: Duration): Future[Long] = semaphore.map {
+    expire(if (contexts.contains((src, ctx))) Seq((src, ctx)) else Seq())
   }
 
-  def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = semaphore.map {
-    expire(contexts.keys.filter(_.high == high).toSeq)
+  def expireAll(src: Src, high: Long)(implicit timeout: Duration): Future[Long] = semaphore.map {
+    expire(contexts.keys.filter { case (src, ctx) => ctx.high == high }.toSeq)
   }
 
-  private def expire(ctxs: Seq[Context]): Long = ctxs match {
+  private def expire(ctxs: Seq[(Src, Context)]): Long = ctxs match {
     case Seq() => 0L
     case _ =>
       log.debug(s"expiring contexts: ${ctxs.mkString(",")}")
@@ -96,18 +112,16 @@ extends ServerActor with Logging {
       1L
   }
 
-  def close(): Unit = {}
-
-  def message(packet: Packet): Unit = {
+  def message(src: Src, packet: Packet): Unit = {
     tracker.msgRecv(id)
   }
 
-  def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = semaphore.map {
+  def request(src: Src, packet: Packet)(implicit timeout: Duration): Future[Packet] = semaphore.map {
     // TODO: handle timeout
     tracker.serverReq(id)
     val response = Server.handle(packet, includeStackTrace = false) { req =>
-      val (_, handler) = contexts.getOrElseUpdate(req.context, {
-        val regCtx = new RegistryContext(req.context)
+      val (_, handler) = contexts.getOrElseUpdate((src, req.context), {
+        val regCtx = new RegistryContext(src, req.context)
         val handler = bind(regCtx)
         (regCtx, handler)
       })
@@ -130,7 +144,7 @@ extends ServerActor with Logging {
   store.notifyOnChange(notifyContexts)
 
   // contains context-specific state and settings
-  class RegistryContext(context: Context) {
+  class RegistryContext(src: Src, context: Context) {
 
     private var curDir = store.root
     private var changeListener: Option[(Long, Long)] = None
@@ -246,7 +260,7 @@ extends ServerActor with Logging {
              doc="Copy context state from the specified context into the current context (DEPRECATED)")
     def duplicateContext(r: RequestContext, high: Long, low: Long): Unit = {
       val xHigh = if (high == 0) r.source else high
-      contexts.get(Context(xHigh, low)) match {
+      contexts.get((src, Context(xHigh, low))) match {
         case None => sys.error(s"context ($xHigh, $low) does not exist")
         case Some((other, _)) =>
           curDir = other.curDir

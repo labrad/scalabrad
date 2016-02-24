@@ -61,8 +61,8 @@ class CentralNode(
   for (store <- storeOpt) {
     val name = Registry.NAME
     val id = hub.allocateServerId(name)
-    val server = new Registry(id, name, store, hub, tracker)
-    hub.connectServer(id, name, server)
+    val registry = new Registry(id, name, store, hub, tracker)
+    hub.connectServer(id, name, new RegistryActor(registry))
   }
 
   // start listening for incoming network connections
