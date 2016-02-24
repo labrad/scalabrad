@@ -11,7 +11,7 @@ import java.security.{MessageDigest, SecureRandom}
 import java.nio.file.Files
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.TlsMode
+import org.labrad.{ServerConfig, TlsMode}
 import org.labrad.annotations._
 import org.labrad.crypto.Certs
 import org.labrad.data._
@@ -61,7 +61,8 @@ class CentralNode(
   for (store <- storeOpt) {
     val name = Registry.NAME
     val id = hub.allocateServerId(name)
-    val registry = new Registry(id, name, store, hub, tracker)
+    val externalConfig = ServerConfig("", 0, password)
+    val registry = new Registry(id, name, store, hub, tracker, externalConfig)
     hub.connectServer(id, name, new RegistryActor(registry))
   }
 

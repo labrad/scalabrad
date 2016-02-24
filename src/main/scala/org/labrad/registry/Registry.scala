@@ -1,7 +1,9 @@
 package org.labrad.registry
 
-import org.labrad.{Reflect, RequestContext, Server, ServerInfo}
+import org.labrad._
 import org.labrad.annotations._
+import org.labrad.concurrent.{Chan, Send, Time}
+import org.labrad.concurrent.Go._
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.{Hub, ServerActor, StatsTracker}
@@ -78,8 +80,120 @@ class RegistryActor(registry: Registry) extends ServerActor {
   def close(): Unit = {}
 }
 
+class RegistryConnector(registry: Registry, config: ServerConfig) extends Logging {
 
-class Registry(id: Long, val name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
+  implicit val timeout = 30.seconds
+  val reconnectDelay = 10.seconds
+  val srcId = s"${config.host}:${config.port}"
+
+  class RegistryServer(stopped: Send[Unit]) extends IServer {
+    val name = registry.name
+    val doc = registry.doc
+    val settings = registry.settings
+
+    def connected(cxn: Connection): Unit = {}
+    def handleRequest(packet: Packet): Future[Packet] = registry.request(srcId, packet)
+    def expire(context: Context): Unit = registry.expireContext(srcId, context)
+    def stop(): Unit = {
+      registry.expireAll(srcId)
+      stopped.send(())
+    }
+  }
+
+  @volatile private var connected = false
+  def isConnected = connected
+
+  sealed trait Msg
+  case object Ping extends Msg
+  case object Reconnect extends Msg
+  case object Stop extends Msg
+
+  private val ctrl = Chan[Msg](1)
+
+  private val runFuture = go {
+    var done = false
+    while (!done) {
+      log.info(s"$srcId: connecting...")
+      val disconnected = Chan[Unit](1)
+      val server = new RegistryServer(disconnected)
+
+      val cxn: Connection = try {
+        val cxn = Server.start(server, config)
+        connected = true
+        log.info(s"$srcId: connected")
+        cxn
+      } catch {
+        case e: Exception =>
+          log.error(s"$srcId: failed to connect", e)
+          null
+      }
+
+      def doClose(): Unit = {
+        try {
+          cxn.close()
+        } catch {
+          case e: Exception =>
+            log.error(s"$srcId: error during connection close", e)
+        }
+      }
+
+      while (connected) {
+        select(
+          disconnected.onRecv { _ =>
+            log.info(s"$srcId: connection lost; will reconnect after $reconnectDelay")
+            connected = false
+          },
+          ctrl.onRecv {
+            case Ping =>
+              log.info(s"$srcId: ping")
+              val mgr = new ManagerServerProxy(cxn)
+              mgr.echo(Str("ping")).onFailure {
+                case e: Exception =>
+                  log.error(s"$srcId: error during ping", e)
+              }
+
+            case Reconnect =>
+              doClose()
+              log.info(s"$srcId: will reconnect after $reconnectDelay")
+              connected = false
+
+            case Stop =>
+              doClose()
+              log.info(s"$srcId: stopped")
+              connected = false
+              done = true
+          }
+        )
+      }
+
+      if (!done) {
+        select(
+          Time.after(reconnectDelay).onRecv { _ => },
+          ctrl.onRecv {
+            case Ping | Reconnect =>
+            case Stop => done = true
+          }
+        )
+      }
+    }
+  }
+
+  def ping(): Unit = {
+    ctrl.send(Ping)
+  }
+
+  def reconnect(): Unit = {
+    ctrl.send(Reconnect)
+  }
+
+  def stop(): Future[Unit] = {
+    ctrl.send(Stop)
+    runFuture
+  }
+}
+
+
+class Registry(id: Long, val name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker, externalConfig: ServerConfig)
 extends Logging {
 
   // enforce doing one thing at a time using an async semaphore
@@ -87,6 +201,7 @@ extends Logging {
 
   type Src = String
   private val contexts = mutable.Map.empty[(Src, Context), (RegistryContext, RequestContext => Data)]
+  private val managers = mutable.Map.empty[(String, Int), RegistryConnector]
 
   val doc = "Provides a file system-like heirarchical storage of chunks of labrad data. Also allows clients to register for notifications when directories or keys are added or changed."
   private val (_settings, bind) = Reflect.makeHandler[RegistryContext]
@@ -101,7 +216,11 @@ extends Logging {
   }
 
   def expireAll(src: Src, high: Long)(implicit timeout: Duration): Future[Long] = semaphore.map {
-    expire(contexts.keys.filter { case (src, ctx) => ctx.high == high }.toSeq)
+    expire(contexts.keys.filter { case (s, ctx) => s == src && ctx.high == high }.toSeq)
+  }
+
+  def expireAll(src: Src)(implicit timeout: Duration): Future[Unit] = semaphore.map {
+    expire(contexts.keys.filter { case (s, _) => s == src }.toSeq)
   }
 
   private def expire(ctxs: Seq[(Src, Context)]): Long = ctxs match {
@@ -142,6 +261,36 @@ extends Logging {
 
   // tell the backend to call us when changes are made
   store.notifyOnChange(notifyContexts)
+
+  private def refreshManagers(): Unit = {
+    // load the list of managers from the registry
+    var dir = store.root
+    dir = store.child(dir, "Servers", create = true)
+    dir = store.child(dir, "Registry", create = true)
+    dir = store.child(dir, "Multihead", create = true)
+    val default = DataBuilder("*(sws)").array(0).result()
+    val result = store.getValue(dir, "Managers", default = Some((true, default)))
+    val configs = result.get[Seq[(String, Long, String)]].map {
+      case (host, port, pw) =>
+        externalConfig.copy(
+          host = host,
+          port = if (port != 0) port.toInt else externalConfig.port,
+          password = if (pw != "") pw.toCharArray else externalConfig.password
+        )
+    }
+    val urls = configs.map(c => s"${c.host}:${c.port}")
+    log.info(s"managers in registry: ${urls.mkString(", ")}")
+
+    // connect to any managers we are not already connected to
+    for (config <- configs) {
+      managers.getOrElseUpdate((config.host, config.port), {
+        new RegistryConnector(Registry.this, config)
+      })
+    }
+  }
+
+  // connect to managers that are stored in the registry
+  refreshManagers()
 
   // contains context-specific state and settings
   class RegistryContext(src: Src, context: Context) {
@@ -265,6 +414,76 @@ extends Logging {
         case Some((other, _)) =>
           curDir = other.curDir
           // XXX: Any other state to copy here?
+      }
+    }
+
+    @Setting(id=1000,
+             name="Managers",
+             doc="Get a list of managers we are connecting to as an external registry")
+    def managersList(): Seq[(String, Int, Boolean)] = {
+      managers.toSeq.map { case ((host, port), reg) =>
+        (host, port, reg.isConnected)
+      }.sorted
+    }
+
+    @Setting(id=1001,
+             name="Managers Refresh",
+             doc="Refresh the list of managers from the registry.")
+    def managersRefresh(): Unit = {
+      refreshManagers()
+    }
+
+    @Setting(id=1002,
+             name="Managers Add",
+             doc="Add a new manager to connect to as an external registry")
+    def managersAdd(host: String, port: Option[Int], password: Option[String]): Unit = {
+      val config = externalConfig.copy(
+        host = host,
+        port = port.getOrElse(externalConfig.port),
+        password = password.map(_.toCharArray).getOrElse(externalConfig.password)
+      )
+      managers.getOrElseUpdate((config.host, config.port), {
+        new RegistryConnector(Registry.this, config)
+      })
+    }
+
+    @Setting(id=1003,
+             name="Managers Ping",
+             doc="Send a network ping to all external managers")
+    def managersPing(hostPat: String = ".*", port: Int = 0): Unit = {
+      for ((_, reg) <- matchingManagers(hostPat, port)) {
+        reg.ping()
+      }
+    }
+
+    @Setting(id=1004,
+             name="Managers Reconnect",
+             doc="Disconnect from matching managers and reconnect")
+    def managersReconnect(hostPat: String, port: Int = 0): Unit = {
+      for ((key, reg) <- matchingManagers(hostPat, port.toInt)) {
+        reg.reconnect()
+        managers.remove(key)
+      }
+    }
+
+    @Setting(id=1005,
+             name="Managers Drop",
+             doc="Disconnect from matching managers and do not reconnect")
+    def managersDrop(hostPat: String, port: Int = 0): Unit = {
+      for ((key, reg) <- matchingManagers(hostPat, port.toInt)) {
+        reg.stop()
+        managers.remove(key)
+      }
+    }
+
+    private def matchingManagers(hostPat: String, port: Int): Seq[((String, Int), RegistryConnector)] = {
+      val hostRegex = hostPat.r
+      for {
+        ((h, p), reg) <- managers.toSeq
+        if hostRegex.unapplySeq(h).isDefined
+        if port == 0 || port == p
+      } yield {
+        ((h, p), reg)
       }
     }
 
