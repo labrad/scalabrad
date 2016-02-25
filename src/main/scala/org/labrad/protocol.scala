@@ -1,9 +1,10 @@
 package org.labrad
 
-import io.netty.buffer.ByteBuf
+import io.netty.buffer.{ByteBuf, Unpooled}
 import io.netty.channel._
 import io.netty.handler.codec._
 import io.netty.util.AttributeKey
+import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
 import java.util.{List => JList}
@@ -22,14 +23,23 @@ import org.labrad.util.Logging
  */
 class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[Packet] with Logging {
 
+  // Byte order of this channel, based on first word of first received packet
   private var byteOrder: ByteOrder = forceByteOrder
 
-  protected override def decode(ctx: ChannelHandlerContext, in: ByteBuf, out: JList[AnyRef]): Unit = {
-    // Wait until the full header is available
-    if (in.readableBytes < 20) return
+  // Decoding state of the current packet.
+  //
+  // Previously we used ByteToMessageCodec's buffer management to accumulate
+  // bytes until we had the full packet, but it has quadratic scaling and so
+  // gets very slow for large packets. Instead, we use a ByteArrayOutputStream
+  // to collect the bytes.
+  case class DecodeState(context: Context, request: Int, target: Long, dataLen: Int, bytes: ByteArrayOutputStream)
+  private var state: DecodeState = _
 
+  protected override def decode(ctx: ChannelHandlerContext, in: ByteBuf, out: JList[AnyRef]): Unit = {
     // detect endianness from target field of first packet
     if (byteOrder == null) {
+      if (in.readableBytes < 4) return
+
       byteOrder = in.getInt(12) match {
         case 0x00000001 => // endianness is okay. do nothing
           in.order
@@ -46,28 +56,44 @@ class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[P
     }
     val buf = in.order(byteOrder)
 
-    log.trace(s"decoding packet: ${in.order}")
-    log.trace(s"buffer byteOrder: ${buf.order}")
+    if (state == null) {
+      // Wait until the full header is available
+      if (in.readableBytes < 20) return
 
-    // Unpack the header
-    buf.markReaderIndex
-    val high = buf.readUnsignedInt
-    val low = buf.readUnsignedInt
-    val request = buf.readInt
-    val target = buf.readUnsignedInt
-    val dataLen = buf.readInt
+      log.trace(s"decoding packet: ${in.order}")
+      log.trace(s"buffer byteOrder: ${buf.order}")
 
-    if (buf.readableBytes < dataLen) {
-      // Wait until enough data is available
-      buf.resetReaderIndex
-    } else {
-      // Unpack the received data into a list of records
-      val recordBuf = buf.readSlice(dataLen)
-      val records = Packet.extractRecords(recordBuf)
+      // Unpack the header
+      val high = buf.readUnsignedInt
+      val low = buf.readUnsignedInt
+      val request = buf.readInt
+      val target = buf.readUnsignedInt
+      val dataLen = buf.readInt
 
-      // Pass along the assembled packet
-      val packet = Packet(request, target, Context(high, low), records)
-      out.add(packet)
+      // Start decoding a new packet
+      state = DecodeState(Context(high, low), request, target, dataLen, new ByteArrayOutputStream)
+    }
+
+    if (state != null) {
+      val remaining = state.dataLen - state.bytes.size
+      val available = Math.min(remaining, buf.readableBytes)
+      buf.readBytes(state.bytes, available)
+
+      if (state.bytes.size == state.dataLen) {
+        // Unpack the received data into a list of records
+        val bytes = state.bytes.toByteArray
+        val recordBuf = Unpooled.wrappedBuffer(bytes).order(byteOrder)
+        recordBuf.retain()
+        val records = Packet.extractRecords(recordBuf)
+        recordBuf.release()
+
+        // Pass along the assembled packet
+        val packet = Packet(state.request, state.target, state.context, records)
+        out.add(packet)
+
+        // Reset decoder state for next packet
+        state = null
+      }
     }
   }
 
