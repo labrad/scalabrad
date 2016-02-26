@@ -34,7 +34,7 @@ libraryDependencies ++= Seq(
   "org.slf4j" % "slf4j-api" % "1.7.2",
   "ch.qos.logback" % "logback-classic" % "1.0.6",
   "com.typesafe.play" %% "anorm" % "2.4.0-M2",
-  "org.xerial" % "sqlite-jdbc" % "3.8.7",
+  "org.xerial" % "sqlite-jdbc" % "3.8.11.2",
   "org.bouncycastle" % "bcprov-jdk15on" % "1.52",
   "org.bouncycastle" % "bcpkix-jdk15on" % "1.52"
 )
