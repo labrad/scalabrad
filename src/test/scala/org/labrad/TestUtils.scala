@@ -33,20 +33,20 @@ object TestUtils extends {
 
     val password = "testPassword12345!@#$%".toCharArray
 
-    val registryFile = File.createTempFile("labrad-registry", "")
+    withTempDir { registryDir =>
+      val registryStore = new BinaryFileStore(registryDir)
 
-    val registryStore = SQLiteStore(registryFile)
+      val ssc = new SelfSignedCertificate()
+      val sslCtx = SslContextBuilder.forServer(ssc.certificate, ssc.privateKey).build()
+      val tlsHosts = TlsHostConfig((ssc.certificate, sslCtx))
+      val listeners = Seq(port -> tlsPolicy)
 
-    val ssc = new SelfSignedCertificate()
-    val sslCtx = SslContextBuilder.forServer(ssc.certificate, ssc.privateKey).build()
-    val tlsHosts = TlsHostConfig((ssc.certificate, sslCtx))
-    val listeners = Seq(port -> tlsPolicy)
-
-    val manager = new CentralNode(password, Some(registryStore), listeners, tlsHosts)
-    try {
-      f(ManagerInfo(host, port, password, tlsPolicy, tlsHosts))
-    } finally {
-      manager.stop()
+      val manager = new CentralNode(password, Some(registryStore), listeners, tlsHosts)
+      try {
+        f(ManagerInfo(host, port, password, tlsPolicy, tlsHosts))
+      } finally {
+        manager.stop()
+      }
     }
   }
 

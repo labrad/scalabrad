@@ -77,7 +77,9 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     val (path, created) = child(dir, name, create = false)
     if (!path.exists) sys.error(s"directory does not exist: $name")
     if (path.isFile) sys.error(s"found file instead of directory: $name")
-    path.delete()
+    if (path.list.nonEmpty) sys.error(s"cannot remove non-empty directory: $name")
+    val ok = path.delete()
+    if (!ok) sys.error(s"failed to remove directory: $name")
   }
 
   def getValue(dir: File, key: String, default: Option[(Boolean, Data)]): Data = {

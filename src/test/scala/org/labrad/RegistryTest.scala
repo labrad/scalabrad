@@ -31,7 +31,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   testAllBackends("registry can store and retrieve arbitrary data") { (backend, exact) =>
     val (loc, _) = backend.child(backend.root, "test", create = true)
-    for (i <- 0 until 1000) {
+    for (i <- 0 until 100) {
       val tpe = Hydrant.randomType
       val data = Hydrant.randomData(tpe)
       backend.setValue(loc, "a", data)
@@ -212,6 +212,19 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
     }
   }
 
+  testAllBackends("deleting a registry directory containing a dir should fail") { (backend, exact) =>
+    val root = backend.root
+    val a = backend.child(root, "a", create = true)._1
+    val b = backend.child(a, "b", create = true)._1
+
+    assert(backend.dir(root)._1 contains "a")
+    assert(backend.dir(a)._1 contains "b")
+
+    intercept[Exception] {
+      backend.rmDir(root, "a")
+    }
+  }
+
   test("deleting a registry directory containing a dir should fail") {
     withManager() { m =>
       withClient(m.host, m.port, m.password) { c =>
@@ -230,7 +243,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
         await(reg.cd(".."))
         assert(dirs() contains "a")
 
-        an[Exception] should be thrownBy {
+        intercept[Exception] {
           await(reg.rmDir("a"))
         }
       }
@@ -250,7 +263,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
         await(reg.cd(".."))
 
-        an[Exception] should be thrownBy {
+        intercept[Exception] {
           await(reg.rmDir("a"))
         }
       }
@@ -264,7 +277,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("test"), true))
 
-        an[Exception] should be thrownBy {
+        intercept[Exception] {
           await(reg.mkDir(""))
         }
       }
@@ -278,7 +291,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("test"), true))
 
-        an[Exception] should be thrownBy {
+        intercept[Exception] {
           await(reg.set("", Str("not allowed")))
         }
       }
