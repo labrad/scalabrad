@@ -4,7 +4,6 @@ import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue, TimeUnit}
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.util.Logging
-import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.fixture.FunSuite
 import scala.collection._
 import scala.concurrent.{Await, Future, Promise}
@@ -185,7 +184,7 @@ class TestCtx(
   }
 }
 
-class ServerTest extends FunSuite with AsyncAssertions {
+class ServerTest extends FunSuite {
 
   import TestUtils._
 

@@ -5,7 +5,7 @@ import java.util.{Date, Random}
 import org.labrad.types._
 import org.scalatest.FunSuite
 
-class DataTests extends FunSuite {
+class DataTest extends FunSuite {
   val rand = new Random
 
   def testBothEndian(name: String)(func: ByteOrder => Unit) {
@@ -198,37 +198,4 @@ class DataTests extends FunSuite {
     val c2 = empty2.convertTo("*?")
     assert(c2.t == Type("*_"))
   }
-}
-
-
-class HydrantTests extends FunSuite {
-
-  def testHydrant(tag: String) = test(tag) {
-    val t = Type(tag)
-    val data = Hydrant.randomData(t)
-
-    for (order <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
-      implicit val bo = order
-
-      val bytes = data.toBytes
-      val unflattened = Data.fromBytes(data.t, bytes)
-      assert(unflattened == data)
-    }
-  }
-
-  val types = Seq(
-    "i",
-    "w",
-    "v",
-    "c",
-    "t",
-    "s",
-    "ii",
-    "cvtiwsbb",
-    "*(is)",
-    "*2(i*s)"
-  )
-
-  for (tag <- types)
-    testHydrant(tag)
 }

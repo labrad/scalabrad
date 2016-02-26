@@ -302,7 +302,7 @@ class ReturnAnnotations extends Testable("allow return types to be annotated") {
 //  )
 //}
 
-class ReflectTests extends FunSuite with Logging {
+class ReflectTest extends FunSuite with Logging {
 
   def same(pa: Pattern, pb: Pattern): Boolean = (pa accepts pb) && (pb accepts pa)
 
@@ -443,7 +443,7 @@ class Adder {
   def add(a: Int, b: Int) = a + b
 }
 
-class TypeTests extends FunSuite with Logging {
+class InferenceTest extends FunSuite with Logging {
 
   def testInference[T: ru.TypeTag](expected: Pattern, values: T*): Unit = {
     import SettingHandler._
@@ -494,7 +494,7 @@ class TypeTests extends FunSuite with Logging {
   testInferenceArray[Array[String]](Pattern("*s"), Array("abc"), Array())
 }
 
-class InvokeTests extends FunSuite with Logging {
+class InvokeTest extends FunSuite with Logging {
   val (_, bindDefaultArgs) = Reflect.makeHandler[DefaultArgs]
 
   test("can invoke method with some args having default values") {

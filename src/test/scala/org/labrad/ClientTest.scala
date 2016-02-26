@@ -11,7 +11,7 @@ import org.scalatest.FunSuite
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-class ClientTests extends FunSuite /*with Logging*/ {
+class ClientTest extends FunSuite {
 
   def testWithClient(name: String)(func: Client => Unit) = test(name) {
     TestUtils.withManager() { m =>
