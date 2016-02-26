@@ -7,7 +7,6 @@ import org.joda.time.format.DateTimeFormat
 import org.labrad.data._
 import org.labrad.types._
 import scala.util.matching.Regex
-import scala.util.parsing.combinator.RegexParsers
 
 
 /**
@@ -67,102 +66,84 @@ class DelphiFileStore(rootDir: File) extends FileStore(rootDir) {
 /**
  * Parsers for the string representation used by the legacy delphi code.
  */
-object DelphiParsers extends RegexParsers {
+object DelphiParsers {
 
-  def parseData(s: String): Data =
-    parseAll(data, s) match {
-      case Success(d, _) => d
-      case NoSuccess(msg, _) => sys.error(msg)
-    }
+  import fastparse.noApi._
+  import org.labrad.util.Parsing._
+  import org.labrad.util.Parsing.AllowWhitespace._
 
-  def data: Parser[Data] =
-    ( nonArrayData | array )
+  def parseData(s: String): Data = parseOrThrow(dataAll, s)
 
-  def nonArrayData: Parser[Data] =
-    ( none | bool | complex | value | time | int | uint | string | cluster )
+  val dataAll: Parser[Data] =
+    P( Whitespace ~ data ~ Whitespace ~ End )
 
-  def none: Parser[Data] =
-      "_" ^^ { _ => Data.NONE }
+  val data: Parser[Data] =
+    P( nonArrayData | array )
 
-  def bool: Parser[Data] =
-    ( "[Tt]rue".r ^^ { _ => Bool(true) }
-    | "[Ff]alse".r ^^ { _ => Bool(false) }
-    )
+  val nonArrayData: Parser[Data] =
+    P( none | bool | complex | value | time | int | uint | string | cluster )
 
-  def int: Parser[Data] =
-    ( "+" ~> unsignedInt ^^ { x => Integer(x.toInt) }
-    | "-" ~> unsignedInt ^^ { x => Integer(-x.toInt) }
-    )
+  val none: Parser[Data] =
+    P( "_" ).map { _ => Data.NONE }
 
-  def uint: Parser[Data] =
-    unsignedInt ^^ { num => UInt(num) }
+  val bool: Parser[Data] =
+    P( Re("[Tt]rue").map { _ => Bool(true) }
+     | Re("[Ff]alse").map { _ => Bool(false) }
+     )
 
-  def unsignedInt: Parser[Long] =
-    """\d+""".r ^^ { _.toLong }
+  val int: Parser[Data] =
+    P( "+" ~ unsignedInt.map { x => Integer(x.toInt) }
+     | "-" ~ unsignedInt.map { x => Integer(-x.toInt) }
+     )
 
-  def string: Parser[Data] =
-    """('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""".r ^^ { s => Bytes(DelphiFormat.stringToBytes(s)) }
+  val uint: Parser[Data] =
+    P( unsignedInt.map { num => UInt(num) } )
 
-  def time: Parser[Data] =
-    """\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""".r ~ """\d*(E-\d+)?""".r ^^ { case s ~ ignored => Time(DelphiFormat.DateFormat.parseDateTime(s).toDate) }
+  val unsignedInt: Parser[Long] =
+    P( number.!.map(_.toLong) )
 
-  def value: Parser[Data] =
-      signedReal ~ (' ' ~> units).? ^^ { case num ~ unit => Value(num, unit.orElse(Some(""))) }
+  val string: Parser[Data] =
+    P( Re("""('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""").! ).map { s => Bytes(DelphiFormat.stringToBytes(s)) }
 
-  def complex: Parser[Data] =
-      complexNum ~ (' ' ~> units).? ^^ { case (re, im) ~ unit => Cplx(re, im, unit.orElse(Some(""))) }
+  val time: Parser[Data] =
+    P( Re("""\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""").! ~ Re("""\d*(E-\d+)?""") ).map { s => Time(DelphiFormat.DateFormat.parseDateTime(s).toDate) }
 
-  def signedReal: Parser[Double] =
-    ( "+" ~> unsignedReal ^^ { x => x }
-    | "-" ~> unsignedReal ^^ { x => -x }
-    | unsignedReal
-    )
+  val value: Parser[Data] =
+    P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit.orElse(Some(""))) }
 
-  def unsignedReal: Parser[Double] =
-    ( "NAN.0" ^^ { _ => Double.NaN }
-    | "INF.0" ^^ { _ => Double.PositiveInfinity }
-    | """(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""".r ^^ { _.toDouble }
-    | """\d*\.\d+""".r ^^ { _.toDouble }
-    )
+  val complex: Parser[Data] =
+    P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit.orElse(Some(""))) }
 
-  def complexNum: Parser[(Double, Double)] =
-      signedReal ~ ("+" | "-") ~ unsignedReal <~ "[ij]".r ^^ {
-        case re ~ "+" ~ im => (re, im)
-        case re ~ "-" ~ im => (re, -im)
-      }
+  val signedReal: Parser[Double] =
+    P( "+" ~ unsignedReal.map { x => x }
+     | "-" ~ unsignedReal.map { x => -x }
+     | unsignedReal
+     )
 
-  def units: Parser[String] =
-      firstTerm ~ (divTerm | mulTerm).* ^^ {
-        case first ~ rest => first + rest.mkString
-      }
+  val unsignedReal: Parser[Double] =
+    P( Token("NAN.0").map { _ => Double.NaN }
+     | Token("INF.0").map { _ => Double.PositiveInfinity }
+     | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
+     | Re("""\d*\.\d+""").!.map { _.toDouble }
+     )
 
-  def firstTerm =
-    ( "1".? ~ divTerm ^^ { case one ~ term => one.getOrElse("") + term }
-    | term
-    )
+  val complexNum: Parser[(Double, Double)] =
+    P( (signedReal ~ ("+" | "-").! ~ unsignedReal ~ CharIn("ij")).map {
+        case (re, "+", im) => (re, im)
+        case (re, "-", im) => (re, -im)
+       }
+     )
 
-  def mulTerm = "*" ~ term ^^ { case op ~ term => op + term }
-  def divTerm = "/" ~ term ^^ { case op ~ term => op + term }
+  val units = P( firstTerm ~ (divTerm | mulTerm).rep )
+  val firstTerm = P( "1".? ~ divTerm | term )
+  val mulTerm = P( "*" ~ term )
+  val divTerm = P( "/" ~ term )
+  val term = P( termName ~ exponent.? )
+  val termName = P( Re("""[A-Za-z'"][A-Za-z'"0-9]*""") )
+  val exponent = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  val number = P( Re("""\d+""") )
 
-  def term =
-      termName ~ exponent.? ^^ {
-        case name ~ None      => name
-        case name ~ Some(exp) => name + exp
-      }
-
-  def termName = """[A-Za-z'"][A-Za-z'"0-9]*""".r
-
-  def exponent =
-      "^" ~ "-".? ~ number ~ ("/" ~ number).? ^^ {
-        case carat ~ None    ~ n ~ None            => carat     + n
-        case carat ~ None    ~ n ~ Some(slash ~ d) => carat     + n + slash + d
-        case carat ~ Some(m) ~ n ~ None            => carat + m + n
-        case carat ~ Some(m) ~ n ~ Some(slash ~ d) => carat + m + n + slash + d
-      }
-
-  def number = """\d+""".r
-
-  def array = arrND ^^ { case (elems, shape) =>
+  val array: Parser[Data] = P( arrND ).map { case (elems, shape) =>
     val b = new DataBuilder
     b.array(shape: _*)
     for (elem <- elems) {
@@ -171,19 +152,20 @@ object DelphiParsers extends RegexParsers {
     b.result()
   }
 
-  def arrND: Parser[(Array[Data], List[Int])] =
-    ( "[" ~> repsep(nonArrayData, ",") <~ "]" ^^ { elems =>
-        (elems.toArray, List(elems.size))
-      }
-    | "[" ~> repsep(arrND, ",") <~ "]" ^^ { subArrays =>
-        // make sure all subarrays have the same shape and element type
-        val shape = subArrays(0)._2
-        require(subArrays forall (_._2 == shape))
-        (subArrays.flatMap(_._1).toArray, subArrays.size :: shape)
-      }
-    )
+  val arrND: Parser[(Array[Data], List[Int])] =
+    P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
+         (elems.toArray, List(elems.size))
+       }
+     | ("[" ~ arrND.rep(sep = ",") ~ "]").map { subArrays =>
+         // make sure all subarrays have the same shape and element type
+         val shape = subArrays(0)._2
+         require(subArrays forall (_._2 == shape))
+         (subArrays.flatMap(_._1).toArray, subArrays.size :: shape)
+       }
+     )
 
-  def cluster = "(" ~> repsep(data, ",") <~ ")" ^^ { elems => Cluster(elems: _*) }
+  val cluster =
+    P( "(" ~/ data.rep(sep = ",").map(xs => Cluster(xs: _*)) ~ ")" )
 }
 
 object DelphiFormat {

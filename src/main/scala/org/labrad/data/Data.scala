@@ -14,7 +14,6 @@ import org.labrad.types._
 import scala.annotation.tailrec
 import scala.collection.mutable.Buffer
 import scala.util.Try
-import scala.util.parsing.combinator.RegexParsers
 
 case class Complex(real: Double, imag: Double)
 
@@ -1342,98 +1341,76 @@ object Error {
 
 // parsing data from string representation
 
-object Parsers extends RegexParsers {
+object Parsers {
 
-  def parseData(s: String): Data =
-    parseAll(data, s) match {
-      case Success(d, _) => d
-      case NoSuccess(msg, _) => sys.error(msg)
-    }
+  import fastparse.noApi._
+  import org.labrad.util.Parsing._
+  import org.labrad.util.Parsing.AllowWhitespace._
 
-  def data: Parser[Data] =
-    ( nonArrayData | array )
+  def parseData(s: String): Data = parseOrThrow(dataAll, s)
 
-  def nonArrayData: Parser[Data] =
-    ( none | bool | complex | value | time | int | uint | string | cluster )
+  val dataAll: Parser[Data] = P( Whitespace ~ data ~ Whitespace ~ End )
 
-  def none: Parser[Data] =
-      "_" ^^ { _ => Data.NONE }
+  val data: Parser[Data] = P( nonArrayData | array )
 
-  def bool: Parser[Data] =
-    ( "true" ^^ { _ => Bool(true) }
-    | "false" ^^ { _ => Bool(false) }
-    )
+  val nonArrayData: Parser[Data] =
+    P( none | bool | complex | value | time | int | uint | string | cluster )
 
-  def int: Parser[Data] =
-    """[+-]\d+""".r ^^ { num => Integer(num.substring(if (num.startsWith("+")) 1 else 0).toInt) } // i8, i16, i64
+  val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
-  def uint: Parser[Data] =
-    """\d+""".r ^^ { num => UInt(num.toLong) } // w8, w16, w64
+  val bool: Parser[Data] =
+    P( Token("true").map { _ => Bool(true) }
+     | Token("false").map { _ => Bool(false) }
+     )
 
-  def string: Parser[Data] =
-    ("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").r ^^ { s => Bytes(Translate.stringToBytes(s)) }
+  val int: Parser[Data] =
+    P( Re("""[+-]\d+""").! ).map { s => Integer(s.substring(if (s.startsWith("+")) 1 else 0).toInt) } // i8, i16, i64
+
+  val uint: Parser[Data] =
+    P( Re("""\d+""").! ).map { s => UInt(s.toLong) } // w8, w16, w64
+
+  val string: Parser[Data] =
+    P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").! ).map { s => Bytes(Translate.stringToBytes(s)) }
     //("\""+"""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*"""+"\"").r
 
-  def time: Parser[Data] =
-    """\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""".r ^^ { s => Time(new DateTime(s).toDate) }
+  val time: Parser[Data] =
+    P( Re("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""").! ).map { s => Time(new DateTime(s).toDate) }
 
-  def value: Parser[Data] =
-      signedReal ~ (' ' ~> units).? ^^ { case num ~ unit => Value(num, unit) }
+  val value: Parser[Data] =
+    P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit) }
 
-  def complex: Parser[Data] =
-      complexNum ~ (' ' ~> units).? ^^ { case (re, im) ~ unit => Cplx(re, im, unit) }
+  val complex: Parser[Data] =
+    P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit) }
 
-  def signedReal: Parser[Double] =
-    ( "+" ~> unsignedReal ^^ { x => x }
-    | "-" ~> unsignedReal ^^ { x => -x }
-    | unsignedReal
-    )
+  val signedReal: Parser[Double] =
+    P( "+" ~ unsignedReal.map { x => x }
+     | "-" ~ unsignedReal.map { x => -x }
+     | unsignedReal
+     )
 
-  def unsignedReal: Parser[Double] =
-    ( "NaN" ^^ { _ => Double.NaN }
-    | "Infinity" ^^ { _ => Double.PositiveInfinity }
-    | """(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""".r ^^ { _.toDouble }
-    | """\d*\.\d+""".r ^^ { _.toDouble }
-    )
+  val unsignedReal: Parser[Double] =
+    P( Token("NaN").map { _ => Double.NaN }
+     | Token("Infinity").map { _ => Double.PositiveInfinity }
+     | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
+     | Re("""\d*\.\d+""").!.map { _.toDouble }
+     )
 
-  def complexNum: Parser[(Double, Double)] =
-      signedReal ~ ("+" | "-") ~ unsignedReal <~ "i" ^^ {
-        case re ~ "+" ~ im => (re, im)
-        case re ~ "-" ~ im => (re, -im)
-      }
+  val complexNum: Parser[(Double, Double)] =
+    P( signedReal ~ ("+" | "-").! ~ unsignedReal ~ "i" ).map {
+         case (re, "+", im) => (re, im)
+         case (re, "-", im) => (re, -im)
+       }
 
-  def units: Parser[String] =
-      firstTerm ~ (divTerm | mulTerm).* ^^ {
-        case first ~ rest => first + rest.mkString
-      }
+  val units = P( firstTerm ~ (divTerm | mulTerm).rep )
+  val firstTerm = P( "1".? ~ divTerm | term )
+  val mulTerm = P( "*" ~ term )
+  val divTerm = P( "/" ~ term )
+  val term = P( termName ~ exponent.? )
+  val termName = Re("""[A-Za-z'"][A-Za-z'"0-9]*""")
+  val exponent = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  val number = Re("""\d+""")
 
-  def firstTerm =
-    ( "1".? ~ divTerm ^^ { case one ~ term => one.getOrElse("") + term }
-    | term
-    )
-
-  def mulTerm = "*" ~ term ^^ { case op ~ term => op + term }
-  def divTerm = "/" ~ term ^^ { case op ~ term => op + term }
-
-  def term =
-      termName ~ exponent.? ^^ {
-        case name ~ None      => name
-        case name ~ Some(exp) => name + exp
-      }
-
-  def termName = """[A-Za-z'"]+""".r
-
-  def exponent =
-      "^" ~ "-".? ~ number ~ ("/" ~ number).? ^^ {
-        case carat ~ None    ~ n ~ None            => carat     + n
-        case carat ~ None    ~ n ~ Some(slash ~ d) => carat     + n + slash + d
-        case carat ~ Some(m) ~ n ~ None            => carat + m + n
-        case carat ~ Some(m) ~ n ~ Some(slash ~ d) => carat + m + n + slash + d
-      }
-
-  def number = """\d+""".r
-
-  def array = arrND ^^ { case (elems, typ, shape) =>
+  val array: Parser[Data] = P( arrND ).map { case (elems, typ, shape) =>
     val data = TreeData(TArr(typ, shape.size))
     data.setArrayShape(shape: _*)
     for ((data, elem) <- data.flatIterator zip elems.iterator) {
@@ -1442,27 +1419,27 @@ object Parsers extends RegexParsers {
     data
   }
 
-  def arrND: Parser[(Array[Data], Type, List[Int])] =
-    ( "[" ~> repsep(nonArrayData, ",") <~ "]" ^^ { elems =>
-        val typ = if (elems.isEmpty) {
-          TNone
-        } else {
-          val typ = elems(0).t
-          require(elems forall (_.t == typ), s"all elements must be of type '$typ'")
-          typ
-        }
-        (elems.toArray, typ, List(elems.size))
-      }
-    | "[" ~> repsep(arrND, ",") <~ "]" ^^ { subArrays =>
-        // make sure all subarrays have the same shape and element type
-        val (typ, shape) = (subArrays(0)._2, subArrays(0)._3)
-        require(subArrays forall (_._2 == typ))
-        require(subArrays forall (_._3 == shape))
-        (subArrays.flatMap(_._1).toArray, typ, subArrays.size :: shape)
-      }
-    )
+  val arrND: Parser[(Array[Data], Type, List[Int])] =
+    P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
+         val typ = if (elems.isEmpty) {
+           TNone
+         } else {
+           val typ = elems(0).t
+           require(elems forall (_.t == typ), s"all elements must be of type '$typ'")
+           typ
+         }
+         (elems.toArray, typ, List(elems.size))
+       }
+     | ("[" ~ arrND.rep(sep = ",") ~ "]").map { subArrays =>
+         // make sure all subarrays have the same shape and element type
+         val (typ, shape) = (subArrays(0)._2, subArrays(0)._3)
+         require(subArrays forall (_._2 == typ))
+         require(subArrays forall (_._3 == shape))
+         (subArrays.flatMap(_._1).toArray, typ, subArrays.size :: shape)
+       }
+     )
 
-  def cluster = "(" ~> repsep(data, ",") <~ ")" ^^ { elems => Cluster(elems: _*) }
+  val cluster: Parser[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
 }
 
 object Translate {

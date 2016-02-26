@@ -1,155 +1,155 @@
 package org.labrad.types
 
 import scala.collection.mutable
-import scala.util.parsing.combinator.RegexParsers
 
-object Parsers extends RegexParsers {
+object Parsers {
+
+  import fastparse.noApi._
+  import org.labrad.util.Parsing._
+  import org.labrad.util.Parsing.AllowWhitespace._
 
   private def stripComments(tag: String): String =
     tag.replaceAll("""\{[^\{\}]*\}""", "") // remove bracketed comments
        .split(":")(0) // strip off any trailing comments
 
-  private def parseOrThrow[A](p: Parser[A], s: String): A =
-    parseAll(p, s) match {
-      case Success(x, _) => x
-      case NoSuccess(msg, _) => sys.error(msg)
-    }
-
-  def parsePattern(tag: String): Pattern = parseOrThrow(aPattern, stripComments(tag))
-  def parseType(tag: String): Type = parseOrThrow(aType, stripComments(tag))
+  def parsePattern(tag: String): Pattern = parseOrThrow(fullPattern, stripComments(tag))
+  def parseType(tag: String): Type = parseOrThrow(fullType, stripComments(tag))
   def parseUnit(s: String): Seq[(String, Ratio)] = parseOrThrow(unitStr, s)
 
+  val fullType = P( Whitespace ~ aType ~ Whitespace ~ End )
 
-  def aType: Parser[Type] =
-    ( errorType
-    | repsep(singleType, ",".?) ^^ {
-        case Seq()  => TNone
-        case Seq(t) => t
-        case ts     => TCluster(ts: _*)
-      }
-    )
+  val aType: Parser[Type] =
+    P( errorType
+     | singleType.rep(sep = ",".?).map {
+         case Seq()  => TNone
+         case Seq(t) => t
+         case ts     => TCluster(ts: _*)
+       }
+     )
 
-  def noneType: Parser[Type] =
-      "_" ^^ { _ => TNone }
+  val noneType: Parser[Type] =
+    P( "_" ).map { _ => TNone }
 
-  def errorType: Parser[Type] =
-      "E" ~> singleType.? ^^ { t => TError(t getOrElse TNone) }
+  val errorType: Parser[Type] =
+    P( "E" ~ singleType.? ).map { t => TError(t getOrElse TNone) }
 
-  def someType: Parser[Type] =
-    ( "b"   ^^ { _ => TBool }
-    | "i"   ^^ { _ => TInt }
-//    | "i8"  ^^ { _ => TInt8 }
-//    | "i16" ^^ { _ => TInt16 }
-//    | "i32" ^^ { _ => TInt }
-//    | "i64" ^^ { _ => TInt64 }
-    | "w"   ^^ { _ => TUInt }
-//    | "u8"  ^^ { _ => TUInt8 }
-//    | "u16" ^^ { _ => TUInt16 }
-//    | "u32" ^^ { _ => TUInt }
-//    | "u64" ^^ { _ => TUInt64 }
-    | "s"   ^^ { _ => TStr }
-    | "t"   ^^ { _ => TTime }
-    | valueType
-    | complexType
-    | arrayType
-    | clusterType
-    )
+  val someType: Parser[Type] =
+    P( Token("b").map { _ => TBool }
+     | Token("i").map { _ => TInt }
+//     | "i8"  ^^ { _ => TInt8 }
+//     | "i16" ^^ { _ => TInt16 }
+//     | "i32" ^^ { _ => TInt }
+//     | "i64" ^^ { _ => TInt64 }
+     | Token("w").map { _ => TUInt }
+//     | "u8"  ^^ { _ => TUInt8 }
+//     | "u16" ^^ { _ => TUInt16 }
+//     | "u32" ^^ { _ => TUInt }
+//     | "u64" ^^ { _ => TUInt64 }
+     | Token("s").map { _ => TStr }
+     | Token("t").map { _ => TTime }
+     | valueType
+     | complexType
+     | arrayType
+     | clusterType
+     )
 
-  def singleType: Parser[Type] = noneType | someType
+  val singleType: Parser[Type] = P( noneType | someType )
 
-  def valueType: Parser[Type] =
-      "v" ~> units.? ^^ { u => TValue(u) }
+  val valueType: Parser[Type] =
+    P( "v" ~ units.? ).map { u => TValue(u) }
 
-  def complexType: Parser[Type] =
-      "c" ~> units.? ^^ { u => TComplex(u) }
+  val complexType: Parser[Type] =
+    P( "c" ~ units.? ).map { u => TComplex(u) }
 
-  def units: Parser[String] = "[" ~> """[^\[\]]*""".r <~ "]"
+  val units: Parser[String] =
+    P( "[" ~ Re("""[^\[\]]*""").! ~ "]" )
 
-  def arrayType: Parser[Type] =
-      "*" ~> number.? ~ singleType ^^ { case d ~ t => TArr(t, d getOrElse 1) }
+  val arrayType: Parser[Type] =
+    P( "*" ~ number.? ~ singleType ).map { case (d, t) => TArr(t, d getOrElse 1) }
 
-  def number: Parser[Int] = """\d+""".r ^^ { _.toInt }
+  val number: Parser[Int] = P( Re("""\d+""").! ).map { _.toInt }
 
-  def clusterType: Parser[Type] =
-      "(" ~> repsep(singleType, ",".?) <~ ")" ^^ { ts => TCluster(ts: _*) }
-
-
-
-  def aPattern: Parser[Pattern] =
-    ( errorPattern
-    | repsep(nonemptyPattern, "|") ^^ {
-        case Seq()  => TNone
-        case Seq(p) => p
-        case ps     => PChoice(ps: _*)
-      }
-    )
-
-  def nonemptyPattern: Parser[Pattern] =
-      rep1sep(singlePattern, ",".?) ^^ {
-        case Seq(p) => p
-        case ps     => PCluster(ps: _*)
-      }
-
-  def errorPattern: Parser[Pattern] =
-      "E" ~> singlePattern.? ^^ { p => PError(p getOrElse TNone) }
-
-  def somePattern: Parser[Pattern] =
-    ( "?" ^^ { _ => PAny }
-    | valuePattern
-    | complexPattern
-    | arrayPattern
-    | expandoPattern
-    | clusterPattern
-    | choicePattern
-    | someType
-    )
-
-  def singlePattern: Parser[Pattern] = noneType | somePattern
-
-  def valuePattern: Parser[Pattern] =
-      "v" ~> units.? ^^ { u => PValue(u) }
-
-  def complexPattern: Parser[Pattern] =
-      "c" ~> units.? ^^ { u => PComplex(u) }
-
-  def arrayPattern: Parser[Pattern] =
-      "*" ~> number.? ~ singlePattern ^^ { case d ~ t => PArr(t, d getOrElse 1) }
-
-  def expandoPattern: Parser[Pattern] =
-      "(" ~> somePattern <~ "...)" ^^ { p => PExpando(p) }
-
-  def clusterPattern: Parser[Pattern] =
-      "(" ~> repsep(somePattern, ",".?) <~ ")" ^^ { ps => PCluster(ps: _*) }
-
-  def choicePattern: Parser[Pattern] =
-      "<" ~> repsep(nonemptyPattern, "|") <~ ">" ^^ { ps => PChoice(ps: _*) }
+  val clusterType: Parser[Type] =
+    P( "(" ~ singleType.rep(sep = ",".?) ~ ")" ).map { ts => TCluster(ts: _*) }
 
 
-  def unitStr: Parser[Seq[(String, Ratio)]] =
-      firstTerm ~ (divTerm | mulTerm).* ^^ {
-        case first ~ rest => first :: rest
-      }
+  val fullPattern = P( Whitespace ~ aPattern ~ Whitespace ~ End )
 
-  def firstTerm = "1".? ~> divTerm | term
+  val aPattern: Parser[Pattern] =
+    P( errorPattern
+     | nonemptyPattern.rep(sep = "|").map {
+         case Seq()  => TNone
+         case Seq(p) => p
+         case ps     => PChoice(ps: _*)
+       }
+     )
 
-  def mulTerm = "*" ~> term
-  def divTerm = "/" ~> term ^^ { case (name, exp) => (name, -exp) }
+  val nonemptyPattern: Parser[Pattern] =
+    P( singlePattern.rep(sep = ",".?, min = 1).map {
+         case Seq(p) => p
+         case ps     => PCluster(ps: _*)
+       }
+     )
 
-  def term: Parser[(String, Ratio)] =
-      termName ~ exponent.? ^^ {
-        case name ~ None      => (name, Ratio(1))
-        case name ~ Some(exp) => (name, exp)
-      }
+  val errorPattern: Parser[Pattern] =
+    P( "E" ~ singlePattern.? ).map { p => PError(p getOrElse TNone) }
 
-  def termName = """[A-Za-z'"]+""".r
+  val somePattern: Parser[Pattern] =
+    P( Token("?").map { _ => PAny }
+     | valuePattern
+     | complexPattern
+     | arrayPattern
+     | expandoPattern
+     | clusterPattern
+     | choicePattern
+     | someType
+     )
 
-  def exponent: Parser[Ratio] =
-      "^" ~> "-".? ~ number ~ ("/" ~> number).? ^^ {
-        case None    ~ n ~ None    => Ratio( n)
-        case None    ~ n ~ Some(d) => Ratio( n, d)
-        case Some(_) ~ n ~ None    => Ratio(-n)
-        case Some(_) ~ n ~ Some(d) => Ratio(-n, d)
-      }
+  val singlePattern: Parser[Pattern] = P( noneType | somePattern )
+
+  val valuePattern: Parser[Pattern] =
+    P( "v" ~ units.? ).map { u => PValue(u) }
+
+  val complexPattern: Parser[Pattern] =
+    P( "c" ~ units.? ).map { u => PComplex(u) }
+
+  val arrayPattern: Parser[Pattern] =
+    P( "*" ~ number.? ~ singlePattern ).map { case (d, t) => PArr(t, d getOrElse 1) }
+
+  val expandoPattern: Parser[Pattern] =
+    P( "(" ~ somePattern ~ "...)" ).map { p => PExpando(p) }
+
+  val clusterPattern: Parser[Pattern] =
+    P( "(" ~ somePattern.rep(sep = ",".?) ~ ")" ).map { ps => PCluster(ps: _*) }
+
+  val choicePattern: Parser[Pattern] =
+    P( "<" ~ nonemptyPattern.rep(sep = "|") ~ ">" ).map { ps => PChoice(ps: _*) }
+
+
+  val unitStr: Parser[Seq[(String, Ratio)]] =
+    P( firstTerm ~ (divTerm | mulTerm).rep ).map {
+         case (name, exp, rest) => (name, exp) +: rest
+       }
+
+  val firstTerm = P( "1".? ~ divTerm | term )
+
+  val mulTerm = P( "*" ~ term )
+  val divTerm = P( "/" ~ term ).map { case (name, exp) => (name, -exp) }
+
+  val term: Parser[(String, Ratio)] =
+    P( termName.! ~ exponent.? ).map {
+         case (name, expOpt) => (name, expOpt.getOrElse(Ratio(1)))
+       }
+
+  val termName = P( Re("""[A-Za-z'"]+""") )
+
+  val exponent: Parser[Ratio] =
+    P( "^" ~ "-".!.? ~ number ~ ("/" ~ number).? ).map {
+         case (None,    n, None   ) => Ratio( n)
+         case (None,    n, Some(d)) => Ratio( n, d)
+         case (Some(_), n, None   ) => Ratio(-n)
+         case (Some(_), n, Some(d)) => Ratio(-n, d)
+       }
 }
 
 

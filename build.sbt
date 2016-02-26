@@ -26,7 +26,7 @@ licenses += ("GPL-2.0", url("http://www.gnu.org/licenses/gpl-2.0.html"))
 // dependencies
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.1",
+  "com.lihaoyi" %% "fastparse" % "0.3.5",
   "org.clapper" %% "argot" % "1.0.4",
   "io.netty" % "netty-all" % "4.1.0.Beta8",
   "joda-time" % "joda-time" % "2.1",
