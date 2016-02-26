@@ -48,7 +48,7 @@ javaOptions += "-Dorg.labrad.stopOnEOF=true"
 
 // testing
 libraryDependencies ++= Seq(
-  "org.scalatest" %% "scalatest" % "2.2.4" % "test"
+  "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 )
 
 fork in Test := true
