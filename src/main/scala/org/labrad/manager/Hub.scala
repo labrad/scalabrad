@@ -9,7 +9,7 @@ import org.labrad.types._
 import org.labrad.util._
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 import scala.concurrent.duration._
 
 trait Hub {
@@ -32,6 +32,8 @@ trait Hub {
   def setServerInfo(info: ServerInfo): Unit
   def serversInfo: Seq[ServerInfo]
   def serverInfo(id: Either[Long, String]): Option[ServerInfo]
+
+  def registryConnected: Future[Unit]
 }
 
 object Hub {
@@ -62,6 +64,9 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
   private var nClientsAllocated = 0L
   private var nClientsConnected = 0L
 
+  private val _registryConnected = Promise[Unit]
+  val registryConnected = _registryConnected.future
+
   def allocateServerId(name: String): Long = synchronized {
     serverIdCache.get(name).getOrElse {
       require(nServersAllocated < serverCounter.length, "no server ids available")
@@ -91,6 +96,9 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       handlerMap(id) = handler
       tracker.connectServer(id, name)
       nServersConnected += 1
+      if (name == Registry.NAME) {
+        _registryConnected.trySuccess(())
+      }
     }
     messager.broadcast(Manager.Connect(id, name, isServer = true), sourceId = Manager.ID)
   }

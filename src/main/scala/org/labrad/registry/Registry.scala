@@ -27,6 +27,10 @@ trait RegistryStore {
   def delete(dir: Dir, key: String): Unit
 }
 
+object Registry {
+  val NAME = "Registry"
+}
+
 class Registry(id: Long, name: String, store: RegistryStore, hub: Hub, tracker: StatsTracker)
 extends ServerActor with Logging {
 
