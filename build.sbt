@@ -53,6 +53,7 @@ libraryDependencies ++= Seq(
 
 fork in Test := true
 parallelExecution in Test := false
+javaOptions in Test += "-Xmx1g"
 
 
 // use bintray to publish library jars
