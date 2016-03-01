@@ -68,11 +68,14 @@ object Registry {
   val NAME = "Registry"
 }
 
-class RegistryActor(registry: Registry) extends ServerActor {
+class RegistryActor(registry: Registry, hub: Hub) extends ServerActor {
   val srcId = ""
+  private val messageFunc = (target: Long, pkt: Packet) => hub.message(target, pkt)
 
   def message(packet: Packet): Unit = registry.message(srcId, packet)
-  def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = registry.request(srcId, packet)
+  def request(packet: Packet)(implicit timeout: Duration): Future[Packet] = {
+    registry.request(srcId, packet, messageFunc)
+  }
 
   def expireContext(ctx: Context)(implicit timeout: Duration): Future[Long] = registry.expireContext(srcId, ctx)
   def expireAll(high: Long)(implicit timeout: Duration): Future[Long] = registry.expireAll(srcId, high)
@@ -91,8 +94,24 @@ class RegistryConnector(registry: Registry, config: ServerConfig) extends Loggin
     val doc = registry.doc
     val settings = registry.settings
 
-    def connected(cxn: Connection): Unit = {}
-    def handleRequest(packet: Packet): Future[Packet] = registry.request(srcId, packet)
+    private var cxn: Connection = _
+    private var messageFunc: (Long, Packet) => Unit = _
+
+    def connected(cxn: Connection): Unit = {
+      this.cxn = cxn
+      messageFunc = (target: Long, pkt: Packet) => {
+        val msg = Request(target, pkt.context, pkt.records)
+        try {
+          cxn.sendMessage(msg)
+        } catch {
+          case e: Exception =>
+            log.error(s"$srcId: error while sending message", e)
+        }
+      }
+    }
+    def handleRequest(packet: Packet): Future[Packet] = {
+      registry.request(srcId, packet, messageFunc)
+    }
     def expire(context: Context): Unit = registry.expireContext(srcId, context)
     def stop(): Unit = {
       registry.expireAll(srcId)
@@ -235,12 +254,12 @@ extends Logging {
     tracker.msgRecv(id)
   }
 
-  def request(src: Src, packet: Packet)(implicit timeout: Duration): Future[Packet] = semaphore.map {
+  def request(src: Src, packet: Packet, messageFunc: (Long, Packet) => Unit)(implicit timeout: Duration): Future[Packet] = semaphore.map {
     // TODO: handle timeout
     tracker.serverReq(id)
     val response = Server.handle(packet, includeStackTrace = false) { req =>
       val (_, handler) = contexts.getOrElseUpdate((src, req.context), {
-        val regCtx = new RegistryContext(src, req.context)
+        val regCtx = new RegistryContext(src, req.context, messageFunc)
         val handler = bind(regCtx)
         (regCtx, handler)
       })
@@ -293,7 +312,7 @@ extends Logging {
   refreshManagers()
 
   // contains context-specific state and settings
-  class RegistryContext(src: Src, context: Context) {
+  class RegistryContext(src: Src, context: Context, messageFunc: (Long, Packet) => Unit) {
 
     private var curDir = store.root
     private var changeListener: Option[(Long, Long)] = None
@@ -499,14 +518,14 @@ extends Logging {
         log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
         val msg = Cluster(Arr(store.pathTo(dir).toArray), Str(name), Bool(isDir), Bool(addOrChange))
         val pkt = Packet(0, target = id, context = context, records = Seq(Record(msgId, msg)))
-        hub.message(target, pkt)
+        messageFunc(target, pkt)
       }
       if (dir == curDir) {
         for ((target, msgId) <- changeListener) {
           log.debug(s"notify: ctx=${context} name=${name} isDir=${isDir} addOrChange=${addOrChange}")
           val msg = Cluster(Str(name), Bool(isDir), Bool(addOrChange))
           val pkt = Packet(0, target = id, context = context, records = Seq(Record(msgId, msg)))
-          hub.message(target, pkt)
+          messageFunc(target, pkt)
         }
       }
     }

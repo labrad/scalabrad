@@ -256,7 +256,10 @@ trait Connection {
   }
 
   def sendMessage(request: NameRequest): Unit =
-    lookupProvider.resolve(request).map(r => sendPacket(Packet.forMessage(r)))
+    lookupProvider.resolve(request).map(r => sendMessage(r))
+
+  def sendMessage(request: Request): Unit =
+    sendPacket(Packet.forMessage(request))
 
   protected def sendPacket(packet: Packet): Unit = {
     require(connected, "Not connected.")
