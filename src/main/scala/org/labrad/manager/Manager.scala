@@ -76,6 +76,7 @@ class CentralNode(
 
 
 object Manager extends Logging {
+  val VERSION = "0.6.0-M1"
   val ID = 1L
   val NAME = "Manager"
   val DOC = "Provides basic support for all labrad connections, including discovery of other servers and lookup of metadata about them."

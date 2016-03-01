@@ -336,6 +336,9 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     }
   }
 
+  @Setting(id=20, name="Version", doc="Manager Version")
+  def version(): String = Manager.VERSION
+
   // contexts and messages
 
   @Setting(id=50, name="Expire Context", doc="Expire the context in which this request was sent.")
