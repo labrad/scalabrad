@@ -288,39 +288,45 @@ object Server {
       tlsCerts = Map(),
       handler = packet => server.handleRequest(packet)
     )
-    cxn.connect()
+    try {
+      cxn.connect()
 
-    // if the vm goes down or we lose the connection, shutdown
-    sys.ShutdownHookThread { server.stop() }
-    cxn.addConnectionListener { case false => server.stop() }
+      // if the vm goes down or we lose the connection, shutdown
+      sys.ShutdownHookThread { server.stop() }
+      cxn.addConnectionListener { case false => server.stop() }
 
-    server.connected(cxn)
+      server.connected(cxn)
 
-    val msgId = cxn.getMessageId
-    val msgCtx = cxn.newContext
-    cxn.addMessageListener {
-      case Message(`msgId`, `msgCtx`, _, Cluster(UInt(high), UInt(low))) =>
-        server.expire(Context(high, low))
+      val msgId = cxn.getMessageId
+      val msgCtx = cxn.newContext
+      cxn.addMessageListener {
+        case Message(`msgId`, `msgCtx`, _, Cluster(UInt(high), UInt(low))) =>
+          server.expire(Context(high, low))
+      }
+
+      val registrations = server.settings.sortBy(_.id).map(s =>
+        Cluster(
+          UInt(s.id),
+          Str(s.name),
+          Str(s.doc),
+          Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
+          Arr(s.returns.strs.map(Str(_))),
+          Str(""))
+      )
+
+      val registerF = for {
+        _ <- cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*)
+        _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
+        _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
+      } yield ()
+      Await.result(registerF, 30.seconds)
+
+      cxn
+    } catch {
+      case e: Exception =>
+        cxn.close()
+        throw e
     }
-
-    val registrations = server.settings.sortBy(_.id).map(s =>
-      Cluster(
-        UInt(s.id),
-        Str(s.name),
-        Str(s.doc),
-        Arr(s.accepts.strs.map(Str(_))), // TODO: when manager supports patterns, just use .pat here
-        Arr(s.returns.strs.map(Str(_))),
-        Str(""))
-    )
-
-    val registerF = for {
-      _ <- cxn.send("Manager", registrations.map("S: Register Setting" -> _): _*)
-      _ <- cxn.send("Manager", "S: Notify on Context Expiration" -> Cluster(UInt(msgId), Bool(false)))
-      _ <- cxn.send("Manager", "S: Start Serving" -> Data.NONE)
-    } yield ()
-    Await.result(registerF, 30.seconds)
-
-    cxn
   }
 }
 
