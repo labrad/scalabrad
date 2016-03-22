@@ -218,7 +218,9 @@ trait Connection {
   private def close(cause: Throwable): Unit = {
     closeNoWait(cause)
 
-    channel.close().sync()
+    if (channel != null) {
+      channel.close().sync()
+    }
     workerGroup.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS).sync()
   }
 
