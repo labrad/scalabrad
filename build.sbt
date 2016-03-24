@@ -2,7 +2,9 @@ organization := "org.labrad"
 
 name := "scalabrad"
 
-version := "0.6.0"
+version := {
+  scala.io.Source.fromFile(file("src/main/resources/org/labrad/version.txt")).mkString
+}
 
 scalaVersion := "2.11.7"
 javacOptions ++= Seq("-source", "1.7", "-target", "1.7")

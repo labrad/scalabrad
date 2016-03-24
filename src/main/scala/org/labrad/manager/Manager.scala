@@ -76,7 +76,10 @@ class CentralNode(
 
 
 object Manager extends Logging {
-  val VERSION = "0.6.0"
+  val VERSION = {
+    val url = getClass.getResource("/org/labrad/version.txt")
+    scala.io.Source.fromURL(url).mkString
+  }
   val ID = 1L
   val NAME = "Manager"
   val DOC = "Provides basic support for all labrad connections, including discovery of other servers and lookup of metadata about them."
