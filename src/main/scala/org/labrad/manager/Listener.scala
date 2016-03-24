@@ -7,6 +7,8 @@ import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.handler.ssl.{SniHandler, SslContext}
 import io.netty.util.DomainNameMapping
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.atomic.AtomicLong
 import org.labrad.PacketCodec
 import org.labrad.util._
 import scala.concurrent.ExecutionContext
@@ -59,6 +61,17 @@ object TlsPolicy {
   }
 }
 
+object Listener {
+  private val bossFactoryCounter = new AtomicLong(0)
+  private val workerFactoryCounter = new AtomicLong(0)
+
+  def newBossGroup(): EventLoopGroup =
+    NettyUtil.newEventLoopGroup("LabradManagerBoss", bossFactoryCounter, 1)
+
+  def newWorkerGroup(): EventLoopGroup =
+    NettyUtil.newEventLoopGroup("LabradManagerWorker", workerFactoryCounter)
+}
+
 /**
  * Listens on one or more ports for incoming labrad network connections.
  */
@@ -71,8 +84,8 @@ class Listener(
   tlsHostConfig: TlsHostConfig
 )(implicit ec: ExecutionContext)
 extends Logging {
-  val bossGroup = new NioEventLoopGroup(1)
-  val workerGroup = new NioEventLoopGroup()
+  val bossGroup = Listener.newBossGroup()
+  val workerGroup = Listener.newWorkerGroup()
 
   def bootServer(port: Int, tlsPolicy: TlsPolicy): Channel = {
     try {

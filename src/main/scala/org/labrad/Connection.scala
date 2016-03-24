@@ -1,7 +1,7 @@
 package org.labrad
 
 import io.netty.bootstrap.Bootstrap
-import io.netty.channel.{Channel, ChannelHandlerContext, ChannelOption, ChannelInitializer, SimpleChannelInboundHandler}
+import io.netty.channel.{Channel, ChannelHandlerContext, ChannelOption, ChannelInitializer, EventLoopGroup, SimpleChannelInboundHandler}
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
@@ -12,13 +12,13 @@ import java.nio.{ByteOrder, CharBuffer}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.MessageDigest
-import java.util.concurrent.{ExecutionException, Executors, TimeUnit}
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ExecutionException, Executors, ThreadFactory, TimeUnit}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
 import org.labrad.manager.Manager
-import org.labrad.util.{Counter, LookupProvider}
+import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -46,6 +46,24 @@ object TlsMode {
   }
 }
 
+object Connection {
+  private val groupCounter = new AtomicLong(0)
+
+  def newWorkerGroup(): EventLoopGroup =
+    NettyUtil.newEventLoopGroup("LabradConnection", groupCounter)
+
+  lazy val defaultWorkerGroup: EventLoopGroup = {
+    val group = newWorkerGroup()
+    sys.addShutdownHook {
+      group.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS).sync()
+    }
+    group
+  }
+
+  lazy val defaultExecutionContext =
+    ExecutionContext.fromExecutor(defaultWorkerGroup)
+}
+
 /**
  * A client or server connection to the Labrad manager.
  */
@@ -56,6 +74,9 @@ trait Connection {
   val port: Int
   val tls: TlsMode
   val tlsCerts: Map[String, File]
+  val workerGroup: EventLoopGroup
+  implicit val executionContext: ExecutionContext
+
   def password: Array[Char]
 
   var id: Long = _
@@ -88,10 +109,8 @@ trait Connection {
   // TODO: inject event loop group from outside so it can be shared between connections.
   // This will mean that its lifecycle must be managed separately, since we won't be
   // able to shut it down ourselves.
-  private val workerGroup: NioEventLoopGroup = new NioEventLoopGroup()
   protected val lookupProvider = new LookupProvider(this.send)
   protected val requestDispatcher = new RequestDispatcher(sendPacket)
-  implicit val executionContext = ExecutionContext.fromExecutor(workerGroup)
 
   private var channel: Channel = _
 
@@ -221,7 +240,6 @@ trait Connection {
     if (channel != null) {
       channel.close().sync()
     }
-    workerGroup.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS).sync()
   }
 
   private def closeNoWait(cause: Throwable): Unit = {
@@ -231,8 +249,6 @@ trait Connection {
         requestDispatcher.failAll(cause)
 
         channel.close()
-        workerGroup.shutdownGracefully(10, 100, TimeUnit.MILLISECONDS)
-
         connectionListeners.map(_.lift)
       } else {
         Seq()

@@ -1,7 +1,9 @@
 package org.labrad
 
+import io.netty.channel.EventLoopGroup
 import java.io.File
 import org.labrad.data._
+import scala.concurrent.ExecutionContext
 
 class Client(
   val name: String = Client.defaults.name,
@@ -9,7 +11,10 @@ class Client(
   val port: Int = Client.defaults.port,
   val password: Array[Char] = Client.defaults.password,
   val tls: TlsMode = Client.defaults.tls,
-  val tlsCerts: Map[String, File] = Map()
+  val tlsCerts: Map[String, File] = Map(),
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+)(
+  implicit val executionContext: ExecutionContext = Connection.defaultExecutionContext
 ) extends Connection {
   protected def loginData = Cluster(UInt(Client.PROTOCOL_VERSION), Str(name))
 }

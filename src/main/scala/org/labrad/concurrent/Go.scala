@@ -1,5 +1,6 @@
 package org.labrad.concurrent
 
+import java.util.{Timer, TimerTask}
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.{Lock, ReentrantLock}
@@ -26,11 +27,8 @@ object Go {
     }
   }
 
-  private[concurrent] val executor = {
-    val executor = new ScheduledThreadPoolExecutor(4, threadFactory)
-    executor.setMaximumPoolSize(1024)
-    executor
-  }
+  private[concurrent] val executor = Executors.newCachedThreadPool(threadFactory)
+  private[concurrent] val timer = new Timer("GoTimer", true)
 
   private val executionContext = ExecutionContext.fromExecutorService(executor)
 
@@ -313,12 +311,12 @@ class BufferedChan[A](capacity: Int) extends Chan[A] { chan =>
 object Time {
   def after(duration: Duration): Recv[Unit] = {
     val chan = Chan[Unit](1)
-    val task = new Runnable {
+    val task = new TimerTask {
       def run(): Unit = {
         chan.send(())
       }
     }
-    Go.executor.schedule(task, duration.toNanos, TimeUnit.NANOSECONDS)
+    Go.timer.schedule(task, duration.toMillis)
     chan
   }
 }

@@ -1,9 +1,10 @@
 package org.labrad
 
+import io.netty.channel.EventLoopGroup
 import java.io.File
 import org.labrad.data._
 import org.labrad.util.Logging
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 
@@ -15,7 +16,10 @@ class ServerConnection(
   val password: Array[Char],
   val tls: TlsMode = TlsMode.STARTTLS,
   val tlsCerts: Map[String, File] = Map(),
-  handler: Packet => Future[Packet]
+  handler: Packet => Future[Packet],
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+)(
+  implicit val executionContext: ExecutionContext = Connection.defaultExecutionContext
 ) extends Connection with Logging {
 
   protected def loginData = Cluster(
