@@ -54,12 +54,12 @@ class DelphiFileStore(rootDir: File) extends FileStore(rootDir) {
   /**
    * Encode and decode data for storage in individual key files.
    */
-  override def encodeData(data: Data): Array[Byte] = {
+  override def encodeData(data: Data, textOpt: Option[String]): Array[Byte] = {
     DelphiFormat.dataToString(data).getBytes(UTF_8)
   }
 
-  override def decodeData(bytes: Array[Byte]): Data = {
-    DelphiFormat.stringToData(new String(bytes, UTF_8))
+  override def decodeData(bytes: Array[Byte]): (Data, Option[String]) = {
+    (DelphiFormat.stringToData(new String(bytes, UTF_8)), None)
   }
 }
 

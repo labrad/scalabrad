@@ -60,6 +60,14 @@ object SQLiteStore {
       )
     """.execute()
 
+    // add data_str column if needed
+    val keyColumns = SQL"""PRAGMA table_info(keys)""".as(str("name").*)
+    if (!keyColumns.contains("data_str")) {
+      SQL"""
+        ALTER TABLE keys ADD COLUMN data_str TEXT
+      """.execute()
+    }
+
     SQL"""
       CREATE INDEX IF NOT EXISTS idx_list_keys ON keys(dir_id)
     """.execute()
@@ -129,35 +137,43 @@ class SQLiteStore(cxn: Connection) extends RegistryStore {
     SQL" DELETE FROM dirs WHERE parent_id = ${dir.id} AND name = $name ".execute()
   }
 
-  def getValue(dir: SqlDir, key: String, default: Option[(Boolean, Data)]): Data = {
+  def getValue(dir: SqlDir, key: String, default: Option[(Boolean, Data)]): (Data, Option[String]) = {
     // SQLite return NULL for empty BLOBs, so we have to treat the data
     // column as nullable, even though we specified it as NOT NULL
     val tdOpt = SQL"""
-      SELECT type, data FROM keys WHERE dir_id = ${dir.id} AND name = $key
-    """.as((str("type") ~ byteArray("data").?).singleOpt)
+      SELECT type, data, data_str FROM keys WHERE dir_id = ${dir.id} AND name = $key
+    """.as((str("type") ~ byteArray("data").? ~ str("data_str").?).singleOpt)
 
     tdOpt match {
-      case Some(typ ~ data) =>
-        Data.fromBytes(Type(typ), data.getOrElse(Array.empty))
+      case Some(typ ~ bytes ~ textOpt) =>
+        val data = Data.fromBytes(Type(typ), bytes.getOrElse(Array.empty))
+        (data, textOpt)
 
       case None =>
         default match {
           case None => sys.error(s"key does not exist: $key")
           case Some((set, default)) =>
-            if (set) setValue(dir, key, default)
-            default
+            if (set) setValue(dir, key, default, None)
+            (default, None)
         }
     }
   }
 
-  def setValueImpl(dir: SqlDir, key: String, value: Data): Unit = {
+  def setValueImpl(dir: SqlDir, key: String, value: Data, textOpt: Option[String]): Unit = {
     val typ = value.t.toString
     val data = value.toBytes
 
-    val n = SQL" UPDATE keys SET type = $typ, data = $data WHERE dir_id = ${dir.id} AND name = $key ".executeUpdate()
+    val n = SQL"""
+      UPDATE keys
+        SET type = $typ, data = $data, data_str = $textOpt
+        WHERE dir_id = ${dir.id} AND name = $key
+      """.executeUpdate()
 
     if (n == 0) {
-      SQL" INSERT INTO keys(dir_id, name, type, data) VALUES (${dir.id}, $key, $typ, $data) ".executeInsert()
+      SQL"""
+        INSERT INTO keys(dir_id, name, type, data, data_str)
+        VALUES (${dir.id}, $key, $typ, $data, $textOpt)
+      """.executeInsert()
     }
   }
 

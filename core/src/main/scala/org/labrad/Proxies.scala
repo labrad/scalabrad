@@ -120,7 +120,14 @@ trait RegistryServer extends Requester {
       case None => call("get", Str(key), Str(pat))
     }
   }
+  def getAsString(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Future[(Data, String)] = {
+    default match {
+      case Some((set, default)) => call[(Data, String)]("get as string", Str(key), Str(pat), Bool(set), default)
+      case None => call[(Data, String)]("get as string", Str(key), Str(pat))
+    }
+  }
   def set(key: String, value: Data): Future[Unit] = callUnit("set", Str(key), value)
+  def setAsString(key: String, text: String): Future[Unit] = callUnit("set as string", Str(key), Str(text))
   def del(key: String): Future[Unit] = callUnit("del", Str(key))
 
   def notifyOnChange(id: Long, enable: Boolean): Future[Unit] =

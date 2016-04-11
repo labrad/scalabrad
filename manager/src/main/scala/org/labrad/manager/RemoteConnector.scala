@@ -72,7 +72,7 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
     dir = registry.child(dir, name, create = true)
     dir = registry.child(dir, "Multihead", create = true)
     val default = DataBuilder("*(sws)").array(0).result()
-    val result = registry.getValue(dir, "Managers", default = Some((true, default)))
+    val (result, textOpt) = registry.getValue(dir, "Managers", default = Some((true, default)))
     val configs = result.get[Seq[(String, Long, String)]].map {
       case (host, port, pw) =>
         externalConfig.copy(
