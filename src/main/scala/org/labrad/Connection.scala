@@ -209,7 +209,8 @@ trait Connection {
       val md = MessageDigest.getInstance("MD5")
       md.update(challenge)
       md.update(UTF_8.encode(CharBuffer.wrap(password)))
-      val data = Bytes(md.digest)
+      val data = TreeData("s") // use s instead of y for backwards compatibility
+      data.setBytes(md.digest)
 
       // send password response; response is welcome message
       val Str(msg) = try {
