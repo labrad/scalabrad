@@ -2,7 +2,7 @@ package org.labrad.manager
 
 import io.netty.channel._
 import io.netty.handler.ssl.{SslContext, SslHandler}
-import io.netty.util.DomainNameMapping
+import io.netty.util.{DomainNameMapping, DomainNameMappingBuilder}
 import java.io.{ByteArrayOutputStream, File, FileInputStream}
 import java.net.{InetAddress, InetSocketAddress}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -35,9 +35,9 @@ case class TlsHostConfig(
 object TlsHostConfig {
   def apply(default: (File, SslContext), hosts: (String, (File, SslContext))*): TlsHostConfig = {
     val (defaultCertFile, defaultSslCtx) = default
-    val certMapping = new DomainNameMapping[String](readFile(defaultCertFile))
-    val certFileMapping = new DomainNameMapping[File](defaultCertFile)
-    val ctxMapping = new DomainNameMapping[SslContext](defaultSslCtx)
+    val certMapping = new DomainNameMappingBuilder[String](readFile(defaultCertFile))
+    val certFileMapping = new DomainNameMappingBuilder[File](defaultCertFile)
+    val ctxMapping = new DomainNameMappingBuilder[SslContext](defaultSslCtx)
 
     for ((host, (certFile, sslCtx)) <- hosts) {
       certMapping.add(host, readFile(certFile))
@@ -45,7 +45,11 @@ object TlsHostConfig {
       ctxMapping.add(host, sslCtx)
     }
 
-    TlsHostConfig(certMapping, certFileMapping, ctxMapping)
+    TlsHostConfig(
+      certs = certMapping.build(),
+      certFiles = certFileMapping.build(),
+      sslCtxs = ctxMapping.build()
+    )
   }
 
   private def readFile(f: File): String = new String(Files.readAllBytes(f.toPath), UTF_8)

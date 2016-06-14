@@ -77,12 +77,12 @@ trait Data {
   }
 
   def toBytes(implicit outputOrder: ByteOrder): Array[Byte] = {
-    val buf = Unpooled.buffer().order(outputOrder)
-    flatten(buf)
+    val buf = Unpooled.buffer()
+    flatten(buf, outputOrder)
     buf.toByteArray
   }
 
-  def flatten(buf: ByteBuf): Unit
+  def flatten(buf: ByteBuf, outputOrder: ByteOrder): Unit
 
   override def toString = t match {
     case TNone => "_"
@@ -286,8 +286,8 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
     }
   }
 
-  def flatten(os: ByteBuf): Unit = {
-    if (os.order == byteOrder)
+  def flatten(os: ByteBuf, outputOrder: ByteOrder): Unit = {
+    if (outputOrder == byteOrder)
       os.writeBytes(buf, ofs, len)
     else {
       t match {
@@ -297,25 +297,25 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
           os.writeBoolean(buf.getBool(ofs))
 
         case TInt =>
-          os.writeInt(buf.getInt(ofs))
+          os.writeIntOrdered(buf.getInt(ofs))(outputOrder)
 
         case TUInt =>
-          os.writeInt(buf.getUInt(ofs).toInt)
+          os.writeIntOrdered(buf.getUInt(ofs).toInt)(outputOrder)
 
         case TValue(_) =>
-          os.writeDouble(buf.getDouble(ofs))
+          os.writeDoubleOrdered(buf.getDouble(ofs))(outputOrder)
 
         case TComplex(_) =>
-          os.writeDouble(buf.getDouble(ofs))
-          os.writeDouble(buf.getDouble(ofs + 8))
+          os.writeDoubleOrdered(buf.getDouble(ofs))(outputOrder)
+          os.writeDoubleOrdered(buf.getDouble(ofs + 8))(outputOrder)
 
         case TTime =>
-          os.writeLong(buf.getLong(ofs))
-          os.writeLong(buf.getLong(ofs + 8))
+          os.writeLongOrdered(buf.getLong(ofs))(outputOrder)
+          os.writeLongOrdered(buf.getLong(ofs + 8))(outputOrder)
 
         case TStr | TBytes =>
           val len = buf.getInt(ofs)
-          os.writeInt(len)
+          os.writeIntOrdered(len)(outputOrder)
           os.writeBytes(buf, ofs + 4, len)
 
         case TArr(elem, depth) =>
@@ -323,30 +323,30 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
           var size = 1
           for (i <- 0 until depth) {
             val dim = buf.getInt(ofs + 4*i)
-            os.writeInt(dim)
+            os.writeIntOrdered(dim)(outputOrder)
             size *= dim
           }
 
           // write arr data
-          if (elem.fixedWidth && os.order == byteOrder) {
+          if (elem.fixedWidth && outputOrder == byteOrder) {
             // for fixed-width data, just copy in one big chunk
             os.writeBytes(buf, ofs + 4*depth, elem.dataWidth * size)
           } else {
             // for variable-width data, flatten recursively
             val iter = _arrayCursor(elem, depth)
             while (iter.hasNext) {
-              iter.next.flatten(os)
+              iter.next.flatten(os, outputOrder)
             }
           }
 
         case t: TCluster =>
           val iter = _clusterCursor(t)
           while (iter.hasNext) {
-            iter.next.flatten(os)
+            iter.next.flatten(os, outputOrder)
           }
 
         case TError(payload) =>
-          _errorCursor.flatten(os)
+          _errorCursor.flatten(os, outputOrder)
       }
     }
   }
@@ -444,8 +444,8 @@ extends Data with Serializable with Cloneable {
     }
   }
 
-  def flatten(out: ByteBuf): Unit = {
-    cursor.flatten(out)
+  def flatten(out: ByteBuf, outputOrder: ByteOrder): Unit = {
+    cursor.flatten(out, outputOrder)
   }
 
   def convertTo(pattern: String): Data = convertTo(Pattern(pattern))
@@ -626,21 +626,20 @@ object FlatData {
     data
   }
 
-  def fromBytes(t: Type, in: ByteBuf): Data = {
-    implicit val byteOrder = in.order
+  def fromBytes(t: Type, in: ByteBuf)(implicit bo: ByteOrder): Data = {
     def traverse(t: Type, ofs: Int): Int = {
       if (t.fixedWidth) {
         t.dataWidth
       } else {
         t match {
           case TStr | TBytes =>
-            val len = in.getInt(ofs)
+            val len = in.getIntOrdered(ofs)
             4 + len
 
           case TArr(elem, depth) =>
             var size = 1
             for (i <- 0 until depth) {
-              val dim = in.getInt(ofs + 4 * i)
+              val dim = in.getIntOrdered(ofs + 4 * i)
               size *= dim
             }
             var len = 0
@@ -687,10 +686,10 @@ extends Data with Serializable with Cloneable {
    */
   override private[data] def cast(newType: Type) = new TreeData(newType, buf, ofs, heap)
 
-  def flatten(out: ByteBuf): Unit = flatten(out, t, buf, ofs)
+  def flatten(out: ByteBuf, outputOrder: ByteOrder): Unit = flatten(out, t, buf, ofs, outputOrder)
 
-  private def flatten(os: ByteBuf, t: Type, buf: Array[Byte], ofs: Int) {
-    if (t.fixedWidth && os.order == byteOrder)
+  private def flatten(os: ByteBuf, t: Type, buf: Array[Byte], ofs: Int, outputOrder: ByteOrder) {
+    if (t.fixedWidth && outputOrder == byteOrder)
       os.writeBytes(buf, ofs, t.dataWidth)
     else {
       t match {
@@ -700,25 +699,25 @@ extends Data with Serializable with Cloneable {
           os.writeBoolean(buf.getBool(ofs))
 
         case TInt =>
-          os.writeInt(buf.getInt(ofs))
+          os.writeIntOrdered(buf.getInt(ofs))(outputOrder)
 
         case TUInt =>
-          os.writeInt(buf.getUInt(ofs).toInt)
+          os.writeIntOrdered(buf.getUInt(ofs).toInt)(outputOrder)
 
         case TValue(_) =>
-          os.writeDouble(buf.getDouble(ofs))
+          os.writeDoubleOrdered(buf.getDouble(ofs))(outputOrder)
 
         case TComplex(_) =>
-          os.writeDouble(buf.getDouble(ofs))
-          os.writeDouble(buf.getDouble(ofs + 8))
+          os.writeDoubleOrdered(buf.getDouble(ofs))(outputOrder)
+          os.writeDoubleOrdered(buf.getDouble(ofs + 8))(outputOrder)
 
         case TTime =>
-          os.writeLong(buf.getLong(ofs))
-          os.writeLong(buf.getLong(ofs + 8))
+          os.writeLongOrdered(buf.getLong(ofs))(outputOrder)
+          os.writeLongOrdered(buf.getLong(ofs + 8))(outputOrder)
 
         case TStr | TBytes =>
           val strBuf = heap(buf.getInt(ofs))
-          os.writeInt(strBuf.length)
+          os.writeIntOrdered(strBuf.length)(outputOrder)
           os.writeBytes(strBuf)
 
         case TArr(elem, depth) =>
@@ -726,27 +725,27 @@ extends Data with Serializable with Cloneable {
           var size = 1
           for (i <- 0 until depth) {
             val dim = buf.getInt(ofs + 4*i)
-            os.writeInt(dim)
+            os.writeIntOrdered(dim)(outputOrder)
             size *= dim
           }
 
           // write arr data
           val arrBuf = heap(buf.getInt(ofs + 4*depth))
-          if (elem.fixedWidth && os.order == byteOrder) {
+          if (elem.fixedWidth && outputOrder == byteOrder) {
             // for fixed-width data, just copy in one big chunk
             os.writeBytes(arrBuf, 0, elem.dataWidth * size)
           } else {
             // for variable-width data, flatten recursively
             for (i <- 0 until size)
-              flatten(os, elem, arrBuf, elem.dataWidth * i)
+              flatten(os, elem, arrBuf, elem.dataWidth * i, outputOrder)
           }
 
         case t: TCluster =>
           for ((elem, delta) <- t.elems zip t.offsets)
-            flatten(os, elem, buf, ofs + delta)
+            flatten(os, elem, buf, ofs + delta, outputOrder)
 
         case TError(payload) =>
-          flatten(os, TCluster(TInt, TStr, payload), buf, ofs)
+          flatten(os, TCluster(TInt, TStr, payload), buf, ofs, outputOrder)
       }
     }
   }
@@ -964,14 +963,13 @@ object TreeData {
   private[data] def newHeap: Buffer[Array[Byte]] = Buffer.empty[Array[Byte]]
 
   def fromBytes(t: Type, buf: Array[Byte])(implicit bo: ByteOrder): Data = {
-    val in = Unpooled.wrappedBuffer(buf).order(bo)
+    val in = Unpooled.wrappedBuffer(buf)
     val data = fromBytes(t, in)
     assert(in.readableBytes == 0, "not all bytes consumed when unflattening from array")
     data
   }
 
-  def fromBytes(t: Type, in: ByteBuf): Data = {
-    implicit val byteOrder = in.order
+  def fromBytes(t: Type, in: ByteBuf)(implicit bo: ByteOrder): Data = {
     val buf = Array.ofDim[Byte](t.dataWidth)
     val heap = newHeap
     def unflatten(t: Type, buf: Array[Byte], ofs: Int) {
@@ -980,7 +978,7 @@ object TreeData {
       else
         t match {
           case TStr | TBytes =>
-            val len = in.readInt
+            val len = in.readIntOrdered
             val strBuf = Array.ofDim[Byte](len)
             buf.setInt(ofs, heap.size)
             heap += strBuf
@@ -989,7 +987,7 @@ object TreeData {
           case TArr(elem, depth) =>
             var size = 1
             for (i <- 0 until depth) {
-              val dim = in.readInt
+              val dim = in.readIntOrdered
               buf.setInt(ofs + 4 * i, dim)
               size *= dim
             }
@@ -1066,7 +1064,7 @@ object Data {
     TreeData.fromBytes(t, buf)
   }
 
-  def fromBytes(t: Type, in: ByteBuf): Data = {
+  def fromBytes(t: Type, in: ByteBuf)(implicit bo: ByteOrder): Data = {
     TreeData.fromBytes(t, in)
   }
 

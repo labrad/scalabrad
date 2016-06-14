@@ -24,7 +24,7 @@ import org.labrad.util.Logging
 class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[Packet] with Logging {
 
   // Byte order of this channel, based on first word of first received packet
-  private var byteOrder: ByteOrder = forceByteOrder
+  implicit private var byteOrder: ByteOrder = forceByteOrder
 
   // Decoding state of the current packet.
   //
@@ -42,33 +42,28 @@ class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[P
 
       byteOrder = in.getInt(12) match {
         case 0x00000001 => // endianness is okay. do nothing
-          in.order
+          BIG_ENDIAN
 
         case 0x01000000 => // endianness needs to be reversed
-          in.order match {
-            case BIG_ENDIAN => LITTLE_ENDIAN
-            case LITTLE_ENDIAN => BIG_ENDIAN
-          }
+          LITTLE_ENDIAN
 
         case target =>
           sys.error(s"Invalid login packet. Expected target = 1 but got $target")
       }
     }
-    val buf = in.order(byteOrder)
 
     if (state == null) {
       // Wait until the full header is available
       if (in.readableBytes < 20) return
 
-      log.trace(s"decoding packet: ${in.order}")
-      log.trace(s"buffer byteOrder: ${buf.order}")
+      log.trace(s"decoding packet: ${byteOrder}")
 
       // Unpack the header
-      val high = buf.readUnsignedInt
-      val low = buf.readUnsignedInt
-      val request = buf.readInt
-      val target = buf.readUnsignedInt
-      val dataLen = buf.readInt
+      val high = in.readUnsignedIntOrdered()
+      val low = in.readUnsignedIntOrdered()
+      val request = in.readIntOrdered()
+      val target = in.readUnsignedIntOrdered()
+      val dataLen = in.readIntOrdered()
 
       // Start decoding a new packet
       state = DecodeState(Context(high, low), request, target, dataLen, new ByteArrayOutputStream)
@@ -76,15 +71,15 @@ class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[P
 
     if (state != null) {
       val remaining = state.dataLen - state.bytes.size
-      val available = Math.min(remaining, buf.readableBytes)
-      buf.readBytes(state.bytes, available)
+      val available = Math.min(remaining, in.readableBytes)
+      in.readBytes(state.bytes, available)
 
       if (state.bytes.size == state.dataLen) {
         // Unpack the received data into a list of records
         val bytes = state.bytes.toByteArray
-        val recordBuf = Unpooled.wrappedBuffer(bytes).order(byteOrder)
+        val recordBuf = Unpooled.wrappedBuffer(bytes)
         recordBuf.retain()
-        val records = Packet.extractRecords(recordBuf)
+        val records = Packet.extractRecords(recordBuf)(byteOrder)
         recordBuf.release()
 
         // Pass along the assembled packet
@@ -99,8 +94,7 @@ class PacketCodec(forceByteOrder: ByteOrder = null) extends ByteToMessageCodec[P
 
   override def encode(ctx: ChannelHandlerContext, packet: Packet, out: ByteBuf): Unit = {
     log.trace(s"write packet: $packet")
-    val buf = out.order(byteOrder)
-    packet.writeTo(buf)
+    packet.writeTo(out)
   }
 }
 

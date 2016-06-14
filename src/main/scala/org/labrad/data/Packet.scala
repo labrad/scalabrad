@@ -9,16 +9,16 @@ import org.labrad.types.Type
 
 case class Packet(id: Int, target: Long, context: Context, records: Seq[Record]) {
   def toBytes(implicit bo: ByteOrder = BIG_ENDIAN): Array[Byte] = {
-    val buf = Unpooled.buffer().order(bo)
+    val buf = Unpooled.buffer()
     writeTo(buf)
     buf.toByteArray
   }
 
-  def writeTo(buf: ByteBuf): Unit = {
-    buf.writeInt(context.high.toInt)
-    buf.writeInt(context.low.toInt)
-    buf.writeInt(id)
-    buf.writeInt(target.toInt)
+  def writeTo(buf: ByteBuf)(implicit bo: ByteOrder): Unit = {
+    buf.writeIntOrdered(context.high.toInt)
+    buf.writeIntOrdered(context.low.toInt)
+    buf.writeIntOrdered(id)
+    buf.writeIntOrdered(target.toInt)
     buf.writeLen {
       for (record <- records) {
         record.writeTo(buf)
@@ -57,26 +57,26 @@ object Packet {
     val ((high, low), req, src, len) = hdr.get[((Long, Long), Int, Long, Long)]
 
     val data = readBytes(len.toInt)
-    val recordBuf = Unpooled.wrappedBuffer(data).order(bo)
+    val recordBuf = Unpooled.wrappedBuffer(data)
     val records = extractRecords(recordBuf)
     Packet(req, src, Context(high, low), records)
   }
 
-  def extractRecords(buf: ByteBuf): Seq[Record] = {
+  def extractRecords(buf: ByteBuf)(implicit bo: ByteOrder): Seq[Record] = {
     val records = Seq.newBuilder[Record]
     while (buf.readableBytes > 0) {
-      val id = buf.readUnsignedInt
+      val id = buf.readUnsignedIntOrdered()
 
-      val tagLen = buf.readInt
+      val tagLen = buf.readIntOrdered()
       val tag = buf.toString(buf.readerIndex, tagLen, UTF_8)
       val t = Type(tag)
       buf.skipBytes(tagLen)
 
-      val dataLen = buf.readInt
+      val dataLen = buf.readIntOrdered()
       val dataBytes = Array.ofDim[Byte](dataLen)
       buf.readBytes(dataBytes)
 
-      val data = FlatData.fromBytes(t, dataBytes)(buf.order)
+      val data = FlatData.fromBytes(t, dataBytes)
 
       records += Record(id, data)
     }
@@ -86,13 +86,13 @@ object Packet {
 
 case class Record(id: Long, data: Data) {
   def toBytes(implicit order: ByteOrder): Array[Byte] = {
-    val buf = Unpooled.buffer().order(order)
+    val buf = Unpooled.buffer()
     writeTo(buf)
     buf.toByteArray
   }
 
-  def writeTo(buf: ByteBuf): Unit = {
-    buf.writeInt(id.toInt)
+  def writeTo(buf: ByteBuf)(implicit bo: ByteOrder): Unit = {
+    buf.writeIntOrdered(id.toInt)
     buf.writeLen { buf.writeUtf8String(data.t.toString) }
     buf.writeLen { buf.writeData(data) }
   }

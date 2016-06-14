@@ -1,6 +1,7 @@
 package org.labrad
 
 import io.netty.buffer.ByteBuf
+import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets.UTF_8
 
 package object data {
@@ -19,6 +20,56 @@ package object data {
   }
 
   implicit class RichByteBuf(val buf: ByteBuf) extends AnyVal {
+    def getIntOrdered(index: Int)(implicit bo: ByteOrder): Int = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.getInt(index)
+        case ByteOrder.LITTLE_ENDIAN => buf.getIntLE(index)
+      }
+    }
+
+    def readIntOrdered()(implicit bo: ByteOrder): Int = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.readInt()
+        case ByteOrder.LITTLE_ENDIAN => buf.readIntLE()
+      }
+    }
+
+    def readUnsignedIntOrdered()(implicit bo: ByteOrder): Long = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.readUnsignedInt()
+        case ByteOrder.LITTLE_ENDIAN => buf.readUnsignedIntLE()
+      }
+    }
+
+    def setIntOrdered(index: Int, value: Int)(implicit bo: ByteOrder): ByteBuf = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.setInt(index, value)
+        case ByteOrder.LITTLE_ENDIAN => buf.setIntLE(index, value)
+      }
+    }
+
+    def writeIntOrdered(value: Int)(implicit bo: ByteOrder): ByteBuf = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.writeInt(value)
+        case ByteOrder.LITTLE_ENDIAN => buf.writeIntLE(value)
+      }
+    }
+
+    def writeLongOrdered(value: Long)(implicit bo: ByteOrder): ByteBuf = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.writeLong(value)
+        case ByteOrder.LITTLE_ENDIAN => buf.writeLongLE(value)
+      }
+    }
+
+    def writeDoubleOrdered(value: Double)(implicit bo: ByteOrder): ByteBuf = {
+      bo match {
+        case ByteOrder.BIG_ENDIAN => buf.writeDouble(value)
+        case ByteOrder.LITTLE_ENDIAN =>
+          buf.writeLongLE(java.lang.Double.doubleToRawLongBits(value))
+      }
+    }
+
     /**
      * Write the length of a chunk of data as a 4-byte prefix field.
      * We do this by first reserving so space for the length field
@@ -26,17 +77,17 @@ package object data {
      * and keeping track of how many bytes are written, and finally
      * going back and filling in the correct length.
      */
-    def writeLen(f: => Unit): ByteBuf = {
+    def writeLen(f: => Unit)(implicit bo: ByteOrder): ByteBuf = {
       val idx = buf.writerIndex
-      buf.writeInt(0)
+      writeIntOrdered(0)
       val start = buf.writerIndex
       f
       val len = buf.writerIndex - start
-      buf.setInt(idx, len)
+      setIntOrdered(idx, len)
     }
 
-    def writeData(data: Data): ByteBuf = {
-      data.flatten(buf)
+    def writeData(data: Data)(implicit bo: ByteOrder): ByteBuf = {
+      data.flatten(buf, bo)
       buf
     }
 

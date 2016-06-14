@@ -14,7 +14,7 @@ object DataBuilder {
 
 class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG_ENDIAN) { self =>
 
-  private val buf = Unpooled.buffer().order(byteOrder)
+  private val buf = Unpooled.buffer()
   private var state: State = Start(tOpt).call()
 
   def none(): this.type = { state = state.none(); this }
@@ -278,12 +278,12 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
     override def int(x: Int): State = {
       check(TInt)
-      buf.writeInt(x)
+      buf.writeIntOrdered(x)
       ret(TInt)
     }
     override def uint(x: Long): State = {
       check(TUInt)
-      buf.writeInt(x.toInt)
+      buf.writeIntOrdered(x.toInt)
       ret(TUInt)
     }
     override def bytes(x: Array[Byte]): State = {
@@ -298,21 +298,21 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
     override def time(seconds: Long, fraction: Long): State = {
       check(TTime)
-      buf.writeLong(seconds)
-      buf.writeLong(fraction)
+      buf.writeLongOrdered(seconds)
+      buf.writeLongOrdered(fraction)
       ret(TTime)
     }
     override def value(x: Double, unit: String = ""): State = {
       val t = TValue(Some(unit))
       check(t)
-      buf.writeDouble(x)
+      buf.writeDoubleOrdered(x)
       ret(t)
     }
     override def complex(re: Double, im: Double, unit: String = ""): State = {
       val t = TComplex(Some(unit))
       check(t)
-      buf.writeDouble(re)
-      buf.writeDouble(im)
+      buf.writeDoubleOrdered(re)
+      buf.writeDoubleOrdered(im)
       ret(t)
     }
   }
@@ -437,7 +437,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
     def call(): State = {
       for (dim <- shape) {
-        buf.writeInt(dim)
+        buf.writeIntOrdered(dim)
       }
       if (size == 0) {
         ret(TArr(TNone, depth))
@@ -522,7 +522,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
       this.shape = shape
       this.size = shape.product
       for (dim <- shape) {
-        buf.writeInt(dim)
+        buf.writeIntOrdered(dim)
       }
       if (size == 0) {
         ret(TArr(elem, depth))
@@ -556,7 +556,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
 
     override def error(code: Int, message: String): State = {
-      buf.writeInt(code)
+      buf.writeIntOrdered(code)
       buf.writeLen { buf.writeUtf8String(message) }
       awaitingError = false
       consumer.call()
@@ -576,7 +576,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     private var i = 0
 
     def call(): State = {
-      buf.writeInt(code)
+      buf.writeIntOrdered(code)
       buf.writeLen { buf.writeUtf8String(message) }
       consumer.call()
     }
