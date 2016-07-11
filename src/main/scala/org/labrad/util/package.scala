@@ -1,8 +1,10 @@
 package org.labrad.util
 
-import java.io.IOException
+import java.io.{File, IOException}
 import java.net.{DatagramSocket, ServerSocket, URI}
+import java.nio.file.Files
 import java.util.regex.Pattern
+
 
 class Counter(min: Long, max: Long) {
   require(max >= min)
@@ -159,5 +161,24 @@ object Util {
     }
 
     result
+  }
+
+  /**
+   * Copy the given source file to the specified destination, creating
+   * destination directories as needed.
+   */
+  def copy(src: File, dst: File): Unit = {
+    Util.ensureDir(dst.getParentFile)
+    Files.copy(src.toPath, dst.toPath)
+  }
+
+  /**
+   * Create directories as needed to ensure that the specified location exists.
+   */
+  def ensureDir(dir: File): Unit = {
+    if (!dir.exists) {
+      val ok = dir.mkdirs()
+      if (!ok) sys.error(s"failed to create directory: $dir")
+    }
   }
 }

@@ -7,13 +7,13 @@ import java.io.File
 import java.net.{InetAddress, URI}
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
-import java.security.{MessageDigest, SecureRandom}
 import java.nio.file.Files
+import java.security.{MessageDigest, SecureRandom}
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{ServerConfig, TlsMode}
 import org.labrad.annotations._
-import org.labrad.crypto.Certs
+import org.labrad.crypto.{CertConfig, Certs}
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.registry._
@@ -123,6 +123,9 @@ object Manager extends Logging {
     def msgData: Data = ctx.toData
   }
 
+  // A shared SecureRandom instance. Only created if needed because entropy collection is costly.
+  private implicit lazy val secureRandom = new SecureRandom()
+
   def main(args: Array[String]) {
 
     val config = ManagerConfig.fromCommandLine(args) match {
@@ -146,14 +149,14 @@ object Manager extends Logging {
         val registry = new File(Util.bareUri(config.registryUri)).getAbsoluteFile
 
         val (store, format) = if (registry.isDirectory) {
-          ensureDir(registry)
+          Util.ensureDir(registry)
           config.registryUri.getQuery match {
             case null | "format=binary" => (new BinaryFileStore(registry), "binary")
             case "format=delphi" => (new DelphiFileStore(registry), "delphi")
             case query => sys.error(s"invalid format for registry directory: $query")
           }
         } else {
-          ensureDir(registry.getParentFile)
+          Util.ensureDir(registry.getParentFile)
           config.registryUri.getQuery match {
             case null | "format=sqlite" => (SQLiteStore(registry), "sqlite")
             case query => sys.error(s"invalid format for registry file: $query")
@@ -207,9 +210,9 @@ object Manager extends Logging {
 
     val hosts = hostMap.toSeq.map {
       case (host, CertConfig.SelfSigned) =>
-        host -> sslContextForHost(host,
-                                  certPath = config.tlsCertPath,
-                                  keyPath = config.tlsKeyPath)
+        host -> Certs.sslContextForHost(host,
+                                        certPath = config.tlsCertPath,
+                                        keyPath = config.tlsKeyPath)
 
       case (host, CertConfig.Files(cert, key, None)) =>
         host -> (cert, SslContextBuilder.forServer(cert, key).build())
@@ -222,9 +225,9 @@ object Manager extends Logging {
         allCerts.deleteOnExit()
         host -> (cert, SslContextBuilder.forServer(allCerts, key).build())
     }
-    val default = sslContextForHost("localhost",
-                                    certPath = config.tlsCertPath,
-                                    keyPath = config.tlsKeyPath)
+    val default = Certs.sslContextForHost("localhost",
+                                          certPath = config.tlsCertPath,
+                                          keyPath = config.tlsKeyPath)
     val tlsHostConfig = TlsHostConfig(default, hosts: _*)
 
     log.info(s"localhost: sha1=${Certs.fingerprintSHA1(default._1)}")
@@ -250,51 +253,6 @@ object Manager extends Logging {
       }
     }
   }
-
-  /**
-   * Create an SSL/TLS context for the given host, using self-signed certificates.
-   */
-  private def sslContextForHost(host: String, certPath: File, keyPath: File): (File, SslContext) = {
-    val certFile = certPath / s"${host}.cert"
-    val keyFile = keyPath / s"${host}.key"
-
-    if (!certFile.exists() || !keyFile.exists()) {
-      // if one exists but not the other, we have a problem
-      require(!certFile.exists(), s"found cert file $certFile but no matching key file $keyFile")
-      require(!keyFile.exists(), s"found key file $keyFile but no matching cert file $certFile")
-
-      log.info(s"Generating self-signed certificate for host '$host'. certFile=$certFile, keyFile=$keyFile")
-      val ssc = SelfSignedCert(host, bits = 2048)(secureRandom)
-      copy(ssc.certificate, certFile)
-      copy(ssc.privateKey, keyFile)
-    } else {
-      log.info(s"Using saved certificate for host '$host'. certFile=$certFile, keyFile=$keyFile")
-    }
-
-    (certFile, SslContextBuilder.forServer(certFile, keyFile).build())
-  }
-
-  // A shared SecureRandom instance. Only created if needed because entropy collection is costly.
-  private lazy val secureRandom = new SecureRandom()
-
-  /**
-   * Copy the given source file to the specified destination, creating
-   * destination directories as needed.
-   */
-  private def copy(src: File, dst: File): Unit = {
-    ensureDir(dst.getParentFile)
-    Files.copy(src.toPath, dst.toPath)
-  }
-
-  /**
-   * Create directories as needed to ensure that the specified location exists.
-   */
-  private def ensureDir(dir: File): Unit = {
-    if (!dir.exists) {
-      val ok = dir.mkdirs()
-      if (!ok) sys.error(s"failed to create directory: $dir")
-    }
-  }
 }
 
 /**
@@ -311,17 +269,6 @@ case class ManagerConfig(
   tlsCertPath: File,
   tlsKeyPath: File
 )
-
-sealed trait CertConfig
-
-object CertConfig {
-  case object SelfSigned extends CertConfig
-  case class Files(
-    cert: File,
-    key: File,
-    intermediates: Option[File] = None
-  ) extends CertConfig
-}
 
 object ManagerConfig {
 
@@ -453,10 +400,10 @@ object ManagerConfig {
       val tlsRequiredLocalhost = tlsRequiredLocalhostOpt.value.orElse(env.get("LABRAD_TLS_REQUIRED_LOCALHOST")).map(Util.parseBooleanOpt).getOrElse(false)
       val tlsHosts = parseTlsHostsConfig(tlsHostsOpt.value.orElse(env.get("LABRAD_TLS_HOSTS")).getOrElse(""))
       val tlsCertPath = tlsCertPathOpt.value.orElse(env.get("LABRAD_TLS_CERT_PATH")).map(new File(_)).getOrElse {
-        sys.props("user.home") / ".labrad" / "manager" / "certs"
+        CertConfig.Defaults.tlsCertPath
       }
       val tlsKeyPath = tlsKeyPathOpt.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
-        sys.props("user.home") / ".labrad" / "manager" / "keys"
+        CertConfig.Defaults.tlsKeyPath
       }
 
       ManagerConfig(

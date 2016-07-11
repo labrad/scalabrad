@@ -2,6 +2,7 @@ package org.labrad.manager
 
 import java.io.File
 import java.net.URI
+import org.labrad.crypto.CertConfig
 import org.scalatest.FunSuite
 import scala.util.{Failure, Success}
 
