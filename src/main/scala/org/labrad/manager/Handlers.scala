@@ -429,7 +429,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
           |
           |Returns a list of clusters, one for each connection. Each cluster
           |contains the following elements:
-          | - id: The connection id (pass to `Close Connection` to kill connection.
+          | - id: The connection id; pass to `Close Connection` to kill connection.
           | - name: The connection name.
           | - is_server: Boolean indicating if this is a server (true) or client (false).
           | - server_requests: Number of requests received by server (meaningless for clients).
