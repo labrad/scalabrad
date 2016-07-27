@@ -424,7 +424,20 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     case None => sys.error(s"cannot convert ${data.t} to $pattern")
   }
 
-  @Setting(id=10000, name="Connection Info", doc="Get information about connected servers and clients.")
+  @Setting(id=10000, name="Connection Info",
+      doc="""Get information about connected servers and clients.
+          |
+          |Returns a list of clusters, one for each connection. Each cluster
+          |contains the following elements:
+          | - id: The connection id; pass to `Close Connection` to kill connection.
+          | - name: The connection name.
+          | - is_server: Boolean indicating if this is a server (true) or client (false).
+          | - server_requests: Number of requests received by server (meaningless for clients).
+          | - server_replies: Number of replies sent by server (meaningless for clients).
+          | - client_requests: Number of requests sent by client or server.
+          | - client_replies: Number of replies received by client or server.
+          | - messages_sent: Number of messages sent by client or server.
+          | - messages_received: Number of messages received by client or server.""")
   def connectionInfo(): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] = {
     val serverIds = (Manager.ID +: hub.serversInfo.map(_.id)).toSet
     for (s <- tracker.stats if !s.isServer || serverIds(s.id)) yield {
