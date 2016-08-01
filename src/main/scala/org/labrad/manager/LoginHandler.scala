@@ -11,6 +11,7 @@ import java.util.concurrent.TimeoutException
 import org.labrad.ContextCodec
 import org.labrad.data._
 import org.labrad.errors._
+import org.labrad.manager.auth._
 import org.labrad.types._
 import org.labrad.util._
 import scala.concurrent.ExecutionContext
@@ -114,6 +115,8 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   private val challenge = Array.ofDim[Byte](256)
   Random.nextBytes(challenge)
 
+  private var username: String = ""
+
   private var handle: (ChannelHandlerContext, Packet) => Data = {
     import TlsPolicy._
     tlsPolicy match {
@@ -154,10 +157,45 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       d
 
     case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-      Str("PONG")
+      ("PONG", Seq("auth-server")).toData // include manager features in ping response
+
+    case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
+      val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
+      (Seq("password") ++ resp.get[Seq[String]]).toData
+
+    case Packet(req, 1, _, Seq(Record(Authenticator.INFO_SETTING_ID, data))) =>
+      val resp = doAuthRequest(Authenticator.INFO_SETTING_ID, data)
+      resp
+
+    case Packet(req, 1, _, Seq(Record(Authenticator.AUTH_SETTING_ID, data))) =>
+      val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
+      username = resp.get[String]
+      handle = handleIdentification
+      Str("LabRAD 2.0")
 
     case _ =>
       throw LabradException(1, "Invalid login packet")
+  }
+
+  private def doAuthRequest(setting: Long, data: Data): Data = {
+    if (!(isSecure || isLocalConnection)) {
+      throw LabradException(3, "External auth is only available with TLS")
+    }
+    try {
+      Await.result(hub.authServerConnected, 5.seconds)
+    } catch {
+      case _: TimeoutException =>
+        throw LabradException(4, "Timeout while waiting for auth server to connect")
+    }
+    val id = hub.getServerId(Authenticator.NAME)
+    val packet = Packet(1, 1, Context(1, 0), Seq(Record(setting, data)))
+    val f = hub.request(id, packet)(timeout = 5.seconds)
+    val respPacket = Await.result(f, 5.seconds)
+    val Packet(_, _, _, Seq(Record(_, resp))) = respPacket
+    if (resp.isError) {
+      throw LabradException(resp.getErrorCode, resp.getErrorMessage)
+    }
+    resp
   }
 
   private def handleChallengeResponse(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
@@ -165,6 +203,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       if (!auth.authenticate(challenge, response)) throw LabradException(2, "Incorrect password")
       handle = handleIdentification
       Str("LabRAD 2.0")
+
     case _ =>
       throw LabradException(1, "Invalid authentication packet")
   }
@@ -174,13 +213,13 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       val (handler, id) = data match {
         case Cluster(UInt(ver), Str(name)) =>
           val id = hub.allocateClientId(name)
-          val handler = new ClientHandler(hub, tracker, messager, ctx.channel, id, name)
+          val handler = new ClientHandler(hub, tracker, messager, ctx.channel, id, name, username)
           hub.connectClient(id, name, handler)
           (handler, id)
 
         case Cluster(UInt(ver), Str(name), Str(doc)) =>
           val id = hub.allocateServerId(name)
-          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc)
+          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc, username)
           hub.connectServer(id, name, handler)
           (handler, id)
 
@@ -188,7 +227,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
         case Cluster(UInt(ver), Str(name), Str(docOrig), Str(notes)) =>
           val doc = if (notes.isEmpty) docOrig else (docOrig + "\n\n" + notes)
           val id = hub.allocateServerId(name)
-          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc)
+          val handler = new ServerHandler(hub, tracker, messager, ctx.channel, id, name, doc, username)
           hub.connectServer(id, name, handler)
           (handler, id)
 
