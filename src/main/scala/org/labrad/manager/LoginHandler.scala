@@ -157,7 +157,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       d
 
     case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-      Str("PONG:auth-server") // include manager features in ping response
+      ("PONG", Seq("auth-server")).toData // include manager features in ping response
 
     case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
       val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
