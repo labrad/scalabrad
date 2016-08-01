@@ -4,6 +4,7 @@ import org.labrad.ServerInfo
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
+import org.labrad.manager.auth._
 import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util._
@@ -16,9 +17,12 @@ trait Hub {
   def allocateClientId(name: String): Long
   def allocateServerId(name: String): Long
 
+  def getServerId(name: String): Long
+
   def connectClient(id: Long, name: String, handler: ClientActor): Unit
   def connectServer(id: Long, name: String, handler: ServerActor): Unit
 
+  def username(id: Long): String
   def close(id: Long): Unit
   def disconnect(id: Long): Unit
 
@@ -33,6 +37,7 @@ trait Hub {
   def serversInfo: Seq[ServerInfo]
   def serverInfo(id: Either[Long, String]): Option[ServerInfo]
 
+  def authServerConnected: Future[Unit]
   def registryConnected: Future[Unit]
 }
 
@@ -64,7 +69,10 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
   private var nClientsAllocated = 0L
   private var nClientsConnected = 0L
 
+  private val _authServerConnected = Promise[Unit]
   private val _registryConnected = Promise[Unit]
+
+  val authServerConnected = _authServerConnected.future
   val registryConnected = _registryConnected.future
 
   def allocateServerId(name: String): Long = synchronized {
@@ -88,6 +96,10 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
     id
   }
 
+  def getServerId(name: String): Long = synchronized {
+    serverIdCache.get(name).getOrElse { sys.error(s"server does not exist: $name") }
+  }
+
   def connectServer(id: Long, name: String, handler: ServerActor): Unit = {
     synchronized {
       require(allocatedServerIds.contains(id), s"cannot connect server with unallocated id: $id")
@@ -96,8 +108,10 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       handlerMap(id) = handler
       tracker.connectServer(id, name)
       nServersConnected += 1
-      if (name == Registry.NAME) {
-        _registryConnected.trySuccess(())
+      name match {
+        case Authenticator.NAME => _authServerConnected.trySuccess(())
+        case Registry.NAME => _registryConnected.trySuccess(())
+        case _ =>
       }
     }
     messager.broadcast(Manager.Connect(id, name, isServer = true), sourceId = Manager.ID)
@@ -113,6 +127,14 @@ class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with
       nClientsConnected += 1
     }
     messager.broadcast(Manager.Connect(id, name, isServer = false), sourceId = Manager.ID)
+  }
+
+  def username(id: Long): String = {
+    val handlerOpt = synchronized {
+      handlerMap.get(id)
+    }
+    val handler = handlerOpt.getOrElse { sys.error(s"no such connection: $id") }
+    handler.username
   }
 
   def close(id: Long): Unit = {

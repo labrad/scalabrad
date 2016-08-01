@@ -359,9 +359,12 @@ class ReflectTest extends FunSuite with Logging {
       def allocateClientId(name: String): Long = 0
       def allocateServerId(name: String): Long = 0
 
+      def getServerId(name: String): Long = 0
+
       def connectClient(id: Long, name: String, handler: ClientActor): Unit = {}
       def connectServer(id: Long, name: String, handler: ServerActor): Unit = {}
 
+      def username(id: Long): String = ""
       def disconnect(id: Long): Unit = {}
       def close(id: Long): Unit = {}
 
@@ -379,6 +382,7 @@ class ReflectTest extends FunSuite with Logging {
       )
       def serverInfo(id: Either[Long, String]): Option[ServerInfo] = None
 
+      def authServerConnected = Future.successful(())
       def registryConnected = Future.successful(())
     }
 

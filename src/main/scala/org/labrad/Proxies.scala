@@ -88,6 +88,9 @@ trait ManagerServer extends Requester {
   def connectionInfo(): Future[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]] =
     call[Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)]]("Connection Info")
 
+  def connectionUsername(id: Long): Future[String] =
+    call[String]("Connection Username", UInt(id))
+
   def echo(data: Data): Future[Data] =
     call("Echo", data)
 }

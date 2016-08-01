@@ -12,10 +12,8 @@ package object data {
      * There must be a setter for this type T available
      * in implicit scope.
      */
-    def toData(tag: String)(implicit setter: Setter[T]): Data = {
-      val data = Data(tag)
-      data.set(value)
-      data
+    def toData(implicit builder: ToData[T]): Data = {
+      builder(value)
     }
   }
 

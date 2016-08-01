@@ -15,6 +15,8 @@ import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 
 trait ClientActor {
+  def username: String
+
   def message(packet: Packet): Unit
 
   def close(): Unit
@@ -30,7 +32,15 @@ trait ServerActor extends ClientActor {
   def close(): Unit
 }
 
-class ClientHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, name: String)(implicit ec: ExecutionContext)
+class ClientHandler(
+  hub: Hub,
+  tracker: StatsTracker,
+  messager: Messager,
+  channel: Channel,
+  id: Long,
+  name: String,
+  val username: String
+)(implicit ec: ExecutionContext)
 extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport with Logging {
 
   // handle incoming packets
@@ -125,8 +135,18 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
 }
 
 
-class ServerHandler(hub: Hub, tracker: StatsTracker, messager: Messager, channel: Channel, id: Long, name: String, doc: String)(implicit ec: ExecutionContext)
-extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActor with ManagerSupport with Logging {
+class ServerHandler(
+  hub: Hub,
+  tracker: StatsTracker,
+  messager: Messager,
+  channel: Channel,
+  id: Long,
+  name: String,
+  doc: String,
+  username: String
+)(implicit ec: ExecutionContext)
+extends ClientHandler(hub, tracker, messager, channel, id, name, username)
+with ServerActor with ManagerSupport with Logging {
 
   private val contexts = mutable.Set.empty[Context]
   private val promises = mutable.Map.empty[(Long, Int), Promise[Packet]]
@@ -271,6 +291,8 @@ extends ClientHandler(hub, tracker, messager, channel, id, name) with ServerActo
  * Internal methods that must be made available to the ManagerImpl
  */
 trait ManagerSupport {
+  def username: String
+
   def startServing(): Unit
 
   def addSetting(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo): Unit
@@ -444,6 +466,17 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
       val sReqs = s.sReqs - (if (s.id == Manager.ID) 1 else 0) // don't count this request for Manager
       val cReqs = s.cReqs - (if (s.id == id) 1 else 0) // don't count this request for client
       (s.id, s.name, s.isServer, sReqs, s.sReps, cReqs, s.cReps, s.msgSent, s.msgRecd)
+    }
+  }
+
+  @Setting(id=10001, name="Connection Username",
+      doc="""Get the username for the connection with the given id.
+          |
+          |If no id is given, get the username for the current connection.""")
+  def connectionUsername(id: Option[Long]): String = {
+    id match {
+      case None => stub.username
+      case Some(id) => hub.username(id)
     }
   }
 

@@ -11,11 +11,12 @@ import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.{ServerConfig, TlsMode}
+import org.labrad.{ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
 import org.labrad.crypto.{CertConfig, Certs}
 import org.labrad.data._
 import org.labrad.errors._
+import org.labrad.manager.auth._
 import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
@@ -45,7 +46,8 @@ class AuthServiceImpl(password: Array[Char]) extends AuthService {
 
 class CentralNode(
   password: Array[Char],
-  storeOpt: Option[RegistryStore],
+  regStoreOpt: Option[RegistryStore],
+  authStoreOpt: Option[AuthStore],
   listeners: Seq[(Int, TlsPolicy)],
   tlsConfig: TlsHostConfig
 ) extends Logging {
@@ -58,13 +60,24 @@ class CentralNode(
   // Manager gets id 1L
   tracker.connectServer(Manager.ID, Manager.NAME)
 
-  for (store <- storeOpt) {
+  // TODO: this should be configurable, for example passwords per host
+  val externalConfig = ServerConfig("", 0, password)
+
+  for (regStore <- regStoreOpt) {
     val name = Registry.NAME
     val id = hub.allocateServerId(name)
-    val externalConfig = ServerConfig("", 0, password)
     val registry = new Registry(id, name, regStore, externalConfig)
     hub.setServerInfo(ServerInfo(registry.id, registry.name, registry.doc, registry.settings))
     hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker))
+  }
+
+  for (authStore <- authStoreOpt) {
+    val name = Authenticator.NAME
+    val id = hub.allocateServerId(name)
+    val regStore = regStoreOpt.getOrElse { sys.error("cannot run auth server without direct registry access") }
+    val auth = new AuthServer(id, name, hub, authStore, regStore, externalConfig)
+    hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
+    hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
   }
 
   // start listening for incoming network connections
@@ -141,7 +154,7 @@ object Manager extends Logging {
         return
     }
 
-    val storeOpt = config.registryUri.getScheme match {
+    val regStoreOpt = config.registryUri.getScheme match {
       case null if config.registryUri == new URI("none") =>
         log.info("running with external registry")
         None
@@ -193,6 +206,15 @@ object Manager extends Logging {
         sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")
     }
 
+    val authStoreOpt = if (config.authServer) {
+      Some(AuthStore(
+        file = config.authUsersFile,
+        oauthClientInfo = config.oauthClientInfo
+      ))
+    } else {
+      None
+    }
+
     val tlsPolicy = (config.tlsRequired, config.tlsRequiredLocalhost) match {
       case (false, _)    => TlsPolicy.STARTTLS_OPT
       case (true, false) => TlsPolicy.STARTTLS
@@ -236,7 +258,12 @@ object Manager extends Logging {
       log.info(s"$host: sha1=${Certs.fingerprintSHA1(cert)}")
     }
 
-    val centralNode = new CentralNode(config.password, storeOpt, listeners, tlsHostConfig)
+    val centralNode = new CentralNode(
+      password = config.password,
+      regStoreOpt = regStoreOpt,
+      authStoreOpt = authStoreOpt,
+      listeners = listeners,
+      tlsConfig = tlsHostConfig)
 
     // Optionally wait for EOF to stop the manager.
     // This is a convenience feature when developing in sbt, allowing the
@@ -268,7 +295,10 @@ case class ManagerConfig(
   tlsRequiredLocalhost: Boolean,
   tlsHosts: Map[String, CertConfig],
   tlsCertPath: File,
-  tlsKeyPath: File
+  tlsKeyPath: File,
+  authServer: Boolean,
+  authUsersFile: File,
+  oauthClientInfo: Option[OAuthClientInfo]
 )
 
 object ManagerConfig {
@@ -322,6 +352,31 @@ object ManagerConfig {
         "fallback to the value given in the LABRADREGISTRY environment " +
         "variable, with the default being to store registry values in SQLite " +
         "format in $HOME/.labrad/registry.sqlite"
+    )
+    val authServerOpt = parser.option[String](
+      names = List("auth-server"),
+      valueName = "bool",
+      description = "Whether to run auth server locally and store database " +
+        "of username and password info. If true, the default, the auth " +
+        "server will be run locally and a local user database file will be " +
+        "used. Otherwise, an external auth server must connect to this " +
+        "manager to provide username+password or OAuth authentication. " +
+        "If not provided, fallback to the value in the LABRAD_AUTH_SERVER " +
+        "environment variable."
+    )
+    val oauthClientIdOpt = parser.option[String](
+      names = List("oauth-client-id"),
+      valueName = "string",
+      description = "Client ID to use for authenticating users with OAuth. " +
+        "If not given, fallback to the value in the LABRAD_OAUTH_CLIENT_ID " +
+        "environment variable."
+    )
+    val oauthClientSecretOpt = parser.option[String](
+      names = List("oauth-client-secret"),
+      valueName = "string",
+      description = "Client Secret to use for authenticating users with OAuth. " +
+        "If not given, fallback to the value in the LABRAD_OAUTH_CLIENT_SECRET " +
+        "environment variable."
     )
     val tlsPortOpt = parser.option[Int](
       names = List("tls-port"),
@@ -406,6 +461,13 @@ object ManagerConfig {
       val tlsKeyPath = tlsKeyPathOpt.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
         CertConfig.Defaults.tlsKeyPath
       }
+      val oauthClientId = oauthClientIdOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_ID"))
+      val oauthClientSecret = oauthClientSecretOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_SECRET"))
+      val oauthClientInfo = (oauthClientId, oauthClientSecret) match {
+        case (None, None) => None
+        case (Some(id), Some(secret)) => Some(OAuthClientInfo(id, secret))
+        case _ => sys.error("Must specify both or neither of oauth client id and client secret.")
+      }
 
       ManagerConfig(
         port,
@@ -416,7 +478,11 @@ object ManagerConfig {
         tlsRequiredLocalhost,
         tlsHosts,
         tlsCertPath,
-        tlsKeyPath)
+        tlsKeyPath,
+        authServer = authServerOpt.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
+        authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
+        oauthClientInfo = oauthClientInfo
+      )
     }
   }
 

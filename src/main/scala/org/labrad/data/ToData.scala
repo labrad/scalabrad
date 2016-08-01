@@ -58,6 +58,15 @@ object ToData {
     }
   }
 
+  implicit def seqToData[A](implicit aToData: ToData[A]) = new ToData[Seq[A]] {
+    def apply(b: DataBuilder, value: Seq[A]): Unit = {
+      b.array(value.length)
+      for (elem <- value) {
+        b.add(elem)
+      }
+    }
+  }
+
   implicit def tuple2ToData[T1, T2](implicit s1: ToData[T1], s2: ToData[T2]) = new ToData[(T1, T2)] {
     def apply(b: DataBuilder, value: (T1, T2)): Unit = {
       value match {
