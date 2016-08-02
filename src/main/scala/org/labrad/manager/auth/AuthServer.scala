@@ -73,9 +73,9 @@ class AuthServer(
   // contains context-specific state and settings
   class AuthContext(src: String, context: Context, messageFunc: (Long, Packet) => Unit) {
 
-    @Setting(id=101,
-             name="auth_methods",
-             doc="Get a list of supported authentication methods")
+    @Setting(id = 101,
+             name = "auth_methods",
+             doc = """Get a list of supported authentication methods.""")
     def authMethods(): Seq[String] = {
       auth.oauthClientInfo match {
         case None => Seq("username+password")
@@ -83,19 +83,28 @@ class AuthServer(
       }
     }
 
-    @Setting(id=102,
-             name="auth_info",
-             doc="Get info needed for various auth methods")
+    @Setting(id = 102,
+             name = "auth_info",
+             doc = """Get info needed for the give authentication methods.
+                 |
+                 |Supported authentication methods can be found by calling the auth_methods setting.
+                 |Info about the given authentication method will be returns as a cluster of
+                 |(name, value) pairs. These will include "credential_tag" with a string giving the
+                 |labrad type tag for credential data required by this auth method, and
+                 |"credential_doc" with an explanation of what credentials are required, along with
+                 |any other info needed to authenticate successfully.""")
     def authInfo(method: String): Data = {
       method match {
         case "username+password" =>
-          (("credential_tag", "(ss)")).toData
+          (("credential_tag", "(ss)"),
+           ("credential_doc", "(username, password)")).toData
 
         case "oauth_token" =>
           val clientInfo = auth.oauthClientInfo.getOrElse {
             sys.error("OAuth authentication is not configured")
           }
           (("credential_tag", "s"),
+           ("credential_doc", "id_token string from OAuth login"),
            ("client_id", clientInfo.clientId),
            ("client_secret", clientInfo.clientSecret)).toData
 
@@ -104,9 +113,13 @@ class AuthServer(
       }
     }
 
-    @Setting(id=103,
-             name="authenticate",
-             doc="Check password for the given user")
+    @Setting(id = 103,
+             name = "authenticate",
+             doc = """Check credentials using the given authentication method.
+                 |
+                 |Called with a string indicating which authentication method to use, and data which
+                 |should be in the form given by the "credential_tag" in the auth_info for this
+                 |authentication method.""")
     def authenticateUser(method: String, credentials: Data): String = {
       method match {
         case "username+password" =>
@@ -135,21 +148,33 @@ class AuthServer(
       require(requester == "" || auth.isAdmin(requester), s"Must be admin to $operation.")
     }
 
-    @Setting(id=200, name="users", doc="Get list of users and their admin status.")
+    @Setting(id = 200,
+             name = "users",
+             doc = """Get list of users and their admin status.""")
     def usersList(): Seq[(String, Boolean)] = {
       auth.listUsers()
     }
 
-    @Setting(id=201, name="users_add",
-        doc="""Add a user with the given name, admin status, and optional password.
-            |
-            |If no password is given, then only OAuth login will be supported for this user.""")
+    @Setting(id = 201,
+             name = "users_add",
+             doc = """Add a user with the given name, admin status, and optional password.
+                 |
+                 |If no password is given, only OAuth login will be supported for this user.""")
     def usersAdd(ctx: RequestContext, username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit = {
       requireAdmin(ctx, "add user")
       auth.addUser(username, isAdmin, passwordOpt)
     }
 
-    @Setting(id=202, name="users_change_password", doc="Change a user password")
+    @Setting(id = 202,
+             name = "users_change_password",
+             doc = """Change a user password.
+                 |
+                 |Called with username, optional old password and optional new password. If no new
+                 |password is given, the password will be removed, in which case only OAuth login
+                 |will be supported for this user.
+                 |
+                 |Password can only be changed for the current user, unless the current user is an
+                 |admin.""")
     def usersChangePassword(ctx: RequestContext, username: String, oldPassword: Option[String], newPassword: Option[String]): Unit = {
       val requester = hub.username(ctx.source)
       if (requester != username) {
@@ -158,13 +183,22 @@ class AuthServer(
       auth.changePassword(username, oldPassword, newPassword)
     }
 
-    @Setting(id=203, name="users_set_admin", doc="Change admin status of a user")
+    @Setting(id = 203,
+             name = "users_set_admin",
+             doc = """Change admin status of a user.
+                 |
+                 |Called with a username and flag indicating whether that user should be an admin.
+                 |Can only be called by admins.""")
     def usersSetAdmin(ctx: RequestContext, username: String, isAdmin: Boolean): Unit = {
       requireAdmin(ctx, "change admin status")
       auth.setAdmin(username, isAdmin)
     }
 
-    @Setting(id=204, name="users_remove", doc="Remove the given user")
+    @Setting(id = 204,
+             name = "users_remove",
+             doc = """Remove the given user.
+                 |
+                 |Called with username to remove. Can only be called by admins.""")
     def usersRemove(ctx: RequestContext, username: String): Unit = {
       requireAdmin(ctx, "remove user")
       auth.removeUser(username)
@@ -173,44 +207,63 @@ class AuthServer(
 
     // remote managers
 
-    @Setting(id=1000,
-             name="managers",
-             doc="Get a list of managers we are connecting to as an external registry")
+    @Setting(id = 1000,
+             name = "managers",
+             doc = """Get a list of managers we are connecting to as an external registry.
+                 |
+                 |The returned list is a sequence of clusters of the form (host, port, connected),
+                 |where host is the string hostname and port the integer port number of the manager,
+                 |and connected is a flag indicating whether we are currently connected to that
+                 |manager.""")
     def managersList(): Seq[(String, Int, Boolean)] = {
       multihead.list()
     }
 
-    @Setting(id=1001,
-             name="managers_refresh",
-             doc="Refresh the list of managers from the registry.")
+    @Setting(id = 1001,
+             name = "managers_refresh",
+             doc = """Refresh the list of managers from the registry.""")
     def managersRefresh(): Unit = {
       multihead.refresh()
     }
 
-    @Setting(id=1002,
-             name="managers_add",
-             doc="Add a new manager to connect to as an external registry")
+    @Setting(id = 1002,
+             name = "managers_add",
+             doc = """Add a new manager to connect to as an external registry.
+                 |
+                 |Specified as a hostname, optional port number, and optional password. If port is
+                 |not given, use the default labrad port. If password is not given, use the same
+                 |password as configured on the manager where the registry is running locally.""")
     def managersAdd(host: String, port: Option[Int], password: Option[String]): Unit = {
       multihead.add(host, port, password)
     }
 
-    @Setting(id=1003,
-             name="managers_ping",
-             doc="Send a network ping to all external managers")
+    @Setting(id = 1003,
+             name = "managers_ping",
+             doc = """Send a network ping to all external managers.
+                 |
+                 |Called with a string giving an optional regular expression to match against
+                 |manager names, and an optional port number. If no port is given, matches any port.
+                 |If no host regex is given, matches any hostname.""")
     def managersPing(hostPat: String = ".*", port: Int = 0): Unit = {
       multihead.ping(hostPat, port)
     }
 
-    @Setting(id=1004,
-             name="managers_reconnect",
-             doc="Disconnect from matching managers and reconnect")
+    @Setting(id = 1004,
+             name = "managers_reconnect",
+             doc = """Disconnect from matching managers and reconnect.
+                 |
+                 |Hostname regular expression and port number are matched against external managers
+                 |as described for "Managers Ping".""")
     def managersReconnect(hostPat: String, port: Int = 0): Unit = {
       multihead.reconnect(hostPat, port)
     }
 
-    @Setting(id=1005,
-             name="managers_drop",
-             doc="Disconnect from matching managers and do not reconnect")
+    @Setting(id = 1005,
+             name = "managers_drop",
+             doc = """Disconnect from matching managers and do not reconnect.
+                 |
+                 |Hostname regular expression and port number are matched against external managers
+                 |as described for "Managers Ping".""")
     def managersDrop(hostPat: String, port: Int = 0): Unit = {
       multihead.drop(hostPat, port)
     }
