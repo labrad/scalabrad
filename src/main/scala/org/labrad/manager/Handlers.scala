@@ -317,15 +317,28 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   // metadata lookup and help
 
-  @Setting(id=1, name="Servers", doc="Get a list of ids and names for all currently-connected servers.")
+  @Setting(id = 1,
+           name = "Servers",
+           doc = """Get a list of ids and names for all currently-connected servers.""")
   def servers(): Seq[(Long, String)] =
     (Manager.ID, Manager.NAME) +: hub.serversInfo.map(s => (s.id, s.name)).sorted
 
-  @Setting(id=2, name="Settings", doc="Get a list of ids and names of settings for the given server, specified by name or id.")
+  @Setting(id = 2,
+           name = "Settings",
+           doc = """Get a list of ids and names of settings for a server.
+               |
+               |The server can be specified by specified by string name or integer id.""")
   def settings(serverId: Either[Long, String]): Seq[(Long, String)] =
     serverInfo(serverId).settings.map(s => (s.id, s.name)).sorted
 
-  @Setting(id=3, name="Lookup", doc="Lookup server or setting ids by name. If a single argument is given, returns the server id.")
+  @Setting(id = 3,
+           name = "Lookup",
+           doc = """Lookup server or setting ids by name.
+               |
+               |Can be called with a single string giving a server name, in which case we return the
+               |server id. Or, can be called With two arguments, the server name or id, and one or
+               |more setting names, in which case we return a cluster of server id and one or more
+               |setting ids.""")
   def lookup(name: String): Long = serverInfo(Right(name)).id
   def lookup(serverId: Either[Long, String],
              settingNames: Either[String, Seq[String]]): (Long, Either[Long, Seq[Long]]) = {
@@ -339,7 +352,18 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     (server.id, settingIds)
   }
 
-  @Setting(id=10, name="Help", doc="Get help documentation for the given server or setting.")
+  @Setting(id = 10,
+           name = "Help",
+           doc = """Get help documentation for the given server or setting.
+               |
+               |If called with a single argument giving the server name or id, returns a cluster of
+               |the server doc string and notes; the notes field however is deprecated, and all
+               |information is contained in the first doc string.
+               |
+               |If called with two arguments giving the server id or name, and a setting id or name,
+               |returns a cluster of (setting name, accepted types, return types, notes). Once
+               |again, the notes field is deprecated and all information will be contained in the
+               |first doc string.""")
   def help(serverId: Either[Long, String]): (String, String) = {
     val server = serverInfo(serverId)
     (server.doc, "") // TODO: get rid of notes field
@@ -358,12 +382,16 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     }
   }
 
-  @Setting(id=20, name="Version", doc="Manager Version")
+  @Setting(id = 20,
+           name = "Version",
+           doc = """Returns the manager version string.""")
   def version(): String = Manager.VERSION
 
   // contexts and messages
 
-  @Setting(id=50, name="Expire Context", doc="Expire the context in which this request was sent.")
+  @Setting(id = 50,
+           name = "Expire Context",
+           doc = """Expire the context in which this request was sent.""")
   def expireContext(r: RequestContext, server: Option[Long]): Unit = {
     implicit val timeout = 1.minute
 
@@ -378,7 +406,9 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     messager.broadcast(Manager.ExpireContext(r.context), sourceId = id)
   }
 
-  @Setting(id=51, name="Expire All", doc="Expire all contexts matching the high context of this request.")
+  @Setting(id = 51,
+           name = "Expire All",
+           doc = """Expire all contexts matching the high context of this request.""")
   def expireAll(r: RequestContext): Unit = {
     implicit val timeout = 1.minute
 
@@ -389,7 +419,19 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     messager.broadcast(Manager.ExpireAll(r.context.high), sourceId = id)
   }
 
-  @Setting(id=60, name="Subscribe to Named Message", doc="Register to receive messages identified by a particular name.")
+  @Setting(id = 60,
+           name = "Subscribe to Named Message",
+           doc = """Register to receive messages identified by a particular name.
+               |
+               |Called with the message name, the id that should be used when sending messages with
+               |this name, and a flag indicating whether to activate or deactivate sending this
+               |named message to the given id.
+               |
+               |When a message is sent using the "Send Named Message" setting, it will will be
+               |forwarded to subscribers in the context used when subscribing. The message will be
+               |sent to the id given here, with the as the source, and with contents given as a
+               |cluster of (sender_id, message), where senderId is the one who actually triggered
+               |sending the named message.""")
   def subscribeToNamedMessage(r: RequestContext, name: String, msgId: Long, active: Boolean): Unit = {
     if (active) {
       messager.register(name, id, r.context, msgId)
@@ -398,35 +440,75 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     }
   }
 
-  @Setting(id=61, name="Send Named Message", doc="Send a message with the given name, to be forward to all registered subscribers.")
+  @Setting(id = 61,
+           name = "Send Named Message",
+           doc = """Send a message with the given name to all registered subscribers.
+               |
+               |For compatibility with the delphi manager, we actualy send to subscribers a cluster
+               |of (sender_id, message), where sender_id is the id of the caller and message is the
+               |provided message data.""")
   def sendNamedMessage(name: String, message: Data): Unit = {
-    // for compatibility with delphi manager, we send a cluster of
+    // For compatibility with delphi manager, we send a cluster of
     // id and message data as the message itself, and set the source
-    // to alway be the manager
+    // to always be the manager.
     messager.broadcast(name, Cluster(UInt(id), message), sourceId = Manager.ID)
   }
 
   // server settings (should stay local)
 
-  @Setting(id=100, name="S: Register Setting", doc="(Servers only) Register an available setting for this server.") // TODO: change types to *(s, s) instead of *s, *s
+  @Setting(id = 100,
+           name = "S: Register Setting",
+           doc = """(Servers only) Register an available setting for this server.
+               |
+               |Setting info is given as (id, name, doc, accepted types, returned types, notes).
+               |The final notes field is deprecated, and any information provided there will simply
+               |be concatenated with the doc string.""")
   def addSetting(id: Long, name: String, doc: String,
                  accepted: Seq[String], returned: Seq[String], notes: String): Unit = {
     val docStr = if (notes.isEmpty) doc else s"$doc\n\n$notes"
     stub.addSetting(id, name, docStr, TypeInfo.fromPatterns(accepted), TypeInfo.fromPatterns(returned))
   }
 
-  @Setting(id=101, name="S: Unregister Setting", doc="(Servers only) Unregister an available setting for this server.")
+  @Setting(id = 101,
+           name = "S: Unregister Setting",
+           doc = """(Servers only) Unregister an available setting for this server.
+               |
+               |The setting to unregister can be specified by name or id.""")
   def delSetting(setting: Either[Long, String]): Unit = {
     setting.fold(stub.delSetting, stub.delSetting)
   }
 
-  @Setting(id=110, name="S: Notify on Context Expiration", doc="(Servers only) Register to be notified when contexts which have been used to send requests to this server are expired.")
+  @Setting(id = 110,
+           name = "S: Notify on Context Expiration",
+           doc = """(Servers only) Register to receive context expiration notifications.
+               |
+               |Can be called with two arguments specifying the message id to use for context
+               |expiration notifications and a flag indicating whether to send combined "expire all"
+               |messages. Or can be called with no arguments to disable sending context expiration
+               |messages.
+               |
+               |Context expiration messages will be sent to the given message id in the context in
+               |which this setting was called, for all contexts which have been used to make
+               |requests to this server. Expiration can be triggered either by someone explicitly
+               |calling one of the settings "Expire Context" or "Expire All", or by the connection
+               |with matching high id being closed. In the case of an individual context expiration,
+               |the message data will be a context id, given as a cluster of (high word, low word).
+               |If the expire all flag is false, then when a connection closes or "Expire All" is
+               |called the manager will also send out expiration messages with a context id cluster
+               |for all associated contexts. However, if the expire all flag was true, then we
+               |instead will send one single message containing just the high word of the context
+               |(which matches the connection id).""")
   def notifyOnContextExpiration(r: RequestContext, data: Option[(Long, Boolean)]): Unit = data match {
     case Some((msgId, expireAll)) => stub.startNotifications(r, msgId, expireAll)
     case None => stub.stopNotifications(r)
   }
 
-  @Setting(id=120, name="S: Start Serving", doc="(Servers only) Signal that the server is ready to receive requests. Before this point, the server will not appear in the list of active servers nor any metadata lookups.")
+  @Setting(id = 120,
+           name = "S: Start Serving",
+           doc = """(Servers only) Signal that the server is ready to receive requests.
+               |
+               |Before calling this setting, the server will not appear in the list of active
+               |servers nor any metadata lookups.""")
   def startServing(): Unit = {
     stub.startServing
     messager.broadcast(Manager.ConnectServer(id, name), sourceId = Manager.ID)
@@ -434,32 +516,43 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
 
   // utility methods (should stay local)
 
-  @Setting(id=200, name="Data To String", doc="Convert data into its human-readable string representation.")
+  @Setting(id = 200,
+           name = "Data To String",
+           doc = """Convert data into its human-readable string representation.""")
   def dataToString(data: Data): String = data.toString
 
-  @Setting(id=201, name="String To Data", doc="Parse a string into labrad data.")
+  @Setting(id = 201,
+           name = "String To Data",
+           doc = """Parse a string from human-readable representation into labrad data.""")
   def stringToData(str: String): Data = Data.parse(str)
 
-  @Setting(id=1010, name="Convert", doc="Convert the given data to a new type.")
+  @Setting(id = 1010,
+           name = "Convert",
+           doc = """Convert the given data to a new type.
+               |
+               |Called with data and a type tag string, will convert the data to the given type and
+               |return it, or fail if this is not possible. This can be used to do unit conversion,
+               |for example.""")
   def convert(data: Data, pattern: String): Data = Pattern(pattern)(data.t) match {
     case Some(t) => data.convertTo(t)
     case None => sys.error(s"cannot convert ${data.t} to $pattern")
   }
 
-  @Setting(id=10000, name="Connection Info",
-      doc="""Get information about connected servers and clients.
-          |
-          |Returns a list of clusters, one for each connection. Each cluster
-          |contains the following elements:
-          | - id: The connection id; pass to `Close Connection` to kill connection.
-          | - name: The connection name.
-          | - is_server: Boolean indicating if this is a server (true) or client (false).
-          | - server_requests: Number of requests received by server (meaningless for clients).
-          | - server_replies: Number of replies sent by server (meaningless for clients).
-          | - client_requests: Number of requests sent by client or server.
-          | - client_replies: Number of replies received by client or server.
-          | - messages_sent: Number of messages sent by client or server.
-          | - messages_received: Number of messages received by client or server.""")
+  @Setting(id = 10000,
+           name = "Connection Info",
+           doc = """Get information about connected servers and clients.
+               |
+               |Returns a list of clusters, one for each connection. Each cluster contains the
+               |following elements:
+               | - id: The connection id; pass to `Close Connection` to kill connection.
+               | - name: The connection name.
+               | - is_server: Boolean indicating if this is a server (true) or client (false).
+               | - server_requests: Number of requests received by server (meaningless for clients).
+               | - server_replies: Number of replies sent by server (meaningless for clients).
+               | - client_requests: Number of requests sent by client or server.
+               | - client_replies: Number of replies received by client or server.
+               | - messages_sent: Number of messages sent by client or server.
+               | - messages_received: Number of messages received by client or server.""")
   def connectionInfo(): Seq[(Long, String, Boolean, Long, Long, Long, Long, Long, Long)] = {
     val serverIds = (Manager.ID +: hub.serversInfo.map(_.id)).toSet
     for (s <- tracker.stats if !s.isServer || serverIds(s.id)) yield {
@@ -469,10 +562,11 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     }
   }
 
-  @Setting(id=10001, name="Connection Username",
-      doc="""Get the username for the connection with the given id.
-          |
-          |If no id is given, get the username for the current connection.""")
+  @Setting(id = 10001,
+           name = "Connection Username",
+           doc = """Get the username for the connection with the given id.
+               |
+               |If no id is given, get the username for the current connection.""")
   def connectionUsername(id: Option[Long]): String = {
     id match {
       case None => stub.username
@@ -480,13 +574,15 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
     }
   }
 
-  @Setting(id=14321, name="Close Connection", doc="Close a connection with the specified id.")
+  @Setting(id = 14321,
+           name = "Close Connection",
+           doc = """Close the connection with the specified id.""")
   def closeConnection(id: Long): Unit =
     hub.close(id)
 
-  // TODO: other control stuff here, e.g. shutting down connections and even the entire service?
-
-  @Setting(id=13579, name="Echo", doc="Echo back the supplied data.")
+  @Setting(id = 13579,
+           name = "Echo",
+           doc = """Echo back the supplied data.""")
   def echo(data: Data): Data = data
 }
 

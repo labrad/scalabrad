@@ -139,9 +139,9 @@ extends LocalServer with Logging {
     private var changeListener: Option[(Long, Long)] = None
     private var allChangeListener: Option[(Long, Long)] = None
 
-    @Setting(id=1,
-             name="dir",
-             doc="Returns lists of the subdirs and keys in the current directory")
+    @Setting(id = 1,
+             name = "dir",
+             doc = """Returns lists of the subdirs and keys in the current directory.""")
     def listDir(): (Seq[String], Seq[String]) = {
       store.dir(curDir)
     }
@@ -157,9 +157,9 @@ extends LocalServer with Logging {
       newDir
     }
 
-    @Setting(id=10,
-             name="cd",
-             doc="Change the current directory")
+    @Setting(id = 10,
+             name = "cd",
+             doc = """Change the current directory.""")
     def changeDir(): Seq[String] = {
       store.pathTo(curDir)
     }
@@ -178,9 +178,9 @@ extends LocalServer with Logging {
       changeDir(Right(Seq.fill(dir.toInt)("..")))
     }
 
-    @Setting(id=15,
-             name="mkdir",
-             doc="Create a new subdirectory in the current directory with the given name")
+    @Setting(id = 15,
+             name = "mkdir",
+             doc = """Create a new subdirectory in the current directory with the given name.""")
     def mkDir(name: String): Seq[String] = {
       val dir = _mkDir(curDir, name, create = true)
       store.pathTo(dir)
@@ -194,16 +194,29 @@ extends LocalServer with Logging {
       store.child(dir, name, create)
     }
 
-    @Setting(id=16,
-             name="rmdir",
-             doc="Delete the given subdirectory from the current directory")
+    @Setting(id = 16,
+             name = "rmdir",
+             doc = """Delete the given subdirectory from the current directory.""")
     def rmDir(name: String): Unit = {
       store.rmDir(curDir, name)
     }
 
-    @Setting(id=20,
-             name="get",
-             doc="Get the content of the given key in the current directory")
+    @Setting(id = 20,
+             name = "get",
+             doc = """Get the content of the given key in the current directory.
+                 |
+                 |Can be called in one of four ways, with one of the following:
+                 |- Key name. Returns an error if not found.
+                 |- Key name, type tag. The value will be converted to the given type before being
+                 |  returned. Returns an error if key not found or cannot be converted to the
+                 |  requested type.
+                 |- Key name, set flag, default value. Retrieves the given key, or if not found
+                 |  returns the given default value. Also, if the set flag is true it will be set to
+                 |  the default value in the registry before being returned.
+                 |- Key name, type tag, set flag, default value. Combines the behavior of the
+                 |  previous two, by getting the given default value if the key is not found and
+                 |  optionally setting it in the registry, then converting the value to the given
+                 |  type before returning it.""")
     def getValue(key: String): Data = _getValue(key)
     def getValue(key: String, pat: String): Data = _getValue(key, pat)
     def getValue(key: String, set: Boolean, default: Data): Data = _getValue(key, default = Some((set, default)))
@@ -215,38 +228,57 @@ extends LocalServer with Logging {
       data.convertTo(pattern)
     }
 
-    @Setting(id=30,
-             name="set",
-             doc="Set the content of the given key in the current directory to the given data")
+    @Setting(id = 30,
+             name = "set",
+             doc = """Set the given key in the current directory to the given value.""")
     def setValue(key: String, value: Data): Unit = {
       require(key.nonEmpty, "Cannot create a key with empty name")
       store.setValue(curDir, key, value)
     }
 
-    @Setting(id=40,
-             name="del",
-             doc="Delete the given key from the current directory")
+    @Setting(id = 40,
+             name = "del",
+             doc = """Delete the given key from the current directory.""")
     def delete(key: String): Unit = {
       store.delete(curDir, key)
     }
 
-    @Setting(id=50,
-             name="Notify on Change",
-             doc="Requests notifications if the contents of the current directory change")
+    @Setting(id = 50,
+             name = "Notify on Change",
+             doc = """Requests notifications if the contents of the current directory change.
+                 |
+                 |Called with message id and a flag indicating whether notifications should be
+                 |enabled or disabled. Notification messages will be sent to the given id in the
+                 |context used when calling this setting. The message will be of the form
+                 |(name, isDir, addOrChange), where name is the name of an item in the current
+                 |directory, isDir is a boolean indicating whether the item is a directory (true) or
+                 |key (false), and addOrChange is a boolean indicating whether the item was added or
+                 |changed (true), or was deleted (false).""")
     def notifyOnChange(r: RequestContext, id: Long, enable: Boolean): Unit = {
       changeListener = if (enable) Some((r.source, id)) else None
     }
 
-    @Setting(id=55,
-             name="Stream Changes",
-             doc="Requests notifications of all changes made in any directory")
+    @Setting(id = 55,
+             name = "Stream Changes",
+             doc = """Requests notifications of all changes made in any directory.
+                 |
+                 |Called with message id and a flag indicating whether notifications should be
+                 |enabled or disabled. Notification messages will be sent to the given id in the
+                 |context used when calling this setting. The message will be of the form
+                 |(path, name, isDir, addOrChange), where path is an absolute registry path given as
+                 |a list of strings, name is the name of an item in the specified path, isDir is a
+                 |boolean indicating whether the item is a directory (true) or key (false), and
+                 |addOrChange is a boolean indicating whether the item was added or changed (true),
+                 |or was deleted (false).""")
     def streamChanges(r: RequestContext, id: Long, enable: Boolean): Unit = {
       allChangeListener = if (enable) Some((r.source, id)) else None
     }
 
-    @Setting(id=100,
-             name="Duplicate Context",
-             doc="Copy context state from the specified context into the current context (DEPRECATED)")
+    @Setting(id = 100,
+             name = "Duplicate Context",
+             doc = """Copy context state from the specified context into the request context.
+                 |
+                 |DEPRECATED""")
     def duplicateContext(r: RequestContext, high: Long, low: Long): Unit = {
       val xHigh = if (high == 0) r.source else high
       contexts.get((src, Context(xHigh, low))) match {
@@ -257,44 +289,63 @@ extends LocalServer with Logging {
       }
     }
 
-    @Setting(id=1000,
-             name="Managers",
-             doc="Get a list of managers we are connecting to as an external registry")
+    @Setting(id = 1000,
+             name = "Managers",
+             doc = """Get a list of managers we are connecting to as an external registry.
+                 |
+                 |The returned list is a sequence of clusters of the form (host, port, connected),
+                 |where host is the string hostname and port the integer port number of the manager,
+                 |and connected is a flag indicating whether we are currently connected to that
+                 |manager.""")
     def managersList(): Seq[(String, Int, Boolean)] = {
       multihead.list()
     }
 
-    @Setting(id=1001,
-             name="Managers Refresh",
-             doc="Refresh the list of managers from the registry.")
+    @Setting(id = 1001,
+             name = "Managers Refresh",
+             doc = """Refresh the list of managers from the registry.""")
     def managersRefresh(): Unit = {
       multihead.refresh()
     }
 
-    @Setting(id=1002,
-             name="Managers Add",
-             doc="Add a new manager to connect to as an external registry")
+    @Setting(id = 1002,
+             name = "Managers Add",
+             doc = """Add a new manager to connect to as an external registry.
+                 |
+                 |Specified as a hostname, optional port number, and optional password. If port is
+                 |not given, use the default labrad port. If password is not given, use the same
+                 |password as configured on the manager where the registry is running locally.""")
     def managersAdd(host: String, port: Option[Int], password: Option[String]): Unit = {
       multihead.add(host, port, password)
     }
 
-    @Setting(id=1003,
-             name="Managers Ping",
-             doc="Send a network ping to all external managers")
+    @Setting(id = 1003,
+             name = "Managers Ping",
+             doc = """Send a network ping to matching external managers.
+                 |
+                 |Called with a string giving an optional regular expression to match against
+                 |manager names, and an optional port number. If no port is given, matches any port.
+                 |If no host regex is given, matches any hostname.""")
     def managersPing(hostPat: String = ".*", port: Int = 0): Unit = {
       multihead.ping(hostPat, port)
     }
 
-    @Setting(id=1004,
-             name="Managers Reconnect",
-             doc="Disconnect from matching managers and reconnect")
+    @Setting(id = 1004,
+             name = "Managers Reconnect",
+             doc = """Disconnect from matching managers and reconnect.
+                 |
+                 |Hostname regular expression and port number are matched against external managers
+                 |as described for "Managers Ping".""")
     def managersReconnect(hostPat: String, port: Int = 0): Unit = {
       multihead.reconnect(hostPat, port)
     }
 
-    @Setting(id=1005,
-             name="Managers Drop",
-             doc="Disconnect from matching managers and do not reconnect")
+    @Setting(id = 1005,
+             name = "Managers Drop",
+             doc = """Disconnect from matching managers and do not reconnect.
+                 |
+                 |Hostname regular expression and port number are matched against external managers
+                 |as described for "Managers Ping".""")
     def managersDrop(hostPat: String, port: Int = 0): Unit = {
       multihead.drop(hostPat, port)
     }
