@@ -117,7 +117,7 @@ class AuthServer(
              name = "authenticate",
              doc = """Check credentials using the given authentication method.
                  |
-                 |Called with a string idicating which authentication method to use, and data which
+                 |Called with a string indicating which authentication method to use, and data which
                  |should be in the form given by the "credential_tag" in the auth_info for this
                  |authentication method.""")
     def authenticateUser(method: String, credentials: Data): String = {

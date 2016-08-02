@@ -159,7 +159,19 @@ extends LocalServer with Logging {
 
     @Setting(id = 10,
              name = "cd",
-             doc = """Change the current directory.""")
+             doc = """Change the current directory.
+                 |
+                 |Called with a string giving a subdirectory of the current directory or ".." to
+                 |change to the parent directory, or a sequence of strings giving a path to change
+                 |into. The empty string refers to the root directory, so paths beginning with ""
+                 |are absolute, while other paths are relative to the current directory.
+                 |
+                 |Optionally takes a second boolean argument whether to create the directory or path
+                 |if it does not exist.
+                 |
+                 |Can also be called with a single integer argument n to change to the nth parent of
+                 |of the current directory, that is to go n levels back toward the root directory.
+                 |This usage is deprecated.""")
     def changeDir(): Seq[String] = {
       store.pathTo(curDir)
     }
@@ -269,7 +281,10 @@ extends LocalServer with Logging {
                  |a list of strings, name is the name of an item in the specified path, isDir is a
                  |boolean indicating whether the item is a directory (true) or key (false), and
                  |addOrChange is a boolean indicating whether the item was added or changed (true),
-                 |or was deleted (false).""")
+                 |or was deleted (false).
+                 |
+                 |Note that notifications are sent for changes occuring in any registry directory,
+                 |regardless of the current directory when this setting is called.""")
     def streamChanges(r: RequestContext, id: Long, enable: Boolean): Unit = {
       allChangeListener = if (enable) Some((r.source, id)) else None
     }
