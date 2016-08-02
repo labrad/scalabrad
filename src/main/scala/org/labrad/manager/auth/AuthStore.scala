@@ -22,7 +22,12 @@ trait AuthStore {
 
   def listUsers(): Seq[(String, Boolean)]
   def addUser(username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit
-  def changePassword(username: String, oldPassword: Option[String], newPassword: Option[String]): Unit
+  def changePassword(
+    username: String,
+    oldPassword: Option[String],
+    newPassword: Option[String],
+    isAdmin: Boolean
+  ): Unit
   def checkUser(username: String): Boolean
   def checkUserPassword(username: String, password: String): Boolean
   def checkUserOAuth(idTokenString: String): Option[String]
@@ -93,17 +98,20 @@ class AuthStoreImpl(
   def changePassword(
     username: String,
     oldPasswordOpt: Option[String],
-    newPasswordOpt: Option[String]
+    newPasswordOpt: Option[String],
+    isAdmin: Boolean
   ): Unit = {
     val oldHashedOpt = SQL"""
       SELECT password_hash FROM users WHERE name = $username
     """.as(get[Option[String]]("password_hash").singleOpt)
        .getOrElse { sys.error(s"username $username does not exist") }
 
-    // Check that provided oldPassword matches stored hash, if there is one.
-    for (oldHashed <- oldHashedOpt) {
-      val oldPassword = oldPasswordOpt.getOrElse { sys.error(s"incorrect password") }
-      if (!BCrypt.checkpw(oldPassword, oldHashed)) sys.error(s"incorrect password")
+    if (!isAdmin) {
+      // Check that provided oldPassword matches stored hash, if there is one.
+      for (oldHashed <- oldHashedOpt) {
+        val oldPassword = oldPasswordOpt.getOrElse { sys.error(s"incorrect password") }
+        if (!BCrypt.checkpw(oldPassword, oldHashed)) sys.error(s"incorrect password")
+      }
     }
 
     // Set or clear the password.
