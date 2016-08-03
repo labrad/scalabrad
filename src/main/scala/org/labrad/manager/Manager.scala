@@ -48,6 +48,7 @@ class CentralNode(
   password: Array[Char],
   regStoreOpt: Option[RegistryStore],
   authStoreOpt: Option[AuthStore],
+  oauthClientInfo: Option[OAuthClientInfo],
   listeners: Seq[(Int, TlsPolicy)],
   tlsConfig: TlsHostConfig
 ) extends Logging {
@@ -74,8 +75,11 @@ class CentralNode(
   for (authStore <- authStoreOpt) {
     val name = Authenticator.NAME
     val id = hub.allocateServerId(name)
-    val regStore = regStoreOpt.getOrElse { sys.error("cannot run auth server without direct registry access") }
-    val auth = new AuthServer(id, name, hub, authStore, regStore, externalConfig)
+    val regStore = regStoreOpt.getOrElse {
+      sys.error("cannot run auth server without direct registry access")
+    }
+    val verifierOpt = oauthClientInfo.map { clientInfo => new OAuthVerifier(clientInfo) }
+    val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
     hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
   }
@@ -207,10 +211,7 @@ object Manager extends Logging {
     }
 
     val authStoreOpt = if (config.authServer) {
-      Some(AuthStore(
-        file = config.authUsersFile,
-        oauthClientInfo = config.oauthClientInfo
-      ))
+      Some(AuthStore(file = config.authUsersFile))
     } else {
       None
     }
@@ -262,6 +263,7 @@ object Manager extends Logging {
       password = config.password,
       regStoreOpt = regStoreOpt,
       authStoreOpt = authStoreOpt,
+      oauthClientInfo = config.oauthClientInfo,
       listeners = listeners,
       tlsConfig = tlsHostConfig)
 

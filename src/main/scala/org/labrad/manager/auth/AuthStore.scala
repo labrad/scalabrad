@@ -18,8 +18,6 @@ import scala.collection.JavaConverters._
 case class OAuthClientInfo(clientId: String, clientSecret: String)
 
 trait AuthStore {
-  val oauthClientInfo: Option[OAuthClientInfo]
-
   def listUsers(): Seq[(String, Boolean)]
   def addUser(username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit
   def changePassword(
@@ -30,14 +28,13 @@ trait AuthStore {
   ): Unit
   def checkUser(username: String): Boolean
   def checkUserPassword(username: String, password: String): Boolean
-  def checkUserOAuth(idTokenString: String): Option[String]
   def isAdmin(username: String): Boolean
   def setAdmin(username: String, isAdmin: Boolean): Unit
   def removeUser(username: String): Unit
 }
 
 object AuthStore {
-  def apply(file: File, oauthClientInfo: Option[OAuthClientInfo]): AuthStore = {
+  def apply(file: File): AuthStore = {
     Class.forName("org.sqlite.JDBC")
     val url = s"jdbc:sqlite:${file.getAbsolutePath}"
     implicit val conn = DriverManager.getConnection(url)
@@ -58,13 +55,12 @@ object AuthStore {
       CREATE INDEX IF NOT EXISTS idx_list_users ON users(name)
     """.execute()
 
-    new AuthStoreImpl(conn, oauthClientInfo)
+    new AuthStoreImpl(conn)
   }
 }
 
 class AuthStoreImpl(
-  cxn: Connection,
-  val oauthClientInfo: Option[OAuthClientInfo]
+  cxn: Connection
 ) extends AuthStore with Logging {
 
   private implicit val connection = cxn
@@ -162,33 +158,6 @@ class AuthStoreImpl(
 
   def removeUser(username: String): Unit = {
     SQL" DELETE FROM users WHERE name = $username ".execute()
-  }
-
-  def checkUserOAuth(idTokenString: String): Option[String] = {
-    val clientInfo = oauthClientInfo.getOrElse {
-      sys.error("OAuth Client ID not configured")
-    }
-    val username = try {
-      val transport = new NetHttpTransport()
-      val jsonFactory = JacksonFactory.getDefaultInstance()
-      val verifier = new GoogleIdTokenVerifier.Builder(transport, jsonFactory)
-          .setAudience(Seq(clientInfo.clientId).asJava)
-          .setIssuer("https://accounts.google.com")
-          .build()
-
-      val token = GoogleIdToken.parse(jsonFactory, idTokenString)
-      if (token == null) throw LabradException(3, "Invalid id token")
-
-      val idToken = verifier.verify(idTokenString)
-      if (idToken == null) throw LabradException(3, "Invalid id token")
-
-      idToken.getPayload.getEmail
-    } catch {
-      case e: Exception =>
-        log.error("error validating id token", e)
-        throw e
-    }
-    if (checkUser(username)) Some(username) else None
   }
 }
 

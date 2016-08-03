@@ -18,6 +18,7 @@ class AuthServer(
   val name: String,
   hub: Hub,
   auth: AuthStore,
+  oauth: Option[OAuthVerifier],
   registry: RegistryStore,
   externalConfig: ServerConfig
 ) extends LocalServer with Logging {
@@ -77,7 +78,7 @@ class AuthServer(
              name = "auth_methods",
              doc = """Get a list of supported authentication methods.""")
     def authMethods(): Seq[String] = {
-      auth.oauthClientInfo match {
+      oauth match {
         case None => Seq("username+password")
         case Some(_) => Seq("username+password", "oauth_token")
       }
@@ -100,7 +101,7 @@ class AuthServer(
            ("credential_doc", "(username, password)")).toData
 
         case "oauth_token" =>
-          val clientInfo = auth.oauthClientInfo.getOrElse {
+          val clientInfo = oauth.map(_.clientInfo).getOrElse {
             sys.error("OAuth authentication is not configured")
           }
           (("credential_tag", "s"),
@@ -130,10 +131,13 @@ class AuthServer(
           username
 
         case "oauth_token" =>
+          val verifier = oauth.getOrElse { sys.error("OAuth authentication is not configured") }
           val idTokenString = credentials.get[String]
-          auth.checkUserOAuth(idTokenString).getOrElse {
-            sys.error("invalid oauth token")
+          val username = verifier.verifyToken(idTokenString)
+          if (!auth.checkUser(username)) {
+            sys.error(s"Unknown username: $username")
           }
+          username
 
         case method =>
           sys.error(s"Unknown authentication method: $method")

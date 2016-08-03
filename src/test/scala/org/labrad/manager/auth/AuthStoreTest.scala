@@ -19,7 +19,7 @@ class AuthStoreTest extends FunSuite {
 
   def withFixture(test: OneArgTest) = {
     TestUtils.withTempFile { file =>
-      val authStore = AuthStore(file, oauthClientInfo = None)
+      val authStore = AuthStore(file)
       withFixture(test.toNoArgTest(Fixture(authStore)))
     }
   }
