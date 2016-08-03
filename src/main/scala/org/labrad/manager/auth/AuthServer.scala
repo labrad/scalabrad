@@ -142,12 +142,6 @@ class AuthServer(
 
     // username/password management
 
-    private def requireAdmin(ctx: RequestContext, operation: String): Unit = {
-      require(src == "", s"Must connect to manager where Auth server is running locally to $operation.")
-      val requester = hub.username(ctx.source)
-      require(requester == "" || auth.isAdmin(requester), s"Must be admin to $operation.")
-    }
-
     @Setting(id = 200,
              name = "users",
              doc = """Get list of users and their admin status.""")
@@ -160,7 +154,12 @@ class AuthServer(
              doc = """Add a user with the given name, admin status, and optional password.
                  |
                  |If no password is given, only OAuth login will be supported for this user.""")
-    def usersAdd(ctx: RequestContext, username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit = {
+    def usersAdd(
+      ctx: RequestContext,
+      username: String,
+      isAdmin: Boolean,
+      passwordOpt: Option[String]
+    ): Unit = {
       requireAdmin(ctx, "add user")
       auth.addUser(username, isAdmin, passwordOpt)
     }
@@ -175,12 +174,18 @@ class AuthServer(
                  |
                  |Password can only be changed for the current user, unless the current user is an
                  |admin.""")
-    def usersChangePassword(ctx: RequestContext, username: String, oldPassword: Option[String], newPassword: Option[String]): Unit = {
-      val requester = hub.username(ctx.source)
-      if (requester != username) {
-        requireAdmin(ctx, "change password")
+    def usersChangePassword(
+      ctx: RequestContext,
+      username: String,
+      oldPassword: Option[String],
+      newPassword: Option[String]
+    ): Unit = {
+      val info = requestInfo(ctx)
+      require(info.isLocalRequest, localErrorMsg("change password"))
+      if (!info.isAdmin) {
+        require(username == info.username, adminErrorMsg("change password"))
       }
-      auth.changePassword(username, oldPassword, newPassword)
+      auth.changePassword(username, oldPassword, newPassword, info.isAdmin)
     }
 
     @Setting(id = 203,
@@ -202,6 +207,40 @@ class AuthServer(
     def usersRemove(ctx: RequestContext, username: String): Unit = {
       requireAdmin(ctx, "remove user")
       auth.removeUser(username)
+    }
+
+    private case class RequestInfo(username: String, isAdmin: Boolean, isLocalRequest: Boolean)
+
+    /**
+     * Get information about the local request.
+     *
+     * We only set the isAdmin flag if the request is coming from a connection to the local
+     * manager, not one of the remote managers, since we can not verify user information for
+     * requests made from remote managers.
+     */
+    private def requestInfo(ctx: RequestContext): RequestInfo = {
+      val username = hub.username(ctx.source)
+      val isAdminUser = username == "" || auth.isAdmin(username)
+      val isLocalRequest = src == ""
+      RequestInfo(
+        username,
+        isAdmin = isAdminUser && isLocalRequest,
+        isLocalRequest = isLocalRequest
+      )
+    }
+
+    def localErrorMsg(operation: String): String = {
+      s"Must connect to manager where Auth server is running locally to $operation."
+    }
+
+    def adminErrorMsg(operation: String): String = {
+      s"Must be admin to $operation."
+    }
+
+    private def requireAdmin(ctx: RequestContext, operation: String): Unit = {
+      val info = requestInfo(ctx)
+      require(info.isLocalRequest, localErrorMsg(operation))
+      require(info.isAdmin, adminErrorMsg(operation))
     }
 
 
