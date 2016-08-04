@@ -8,13 +8,21 @@ import org.labrad.errors.LabradException
 import org.labrad.util.Logging
 import scala.collection.JavaConverters._
 
-class OAuthVerifier(val clientInfo: OAuthClientInfo) extends Logging {
+sealed trait OAuthClientType
+object OAuthClientType {
+  case object Desktop extends OAuthClientType
+  case object Web extends OAuthClientType
+}
+
+case class OAuthClientInfo(clientId: String, clientSecret: String)
+
+class OAuthVerifier(val clients: Map[OAuthClientType, OAuthClientInfo]) extends Logging {
   def verifyToken(idTokenString: String): String = {
     try {
       val transport = new NetHttpTransport()
       val jsonFactory = JacksonFactory.getDefaultInstance()
       val verifier = new GoogleIdTokenVerifier.Builder(transport, jsonFactory)
-          .setAudience(Seq(clientInfo.clientId).asJava)
+          .setAudience(clients.values.toSeq.map(_.clientId).asJava)
           .setIssuer("https://accounts.google.com")
           .build()
 

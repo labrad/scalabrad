@@ -48,7 +48,7 @@ class CentralNode(
   password: Array[Char],
   regStoreOpt: Option[RegistryStore],
   authStoreOpt: Option[AuthStore],
-  oauthClientInfo: Option[OAuthClientInfo],
+  oauthClients: Map[OAuthClientType, OAuthClientInfo],
   listeners: Seq[(Int, TlsPolicy)],
   tlsConfig: TlsHostConfig
 ) extends Logging {
@@ -78,7 +78,11 @@ class CentralNode(
     val regStore = regStoreOpt.getOrElse {
       sys.error("cannot run auth server without direct registry access")
     }
-    val verifierOpt = oauthClientInfo.map { clientInfo => new OAuthVerifier(clientInfo) }
+    val verifierOpt = if (oauthClients.isEmpty) {
+      None
+    } else {
+      Some(new OAuthVerifier(oauthClients))
+    }
     val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
     hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
@@ -263,7 +267,7 @@ object Manager extends Logging {
       password = config.password,
       regStoreOpt = regStoreOpt,
       authStoreOpt = authStoreOpt,
-      oauthClientInfo = config.oauthClientInfo,
+      oauthClients = config.oauthClients,
       listeners = listeners,
       tlsConfig = tlsHostConfig)
 
@@ -300,7 +304,7 @@ case class ManagerConfig(
   tlsKeyPath: File,
   authServer: Boolean,
   authUsersFile: File,
-  oauthClientInfo: Option[OAuthClientInfo]
+  oauthClients: Map[OAuthClientType, OAuthClientInfo]
 )
 
 object ManagerConfig {
@@ -378,6 +382,20 @@ object ManagerConfig {
       valueName = "string",
       description = "Client Secret to use for authenticating users with OAuth. " +
         "If not given, fallback to the value in the LABRAD_OAUTH_CLIENT_SECRET " +
+        "environment variable."
+    )
+    val oauthWebClientIdOpt = parser.option[String](
+      names = List("oauth-web-client-id"),
+      valueName = "string",
+      description = "Client ID to use for authenticating users with OAuth on " +
+        "the web. If not given, fallback to the value in the LABRAD_OAUTH_WEB_CLIENT_ID " +
+        "environment variable."
+    )
+    val oauthWebClientSecretOpt = parser.option[String](
+      names = List("oauth-web-client-secret"),
+      valueName = "string",
+      description = "Client Secret to use for authenticating users with OAuth on " +
+        "the web. If not given, fallback to the value in the LABRAD_OAUTH_WEB_CLIENT_SECRET " +
         "environment variable."
     )
     val tlsPortOpt = parser.option[Int](
@@ -463,12 +481,25 @@ object ManagerConfig {
       val tlsKeyPath = tlsKeyPathOpt.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
         CertConfig.Defaults.tlsKeyPath
       }
+
+      val oauthClients = Map.newBuilder[OAuthClientType, OAuthClientInfo]
       val oauthClientId = oauthClientIdOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_ID"))
       val oauthClientSecret = oauthClientSecretOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_SECRET"))
-      val oauthClientInfo = (oauthClientId, oauthClientSecret) match {
-        case (None, None) => None
-        case (Some(id), Some(secret)) => Some(OAuthClientInfo(id, secret))
-        case _ => sys.error("Must specify both or neither of oauth client id and client secret.")
+      (oauthClientId, oauthClientSecret) match {
+        case (None, None) =>
+        case (Some(id), Some(secret)) =>
+          oauthClients += OAuthClientType.Desktop -> OAuthClientInfo(id, secret)
+        case _ =>
+          sys.error("Must specify both or neither of oauth client id and client secret.")
+      }
+      val oauthWebClientId = oauthWebClientIdOpt.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_ID"))
+      val oauthWebClientSecret = oauthWebClientSecretOpt.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_SECRET"))
+      (oauthWebClientId, oauthWebClientSecret) match {
+        case (None, None) =>
+        case (Some(id), Some(secret)) =>
+          oauthClients += OAuthClientType.Web -> OAuthClientInfo(id, secret)
+        case _ =>
+          sys.error("Must specify both or neither of oauth web client id and web client secret.")
       }
 
       ManagerConfig(
@@ -483,7 +514,7 @@ object ManagerConfig {
         tlsKeyPath,
         authServer = authServerOpt.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
         authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
-        oauthClientInfo = oauthClientInfo
+        oauthClients = oauthClients.result
       )
     }
   }

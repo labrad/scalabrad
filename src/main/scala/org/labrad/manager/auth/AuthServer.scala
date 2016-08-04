@@ -101,13 +101,25 @@ class AuthServer(
            ("credential_doc", "(username, password)")).toData
 
         case "oauth_token" =>
-          val clientInfo = oauth.map(_.clientInfo).getOrElse {
+          val clients = oauth.map(_.clients).getOrElse {
             sys.error("OAuth authentication is not configured")
           }
-          (("credential_tag", "s"),
-           ("credential_doc", "id_token string from OAuth login"),
-           ("client_id", clientInfo.clientId),
-           ("client_secret", clientInfo.clientSecret)).toData
+          val clientTypes = Seq(
+            OAuthClientType.Desktop -> "",
+            OAuthClientType.Web -> "web_"
+          )
+          val b = new DataBuilder
+          b.clusterStart()
+            b.add(("credential_tag", "s"))
+            b.add(("credential_doc", "id_token string from OAuth login"))
+            for ((clientType, prefix) <- clientTypes) {
+              for (info <- clients.get(clientType)) {
+                b.add((s"${prefix}client_id", info.clientId))
+                b.add((s"${prefix}client_secret", info.clientSecret))
+              }
+            }
+          b.clusterEnd()
+          b.result()
 
         case method =>
           sys.error(s"Unkown authentication method: $method")

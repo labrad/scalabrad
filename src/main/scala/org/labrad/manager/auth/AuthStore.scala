@@ -15,8 +15,6 @@ import org.labrad.util.Logging
 import org.mindrot.jbcrypt.BCrypt
 import scala.collection.JavaConverters._
 
-case class OAuthClientInfo(clientId: String, clientSecret: String)
-
 trait AuthStore {
   def listUsers(): Seq[(String, Boolean)]
   def addUser(username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit
