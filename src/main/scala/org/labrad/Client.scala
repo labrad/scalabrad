@@ -9,7 +9,7 @@ class Client(
   val name: String = Client.defaults.name,
   val host: String = Client.defaults.host,
   val port: Int = Client.defaults.port,
-  val password: Array[Char] = Client.defaults.password,
+  val credential: Credential = Client.defaults.credential,
   val tls: TlsMode = Client.defaults.tls,
   val tlsCerts: Map[String, File] = Map(),
   val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
@@ -25,7 +25,9 @@ object Client {
   object defaults {
     def name: String = "Scala Client"
     def host: String = sys.env.getOrElse("LABRADHOST", "localhost")
+    def username: String = sys.env.getOrElse("LABRADUSER", "")
     def password: Array[Char] = sys.env.getOrElse("LABRADPASSWORD", "").toCharArray
+    def credential: Credential = Password(username, password)
     def port: Int = tls match {
       case TlsMode.ON => sys.env.getOrElse("LABRAD_TLS_PORT", "7643").toInt
       case _          => sys.env.getOrElse("LABRADPORT", "7682").toInt

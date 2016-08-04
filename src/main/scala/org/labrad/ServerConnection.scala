@@ -13,7 +13,7 @@ class ServerConnection(
   val doc: String,
   val host: String,
   val port: Int,
-  val password: Array[Char],
+  val credential: Credential,
   val tls: TlsMode = TlsMode.STARTTLS,
   val tlsCerts: Map[String, File] = Map(),
   handler: Packet => Future[Packet],

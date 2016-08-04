@@ -64,8 +64,36 @@ class ServerConfigTest extends FunSuite {
   }
 
 
+  test("username can be set from environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(
+      Array(),
+      env = Map("LABRADUSER" -> "foo"))
+    val Password(username, _) = config.credential
+    assert(username == "foo")
+  }
+
+  test("username can be set from command line") {
+    val Success(config1) = ServerConfig.fromCommandLine(Array("--username", "foo"))
+    val Password(username1, _) = config1.credential
+    assert(username1 == "foo")
+
+    val Success(config2) = ServerConfig.fromCommandLine(Array("--username=foo"))
+    val Password(username2, _) = config2.credential
+    assert(username2 == "foo")
+  }
+
+  test("username command line arg overrides environment variable") {
+    val Success(config) = ServerConfig.fromCommandLine(
+      Array("--username=foo"),
+      env = Map("LABRADUSER" -> "bar"))
+    val Password(username, _) = config.credential
+    assert(username == "foo")
+  }
+
+
   private def checkPassword(config: ServerConfig, expected: String): Unit = {
-    assert(config.password.toSeq == expected.toCharArray.toSeq)
+    val Password(_, password) = config.credential
+    assert(password.toSeq == expected.toCharArray.toSeq)
   }
 
   test("password can be set from environment variable") {

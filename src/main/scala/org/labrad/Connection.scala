@@ -18,6 +18,7 @@ import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
 import org.labrad.manager.Manager
+import org.labrad.manager.auth.Authenticator
 import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
@@ -64,6 +65,10 @@ object Connection {
     ExecutionContext.fromExecutor(defaultWorkerGroup)
 }
 
+sealed trait Credential
+case class Password(username: String, password: Array[Char]) extends Credential
+case class OAuthToken(idToken: String) extends Credential
+
 /**
  * A client or server connection to the Labrad manager.
  */
@@ -77,7 +82,7 @@ trait Connection {
   val workerGroup: EventLoopGroup
   implicit val executionContext: ExecutionContext
 
-  def password: Array[Char]
+  def credential: Credential
 
   var id: Long = _
   var loginMessage: String = _
@@ -139,7 +144,7 @@ trait Connection {
     sslContextBuilder.build()
   }
 
-  def connect(): Unit = {
+  def connect(login: Boolean = true, timeout: Duration = 10.seconds): Unit = {
     val b = new Bootstrap()
     b.group(workerGroup)
      .channel(classOf[NioSocketChannel])
@@ -185,15 +190,16 @@ trait Connection {
       }
 
       if (useStartTls) {
-        val startTls = Request(Manager.ID, records = Seq(Record(1, Cluster(Str("STARTTLS"), Str(host)))))
-        val Str(cert) = Await.result(send(startTls), 10.seconds)(0)
+        val Str(cert) = Await.result(sendManagerRequest(1, ("STARTTLS", host).toData), timeout)
 
         var handler = makeSslContext(host).newHandler(channel.alloc(), host, port)
         channel.pipeline.addFirst("sslHandler", handler)
         Await.result(handler.handshakeFuture.toScala, 10.seconds)
       }
 
-      doLogin(password)
+      if (login) {
+        doLogin(credential, isLocalConnection || useStartTls || tls == TlsMode.ON, timeout)
+      }
     } catch {
       case e: Throwable => close(e); throw e
     }
@@ -201,27 +207,45 @@ trait Connection {
     for (listener <- connectionListeners) listener.lift(true)
   }
 
-  private def doLogin(password: Array[Char]): Unit = {
+  private def doLogin(
+    credential: Credential,
+    isSecureOrLocal: Boolean,
+    timeout: Duration = 10.seconds
+  ): Unit = {
     try {
-      // send first ping packet; response is password challenge
-      val Bytes(challenge) = Await.result(send(Request(Manager.ID)), 10.seconds)(0)
+      val loginResponse = credential match {
+        case Password("", password) =>
+          // send first ping packet; response is password challenge
+          val Bytes(challenge) = Await.result(sendManagerRequest(), timeout)
 
-      val md = MessageDigest.getInstance("MD5")
-      md.update(challenge)
-      md.update(UTF_8.encode(CharBuffer.wrap(password)))
-      val data = TreeData("s") // use s instead of y for backwards compatibility
-      data.setBytes(md.digest)
+          val md = MessageDigest.getInstance("MD5")
+          md.update(challenge)
+          md.update(UTF_8.encode(CharBuffer.wrap(password)))
+          val data = TreeData("s") // use s instead of y for backwards compatibility
+          data.setBytes(md.digest)
 
-      // send password response; response is welcome message
-      val Str(msg) = try {
-        Await.result(send(Request(Manager.ID, records = Seq(Record(0, data)))), 10.seconds)(0)
-      } catch {
-        case e: ExecutionException => throw new IncorrectPasswordException
+          // send password response; response is welcome message
+          try {
+            Await.result(sendManagerRequest(0, data), timeout)
+          } catch {
+            case e: ExecutionException => throw new IncorrectPasswordException
+          }
+
+        case Password(username, password) =>
+          require(isSecureOrLocal, "username+password requires secure connection")
+          val data = ("username+password", (username, new String(password))).toData
+          Await.result(sendManagerRequest(Authenticator.AUTH_SETTING_ID, data), timeout)
+
+        case OAuthToken(idToken) =>
+          require(isSecureOrLocal, "oauth_token requires secure connection")
+          val data = ("oauth_token", idToken).toData
+          Await.result(sendManagerRequest(Authenticator.AUTH_SETTING_ID, data), timeout)
       }
-      loginMessage = msg
+
+      loginMessage = loginResponse.get[String]
 
       // send identification packet; response is our assigned connection id
-      val UInt(assignedId) = Await.result(send(Request(Manager.ID, records = Seq(Record(0, loginData)))), 10.seconds)(0)
+      val UInt(assignedId) = Await.result(sendManagerRequest(0, loginData), timeout)
       id = assignedId
 
     } catch {
@@ -256,6 +280,14 @@ trait Connection {
       }
     }
     for (listener <- listeners) listener(false)
+  }
+
+  def sendManagerRequest(settingId: Long = -1, data: Data = Data.NONE): Future[Data] = {
+    val records = settingId match {
+      case -1 => Nil
+      case settingId => Seq(Record(settingId, data))
+    }
+    send(Request(Manager.ID, records = records)).map { results => results(0) }
   }
 
   def send(target: String, records: (String, Data)*): Future[Seq[Data]] =

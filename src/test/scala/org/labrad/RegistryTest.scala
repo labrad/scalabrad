@@ -90,7 +90,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry can store and retrieve arbitrary data") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
         await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
         try {
           for (i <- 0 until 1000) {
@@ -110,7 +110,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry can deal with unicode and strange characters in directory names", Tag("chars")) {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
         val dir = "<\u03C0|\u03C1>??+*\\/:|"
         await(c.send("Registry", "mkdir" -> Str(dir)))
         val (dirs, _) = await(c.send("Registry", "dir" -> Data.NONE))(0).get[(Seq[String], Seq[String])]
@@ -122,7 +122,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry can deal with unicode and strange characters in key names", Tag("chars")) {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
         val key = "<\u03C0|\u03C1>??+*\\/:|"
         val data = Str("Hello!")
         await(c.send("Registry", "set" -> Cluster(Str(key), Str("Hello!"))))
@@ -136,7 +136,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry cd with no arguments stays in same directory") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
         await(c.send("Registry", "cd" -> Cluster(Arr(Str("test"), Str("a")), Bool(true))))
         val result = await(c.send("Registry", "cd" -> Data.NONE))(0)
         assert(result.get[Seq[String]] == Seq("", "test", "a"))
@@ -146,7 +146,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry sends message when key is created") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val w = new Waiter
 
@@ -168,7 +168,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry sends message when key is changed") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val w = new Waiter
 
@@ -191,7 +191,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("registry sends message when key is deleted") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val w = new Waiter
 
@@ -227,7 +227,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("deleting a registry directory containing a dir should fail") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("a", "b"), true))
@@ -252,7 +252,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("deleting a registry directory containing a key should fail") {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("a"), true))
@@ -272,7 +272,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("creating a registry directory with empty name should fail", Tag("empties")) {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("test"), true))
@@ -286,7 +286,7 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("creating a registry key with empty name should fail", Tag("empties")) {
     withManager() { m =>
-      withClient(m.host, m.port, m.password) { c =>
+      withClient(m.host, m.port, m.credential) { c =>
 
         val reg = new RegistryServerProxy(c)
         await(reg.cd(Seq("test"), true))
@@ -315,7 +315,7 @@ object RegistryTest {
         "localhost" -> 7682
     }
 
-    withClient(host, port, password = Array()) { c =>
+    withClient(host, port, credential = Password("", Array())) { c =>
       val reg = new RegistryServerProxy(c)
       val (dirs, keys) = await(reg.dir())
       if (!dirs.contains("test")) {

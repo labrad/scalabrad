@@ -188,14 +188,20 @@ class ServerTest extends FunSuite {
 
   import TestUtils._
 
-  case class Fixture(server: TestSrv, client: Client, host: String, port: Int, password: Array[Char])
+  case class Fixture(
+    server: TestSrv,
+    client: Client,
+    host: String,
+    port: Int,
+    credential: Credential
+  )
   type FixtureParam = Fixture
 
   def withFixture(test: OneArgTest) = {
     withManager() { m =>
-      withServer(m.host, m.port, m.password) { server =>
-        withClient(m.host, m.port, m.password) { client =>
-          withFixture(test.toNoArgTest(Fixture(server, client, m.host, m.port, m.password)))
+      withServer(m.host, m.port, m.credential) { server =>
+        withClient(m.host, m.port, m.credential) { client =>
+          withFixture(test.toNoArgTest(Fixture(server, client, m.host, m.port, m.credential)))
         }
       }
     }
@@ -245,7 +251,7 @@ class ServerTest extends FunSuite {
   }
 
   test("server gets context expiration message when client disconnects") { fix =>
-    val ctx = withClient(fix.host, fix.port, fix.password) { client2 =>
+    val ctx = withClient(fix.host, fix.port, fix.credential) { client2 =>
       val ctx = client2.newContext.copy(high = client2.id)
       await(client2.send("Scala Test Server", ctx,
                          "Set" -> Cluster(Str("a"), Str("test"))))

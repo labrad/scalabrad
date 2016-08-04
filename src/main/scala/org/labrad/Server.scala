@@ -283,7 +283,7 @@ object Server {
       doc = server.doc,
       host = config.host,
       port = port,
-      password = config.password,
+      credential = config.credential,
       tls = config.tls,
       tlsCerts = Map(),
       handler = packet => server.handleRequest(packet)
@@ -336,7 +336,7 @@ object Server {
 case class ServerConfig(
   host: String,
   port: Int,
-  password: Array[Char],
+  credential: Credential,
   nameOpt: Option[String] = None,
   tls: TlsMode = ServerConfig.Defaults.tls,
   tlsPort: Int = ServerConfig.Defaults.tlsPort
@@ -411,6 +411,13 @@ object ServerConfig {
         "TLS. If not provided, fallback to the value given in the " +
         "LABRAD_TLS_PORT environment variable, with default value 7643."
     )
+    val usernameOpt = parser.option[String](
+      names = List("username"),
+      valueName = "string",
+      description = "Username to use to authenticate to the manager. " +
+        "If not provided, fallback to the value given in the LABRADUSER " +
+        "environment variable, with default value '' (global user)."
+    )
     val passwordOpt = parser.option[String](
       names = List("password"),
       valueName = "string",
@@ -429,9 +436,10 @@ object ServerConfig {
       val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
       val tls = tlsOpt.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(ServerConfig.Defaults.tls)
       val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(ServerConfig.Defaults.tlsPort)
+      val username = usernameOpt.value.orElse(env.get("LABRADUSER")).getOrElse("")
       val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
 
-      ServerConfig(host, port, password, nameOpt.value, tls, tlsPort)
+      ServerConfig(host, port, Password(username, password), nameOpt.value, tls, tlsPort)
     }
   }
 }

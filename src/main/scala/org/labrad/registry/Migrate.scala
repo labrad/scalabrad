@@ -4,7 +4,7 @@ import java.io.File
 import java.net.URI
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.{Client, RegistryServerProxy}
+import org.labrad.{Client, Password, RegistryServerProxy}
 import org.labrad.data.Data
 import org.labrad.util.Util
 import scala.concurrent.{Await, Future}
@@ -142,16 +142,16 @@ object Migrate {
         System.console.readPassword()
       }
     }
-    val password = uri.getUserInfo match {
-      case null => getPassword()
+    val (username, password) = uri.getUserInfo match {
+      case null => ("", getPassword())
       case info => info.split(":") match {
-        case Array() => getPassword()
-        case Array(pw) => pw.toCharArray
-        case Array(u, pw) => pw.toCharArray
+        case Array() => ("", getPassword()) // TODO: prompt for username
+        case Array(pw) => ("", pw.toCharArray)
+        case Array(u, pw) => (u, pw.toCharArray)
       }
     }
 
-    val cxn = new Client(host = host, port = port, password = password)
+    val cxn = new Client(host = host, port = port, credential = Password(username, password))
     cxn.connect()
     cxn
   }

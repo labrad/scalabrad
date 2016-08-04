@@ -18,9 +18,9 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   def withManagers()(func: (ManagerInfo, ManagerInfo, ManagerInfo) => Unit): Unit = {
     withManager() { root =>
-      val store1 = new RemoteStore(root.host, root.port, root.password, tls = TlsMode.OFF)
+      val store1 = new RemoteStore(root.host, root.port, root.credential, tls = TlsMode.OFF)
       withManager(registryStore = Some(store1)) { leaf1 =>
-        val store2 = new RemoteStore(root.host, root.port, root.password, tls = TlsMode.OFF)
+        val store2 = new RemoteStore(root.host, root.port, root.credential, tls = TlsMode.OFF)
         withManager(registryStore = Some(store2)) { leaf2 =>
         }
       }
@@ -29,8 +29,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is created") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.password) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.password) { c2 =>
+      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
+        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)
@@ -60,8 +60,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is changed") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.password) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.password) { c2 =>
+      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
+        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)
@@ -92,8 +92,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is deleted") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.password) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.password) { c2 =>
+      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
+        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)

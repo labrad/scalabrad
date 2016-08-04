@@ -77,7 +77,7 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
         externalConfig.copy(
           host = host,
           port = if (port != 0) port.toInt else externalConfig.port,
-          password = if (pw != "") pw.toCharArray else externalConfig.password
+          credential = if (pw != "") Password("", pw.toCharArray) else externalConfig.credential
         )
     }
     val urls = configs.map(c => s"${c.host}:${c.port}")
@@ -95,7 +95,9 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
     val config = externalConfig.copy(
       host = host,
       port = port.getOrElse(externalConfig.port),
-      password = password.map(_.toCharArray).getOrElse(externalConfig.password)
+      credential = password.map { pw =>
+        Password("", pw.toCharArray)
+      }.getOrElse(externalConfig.credential)
     )
     managers.getOrElseUpdate((config.host, config.port), {
       new RemoteConnector(server, config)

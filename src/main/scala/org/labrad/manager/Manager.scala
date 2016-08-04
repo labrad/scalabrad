@@ -11,7 +11,7 @@ import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.{ServerConfig, ServerInfo, TlsMode}
+import org.labrad.{Password, ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
 import org.labrad.crypto.{CertConfig, Certs}
 import org.labrad.data._
@@ -62,7 +62,7 @@ class CentralNode(
   tracker.connectServer(Manager.ID, Manager.NAME)
 
   // TODO: this should be configurable, for example passwords per host
-  val externalConfig = ServerConfig("", 0, password)
+  val externalConfig = ServerConfig(host = "", port = 0, credential = Password("", password))
 
   for (regStore <- regStoreOpt) {
     val name = Registry.NAME
@@ -189,12 +189,12 @@ object Manager extends Logging {
           case -1 => 7682 // not specified; use default
           case port => port
         }
-        val remotePassword = config.registryUri.getUserInfo match {
-          case null => config.password
+        val (remoteUsername, remotePassword) = config.registryUri.getUserInfo match {
+          case null => ("", config.password)
           case info => info.split(":") match {
-            case Array() => config.password
-            case Array(pw) => pw.toCharArray
-            case Array(u, pw) => pw.toCharArray
+            case Array() => ("", config.password)
+            case Array(pw) => ("", pw.toCharArray)
+            case Array(u, pw) => (u, pw.toCharArray)
           }
         }
         val TlsModeParam = "tls=(.+)".r
@@ -204,7 +204,7 @@ object Manager extends Logging {
           case query => sys.error(s"invalid params for registry config: $query")
         }
         log.info(s"remote registry location: $remoteHost:$remotePort, tls=$tls")
-        Some(RemoteStore(remoteHost, remotePort, remotePassword, tls))
+        Some(RemoteStore(remoteHost, remotePort, Password(remoteUsername, remotePassword), tls))
 
       case scheme =>
         sys.error(s"unknown scheme for registry uri: $scheme. must use 'file', 'labrad'")

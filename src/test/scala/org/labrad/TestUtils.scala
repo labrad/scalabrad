@@ -18,7 +18,7 @@ import scala.util.Random
 case class ManagerInfo(
   host: String,
   port: Int,
-  password: Array[Char],
+  credential: Credential,
   tlsPolicy: TlsPolicy,
   tlsHosts: TlsHostConfig
 )
@@ -35,6 +35,7 @@ object TestUtils extends {
     val port = 10000 + Random.nextInt(50000)
 
     val password = "testPassword12345!@#$%".toCharArray
+    val credential = Password("", password)
 
     def run(registryStore: RegistryStore): T = {
       val ssc = new SelfSignedCertificate()
@@ -44,7 +45,7 @@ object TestUtils extends {
 
       val manager = new CentralNode(password, Some(registryStore), None, None, listeners, tlsHosts)
       try {
-        f(ManagerInfo(host, port, password, tlsPolicy, tlsHosts))
+        f(ManagerInfo(host, port, credential, tlsPolicy, tlsHosts))
       } finally {
         manager.stop()
       }
@@ -63,14 +64,14 @@ object TestUtils extends {
   def withClient[A](
     host: String,
     port: Int,
-    password: Array[Char],
+    credential: Credential,
     tls: TlsMode = TlsMode.OFF,
     tlsCerts: Map[String, File] = Map()
   )(func: Client => A): A = {
     val c = new Client(
       host = host,
       port = port,
-      password = password,
+      credential = credential,
       tls = tls,
       tlsCerts = tlsCerts
     )
@@ -82,9 +83,9 @@ object TestUtils extends {
     }
   }
 
-  def withServer[T](host: String, port: Int, password: Array[Char])(body: TestSrv => T) = {
+  def withServer[T](host: String, port: Int, credential: Credential)(body: TestSrv => T) = {
     val s = new TestSrv
-    Server.start(s, ServerConfig(host, port, password))
+    Server.start(s, ServerConfig(host, port, credential))
     try {
       body(s)
     } finally {

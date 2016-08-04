@@ -18,7 +18,7 @@ class TlsTest extends FunSuite {
     } else {
       Map.empty[String, File]
     }
-    withClient(m.host, m.port, m.password, tls = tls, tlsCerts = certs) { c =>
+    withClient(m.host, m.port, m.credential, tls = tls, tlsCerts = certs) { c =>
       val mgr = new ManagerServerProxy(c)
       Await.result(mgr.servers(), 1.second)
     }

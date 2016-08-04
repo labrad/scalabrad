@@ -15,7 +15,7 @@ class ClientTest extends FunSuite {
 
   def testWithClient(name: String)(func: Client => Unit) = test(name) {
     TestUtils.withManager() { m =>
-      TestUtils.withClient(host = m.host, port = m.port, password = m.password) { c =>
+      TestUtils.withClient(host = m.host, port = m.port, credential = m.credential) { c =>
         func(c)
       }
     }
