@@ -14,11 +14,11 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.concurrent.{ExecutionException, Executors, ThreadFactory, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+import org.labrad.Labrad.Manager
+import org.labrad.Labrad.Authenticator
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.events.MessageListener
-import org.labrad.manager.Manager
-import org.labrad.manager.auth.Authenticator
 import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._

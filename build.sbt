@@ -59,12 +59,19 @@ lazy val commonSettings = Seq(
 )
 
 lazy val all = project.in(file("."))
-  .aggregate(core)
+  .aggregate(core, manager)
 
 lazy val core = project.in(file("core"))
   .settings(commonSettings)
   .settings(
-    name := "scalabrad",
+    name := "scalabrad-core"
+  )
+
+lazy val manager = project.in(file("manager"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name := "scalabrad-manager",
 
     packSettings,
 

@@ -1,8 +1,8 @@
 package org.labrad.util
 
 import org.labrad.Connection
+import org.labrad.Labrad.Manager
 import org.labrad.data._
-import org.labrad.manager.Manager
 import scala.concurrent.{ExecutionContext, Future}
 
 class LookupProvider(send: Request => Future[Seq[Data]]) {
