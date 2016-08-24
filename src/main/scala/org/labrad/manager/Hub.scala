@@ -9,8 +9,7 @@ import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util._
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 
 trait Hub {
@@ -47,7 +46,10 @@ object Hub {
   def notFound(id: Long) = Future.failed(new Exception(s"target not found: $id"))
 }
 
-class HubImpl(tracker: StatsTracker, _messager: () => Messager) extends Hub with Logging {
+class HubImpl(
+  tracker: StatsTracker,
+  _messager: () => Messager
+)(implicit ec: ExecutionContext) extends Hub with Logging {
 
   private val allocatedClientIds = mutable.Map.empty[Long, String]
   private val allocatedServerIds = mutable.Map.empty[Long, String]

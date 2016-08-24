@@ -9,8 +9,7 @@ import org.labrad.registry.RegistryStore
 import org.labrad.types._
 import org.labrad.util.{AsyncSemaphore, Logging}
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 class AuthServer(
@@ -21,7 +20,7 @@ class AuthServer(
   oauth: Option[OAuthVerifier],
   registry: RegistryStore,
   externalConfig: ServerConfig
-) extends LocalServer with Logging {
+)(implicit ec: ExecutionContext) extends LocalServer with Logging {
 
   // enforce doing one thing at a time using an async semaphore
   private val semaphore = new AsyncSemaphore(1)

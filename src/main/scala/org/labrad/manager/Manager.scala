@@ -22,8 +22,7 @@ import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
 import scala.annotation.tailrec
-import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
@@ -53,6 +52,13 @@ class CentralNode(
   listeners: Seq[(Int, TlsPolicy)],
   tlsConfig: TlsHostConfig
 ) extends Logging {
+
+  // Execution context for scheduling callbacks.
+  implicit val executionContext = ExecutionContext.global
+
+  // Scheduler for timeouts.
+  implicit val timeoutScheduler = Executors.newSingleThreadScheduledExecutor()
+
   // start services
   val tracker = new StatsTrackerImpl
   val hub: Hub = new HubImpl(tracker, () => messager)
@@ -88,8 +94,6 @@ class CentralNode(
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
     hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
   }
-
-  implicit val timeoutScheduler = Executors.newSingleThreadScheduledExecutor()
 
   // start listening for incoming network connections
   val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig)
