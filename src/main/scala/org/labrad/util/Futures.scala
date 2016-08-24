@@ -1,7 +1,9 @@
 package org.labrad.util
 
 import io.netty.util.concurrent.{Future => NettyFuture, GenericFutureListener}
-import scala.concurrent.{Future, Promise}
+import java.util.concurrent.{ScheduledExecutorService, TimeoutException, TimeUnit}
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.duration._
 
 object Futures {
 
@@ -19,6 +21,22 @@ object Futures {
           }
         }
       })
+      p.future
+    }
+  }
+
+  implicit class RichFuture[A](val future: Future[A]) extends AnyVal {
+    def withTimeout(timeout: Duration)(implicit executor: ExecutionContext, scheduler: ScheduledExecutorService): Future[A] = {
+      val p = Promise[A]
+      val timeoutTask = scheduler.schedule(new Runnable {
+        def run: Unit = {
+          p.tryFailure(new TimeoutException())
+        }
+      }, timeout.toNanos, TimeUnit.NANOSECONDS)
+      future.onComplete { result =>
+        timeoutTask.cancel(false)
+        p.tryComplete(result)
+      }
       p.future
     }
   }

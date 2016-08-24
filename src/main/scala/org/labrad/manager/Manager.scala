@@ -9,6 +9,7 @@ import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
+import java.util.concurrent.Executors
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Password, ServerConfig, ServerInfo, TlsMode}
@@ -87,6 +88,8 @@ class CentralNode(
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
     hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
   }
+
+  implicit val timeoutScheduler = Executors.newSingleThreadScheduledExecutor()
 
   // start listening for incoming network connections
   val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig)

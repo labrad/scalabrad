@@ -85,7 +85,7 @@ class AsyncSemaphore(initialPermits: Int = 0, maxWaiters: Option[Int] = None) { 
 
   def flatMap[A](f: => Future[A])(implicit context: ExecutionContext): Future[A] =
     acquire().flatMap { permit =>
-      val result = f
+      val result = Future.successful(()).flatMap(_ => f)
       result.onComplete(_ => permit.release())
       result
     }

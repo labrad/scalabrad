@@ -7,7 +7,7 @@ import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.handler.ssl.{SniHandler, SslContext}
 import io.netty.util.DomainNameMapping
-import java.util.concurrent.ThreadFactory
+import java.util.concurrent.{ScheduledExecutorService, ThreadFactory}
 import java.util.concurrent.atomic.AtomicLong
 import org.labrad.PacketCodec
 import org.labrad.util._
@@ -82,7 +82,7 @@ class Listener(
   messager: Messager,
   listeners: Seq[(Int, TlsPolicy)],
   tlsHostConfig: TlsHostConfig
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, scheduler: ScheduledExecutorService)
 extends Logging {
   val bossGroup = Listener.newBossGroup()
   val workerGroup = Listener.newWorkerGroup()

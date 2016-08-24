@@ -7,14 +7,15 @@ import java.io.{ByteArrayOutputStream, File, FileInputStream}
 import java.net.{InetAddress, InetSocketAddress}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
-import java.util.concurrent.TimeoutException
+import java.util.concurrent.{ScheduledExecutorService, TimeoutException}
 import org.labrad.ContextCodec
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.auth._
 import org.labrad.types._
 import org.labrad.util._
-import scala.concurrent.ExecutionContext
+import org.labrad.util.Futures._
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.Random
 
@@ -70,7 +71,7 @@ class LoginHandler(
   messager: Messager,
   tlsHostConfig: TlsHostConfig,
   tlsPolicy: TlsPolicy
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, scheduler: ScheduledExecutorService)
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
   override def channelActive(ctx: ChannelHandlerContext): Unit = {
@@ -84,20 +85,23 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     log.info(s"remote=${ctx.channel.remoteAddress}, local=${ctx.channel.localAddress}, isLocalConnection=$isLocalConnection")
   }
 
+  private val lock = new AsyncSemaphore(1)
+
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
     val Packet(req, target, context, records) = packet
-    val resp = try {
+    lock.flatMap {
       handle(ctx, packet)
-    } catch {
+    }.recover {
       case ex: LabradException =>
         log.debug("error during login", ex)
         ex.toData
       case ex: Throwable =>
         log.debug("error during login", ex)
         Error(1, ex.toString)
+    }.map { resp =>
+      val future = ctx.channel.writeAndFlush(Packet(-req, target, context, Seq(Record(0, resp))))
+      if (resp.isError) future.addListener(ChannelFutureListener.CLOSE)
     }
-    val future = ctx.channel.writeAndFlush(Packet(-req, target, context, Seq(Record(0, resp))))
-    if (resp.isError) future.addListener(ChannelFutureListener.CLOSE)
   }
 
   override def exceptionCaught(ctx: ChannelHandlerContext, ex: Throwable): Unit = {
@@ -117,7 +121,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
 
   private var username: String = ""
 
-  private var handle: (ChannelHandlerContext, Packet) => Data = {
+  private var handle: (ChannelHandlerContext, Packet) => Future[Data] = {
     import TlsPolicy._
     tlsPolicy match {
       case STARTTLS | STARTTLS_OPT | STARTTLS_FORCE => handleStartTls
@@ -125,7 +129,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     }
   }
 
-  private def handleStartTls(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
+  private def handleStartTls(ctx: ChannelHandlerContext, packet: Packet): Future[Data] = packet match {
     case Packet(req, 1, _, Seq(Record(1, Cluster(Str("STARTTLS"), Str(host))))) =>
       val sslContext = tlsHostConfig.sslCtxs.map(host)
       val engine = sslContext.newEngine(ctx.alloc())
@@ -133,7 +137,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       ctx.pipeline.addFirst(sslHandler)
       isSecure = true // now upgraded to TLS
       handle = handleLogin
-      Str(tlsHostConfig.certs.map(host))
+      Future.successful(Str(tlsHostConfig.certs.map(host)))
 
     case _ =>
       val requireStartTls = tlsPolicy match {
@@ -147,68 +151,68 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       handleLogin(ctx, packet)
   }
 
-  private def handleLogin(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
+  private def handleLogin(ctx: ChannelHandlerContext, packet: Packet): Future[Data] = packet match {
     case Packet(req, 1, _, Seq()) if req > 0 =>
       handle = handleChallengeResponse
       // For compatibility, send 's' here, even though challenge is binary.
       //Bytes(challenge)
       val d = TreeData("s")
       d.setBytes(challenge)
-      d
+      Future.successful(d)
 
     case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-      ("PONG", Seq("auth-server")).toData // include manager features in ping response
+      Future.successful(("PONG", Seq("auth-server")).toData) // include manager features in ping response
 
     case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
-      val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
-      (Seq("password") ++ resp.get[Seq[String]]).toData
+      doAuthRequest(Authenticator.METHODS_SETTING_ID, data).map { resp =>
+        (Seq("password") ++ resp.get[Seq[String]]).toData
+      }
 
     case Packet(req, 1, _, Seq(Record(Authenticator.INFO_SETTING_ID, data))) =>
-      val resp = doAuthRequest(Authenticator.INFO_SETTING_ID, data)
-      resp
+      doAuthRequest(Authenticator.INFO_SETTING_ID, data)
 
     case Packet(req, 1, _, Seq(Record(Authenticator.AUTH_SETTING_ID, data))) =>
-      val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
-      username = resp.get[String]
-      handle = handleIdentification
-      Str("LabRAD 2.0")
+      doAuthRequest(Authenticator.AUTH_SETTING_ID, data).map { resp =>
+        username = resp.get[String]
+        handle = handleIdentification
+        Str("LabRAD 2.0")
+      }
 
     case _ =>
       throw LabradException(1, "Invalid login packet")
   }
 
-  private def doAuthRequest(setting: Long, data: Data): Data = {
+  private def doAuthRequest(setting: Long, data: Data): Future[Data] = {
     if (!(isSecure || isLocalConnection)) {
       throw LabradException(3, "External auth is only available with TLS")
     }
-    try {
-      Await.result(hub.authServerConnected, 5.seconds)
-    } catch {
+    hub.authServerConnected.withTimeout(5.seconds).recover {
       case _: TimeoutException =>
         throw LabradException(4, "Timeout while waiting for auth server to connect")
+    }.flatMap { _ =>
+      val id = hub.getServerId(Authenticator.NAME)
+      val packet = Packet(1, 1, Context(1, 0), Seq(Record(setting, data)))
+      hub.request(id, packet)(timeout = 5.seconds).map { respPacket =>
+        val Packet(_, _, _, Seq(Record(_, resp))) = respPacket
+        if (resp.isError) {
+          throw LabradException(resp.getErrorCode, resp.getErrorMessage)
+        }
+        resp
+      }
     }
-    val id = hub.getServerId(Authenticator.NAME)
-    val packet = Packet(1, 1, Context(1, 0), Seq(Record(setting, data)))
-    val f = hub.request(id, packet)(timeout = 5.seconds)
-    val respPacket = Await.result(f, 5.seconds)
-    val Packet(_, _, _, Seq(Record(_, resp))) = respPacket
-    if (resp.isError) {
-      throw LabradException(resp.getErrorCode, resp.getErrorMessage)
-    }
-    resp
   }
 
-  private def handleChallengeResponse(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
+  private def handleChallengeResponse(ctx: ChannelHandlerContext, packet: Packet): Future[Data] = packet match {
     case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
       if (!auth.authenticate(challenge, response)) throw LabradException(2, "Incorrect password")
       handle = handleIdentification
-      Str("LabRAD 2.0")
+      Future.successful(Str("LabRAD 2.0"))
 
     case _ =>
       throw LabradException(1, "Invalid authentication packet")
   }
 
-  private def handleIdentification(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
+  private def handleIdentification(ctx: ChannelHandlerContext, packet: Packet): Future[Data] = packet match {
     case Packet(req, 1, _, Seq(Record(0, data))) if req > 0 =>
       val (handler, id) = data match {
         case Cluster(UInt(ver), Str(name)) =>
@@ -235,20 +239,19 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
           throw LabradException(1, "Invalid identification packet")
       }
 
-      try {
-        Await.result(hub.registryConnected, 30.seconds)
-      } catch {
+      hub.registryConnected.withTimeout(30.seconds).recover {
         case _: TimeoutException =>
           throw LabradException(3, "Timeout while waiting for registry to connect")
+      }.map { _ =>
+
+        // logged in successfully; add new handler to channel pipeline
+        val pipeline = ctx.pipeline
+        pipeline.addLast("contextCodec", new ContextCodec(id))
+        pipeline.addLast(handler.getClass.toString, handler)
+        pipeline.remove(this)
+
+        UInt(id)
       }
-
-      // logged in successfully; add new handler to channel pipeline
-      val pipeline = ctx.pipeline
-      pipeline.addLast("contextCodec", new ContextCodec(id))
-      pipeline.addLast(handler.getClass.toString, handler)
-      pipeline.remove(this)
-
-      UInt(id)
 
     case _ =>
       throw LabradException(1, "Invalid identification packet")
