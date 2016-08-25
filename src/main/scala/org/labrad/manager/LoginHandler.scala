@@ -76,23 +76,16 @@ class LoginHandler(
 )(implicit ec: ExecutionContext, scheduler: ScheduledExecutorService)
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
-  // whether the connection originated from localhost (if so, we allow unencrypted connections)
-  private var isLocalConnection: Boolean = false
-
-  // whether the connection is secure (either because this is a tls-only channel
-  // or we have upgraded with STARTTLS to a secure connection.
-  private var isSecure: Boolean = tlsPolicy == TlsPolicy.ON
-
-  private var username: String = ""
-
   import TlsPolicy._
-  private val canStartTls = tlsPolicy match {
-    case STARTTLS | STARTTLS_OPT | STARTTLS_FORCE => true
-    case ON | OFF => false
-  }
 
-  case class Req(packet: Packet, promise: Promise[Data])
-  private val reqs = Chan[Req](1)
+  // whether the connection originated from localhost (if so, we allow unencrypted connections)
+  @volatile private var isLocalConnection: Boolean = false
+
+  // whether the connection is secure, either because this is a tls-only channel
+  // or we have upgraded with STARTTLS to a secure connection.
+  @volatile private var isSecure: Boolean = tlsPolicy == TlsPolicy.ON
+
+  @volatile private var ctx: ChannelHandlerContext = null
 
   override def channelActive(ctx: ChannelHandlerContext): Unit = {
     this.ctx = ctx
@@ -105,9 +98,6 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     }
     log.info(s"remote=${ctx.channel.remoteAddress}, local=${ctx.channel.localAddress}, isLocalConnection=$isLocalConnection")
   }
-
-  private val lock = new AsyncSemaphore(1)
-  private var ctx: ChannelHandlerContext = null
 
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
     val Packet(req, target, context, records) = packet
@@ -127,18 +117,17 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   override def exceptionCaught(ctx: ChannelHandlerContext, ex: Throwable): Unit = {
     log.error("exceptionCaught", ex)
     ctx.close()
-  }
-
-  private def reply(packet: Packet, resp: Data): Unit = {
-    val Packet(req, target, context, records) = packet
-    val future = ctx.channel.writeAndFlush(Packet(-req, target, context, Seq(Record(0, resp))))
-    if (resp.isError) future.addListener(ChannelFutureListener.CLOSE)
+    protocol.close()
   }
 
   private val protocol = Coro[Packet, Data] { (first, next) =>
     var packet = first
     packet match {
       case Packet(req, 1, _, Seq(Record(1, Cluster(Str("STARTTLS"), Str(host))))) =>
+        val canStartTls = tlsPolicy match {
+          case STARTTLS | STARTTLS_OPT | STARTTLS_FORCE => true
+          case ON | OFF => false
+        }
         if (!canStartTls) {
           throw LabradException(2, "Unexpected STARTTLS")
         }
@@ -151,8 +140,8 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
 
       case _ =>
         val requireStartTls = tlsPolicy match {
-          case TlsPolicy.STARTTLS_FORCE => true
-          case TlsPolicy.STARTTLS if !isLocalConnection => true
+          case STARTTLS_FORCE => true
+          case STARTTLS if !isLocalConnection => true
           case _ => false
         }
         if (requireStartTls) {
@@ -161,22 +150,16 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     }
 
     var loggedIn = false
+    var username = ""
     while (!loggedIn) {
       packet match {
         case Packet(req, 1, _, Seq()) if req > 0 =>
-          val challenge = Array.ofDim[Byte](256)
-          Random.nextBytes(challenge)
-          // For compatibility, send 's' here, even though challenge is binary.
-          //Bytes(challenge)
-          val d = TreeData("s")
-          d.setBytes(challenge)
-          packet = next(d)
-          checkChallengeResponse(packet, challenge)
-          packet = next(Str("LabRAD 2.0"))
+          doPasswordChallenge(next)
           loggedIn = true
 
         case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-          packet = next(("PONG", Seq("auth-server")).toData) // include manager features in ping response
+          // include manager features in ping response
+          packet = next(("PONG", Seq("auth-server")).toData)
 
         case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
           val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
@@ -190,15 +173,33 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
           val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
           username = resp.get[String]
           loggedIn = true
-          packet = next(Str("LabRAD 2.0"))
 
         case _ =>
           throw LabradException(1, "Invalid login packet")
       }
     }
 
-    val id = handleIdentification(packet)
+    packet = next(Str("LabRAD 2.0"))
+    val id = handleIdentification(packet, username)
     UInt(id)
+  }
+
+  private def doPasswordChallenge(next: Data => Packet): Unit = {
+    val challenge = Array.ofDim[Byte](256)
+    Random.nextBytes(challenge)
+    // For compatibility, send 's' here, even though challenge is binary.
+    //Bytes(challenge)
+    val d = TreeData("s")
+    d.setBytes(challenge)
+    next(d) match {
+      case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
+        if (!auth.authenticate(challenge, response)) {
+          throw LabradException(2, "Incorrect password")
+        }
+
+      case _ =>
+        throw LabradException(1, "Invalid authentication packet")
+    }
   }
 
   private def doAuthRequest(setting: Long, data: Data): Data = {
@@ -206,14 +207,14 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       throw LabradException(3, "External auth is only available with TLS")
     }
     try {
-      hub.authServerConnected.withTimeout(5.seconds).recv
+      hub.authServerConnected.withTimeout(5.seconds).recv()
     } catch {
       case _: TimeoutException =>
         throw LabradException(4, "Timeout while waiting for auth server to connect")
     }
     val id = hub.getServerId(Authenticator.NAME)
     val packet = Packet(1, 1, Context(1, 0), Seq(Record(setting, data)))
-    val respPacket = hub.request(id, packet)(timeout = 5.seconds).recv.get
+    val respPacket = hub.request(id, packet)(timeout = 5.seconds).recv().get
     val Packet(_, _, _, Seq(Record(_, resp))) = respPacket
     if (resp.isError) {
       throw LabradException(resp.getErrorCode, resp.getErrorMessage)
@@ -221,15 +222,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     resp
   }
 
-  private def checkChallengeResponse(packet: Packet, challenge: Array[Byte]): Unit = packet match {
-    case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
-      if (!auth.authenticate(challenge, response)) throw LabradException(2, "Incorrect password")
-
-    case _ =>
-      throw LabradException(1, "Invalid authentication packet")
-  }
-
-  private def handleIdentification(packet: Packet): Long = packet match {
+  private def handleIdentification(packet: Packet, username: String): Long = packet match {
     case Packet(req, 1, _, Seq(Record(0, data))) if req > 0 =>
       val (handler, id) = data match {
         case Cluster(UInt(ver), Str(name)) =>

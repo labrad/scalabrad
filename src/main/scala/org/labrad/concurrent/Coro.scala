@@ -1,41 +1,31 @@
 package org.labrad.concurrent
 
-import java.util.{Timer, TimerTask}
-import java.util.concurrent._
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.locks.{Lock, ReentrantLock}
 import org.labrad.concurrent.Go._
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration.Duration
 import scala.util.{Try, Success, Failure}
 
-trait Yield[In, Out] {
-  def apply(out: Out): In
-}
-
 object Coro {
-  def apply[In, Out](body: (In, Yield[In, Out]) => Out)(implicit ec: ExecutionContext): Coro[In, Out] = {
+  def apply[In, Out](body: (In, Out => In) => Out): Coro[In, Out] = {
     new Coro(body)
   }
 }
 
-class Coro[In, Out](body: (In, Yield[In, Out]) => Out)(implicit ec: ExecutionContext) {
+class Coro[In, Out](body: (In, Out => In) => Out) {
 
   private val chan = Chan[(Try[In], Promise[Out])](1)
 
   private lazy val f = go {
     var promise: Promise[Out] = null
-    val yieldFunc = new Yield[In, Out] {
-      def apply(out: Out): In = {
-        promise.trySuccess(out)
-        val (in, p) = chan.recv()
-        promise = p
-        in.get
-      }
+    val next = (out: Out) => {
+      promise.trySuccess(out)
+      val (in, p) = chan.recv()
+      promise = p
+      in.get
     }
     val (in, p) = chan.recv()
     promise = p
-    body(in.get, yieldFunc)
+    body(in.get, next)
   }
 
   def sendFuture(in: In): Future[Out] = {
@@ -58,5 +48,9 @@ class Coro[In, Out](body: (In, Yield[In, Out]) => Out)(implicit ec: ExecutionCon
 
   def raise(throwable: Throwable)(implicit timeout: Duration): Out = {
     Await.result(raiseFuture(throwable), timeout)
+  }
+
+  def close(): Unit = {
+    raiseFuture(new InterruptedException)
   }
 }
