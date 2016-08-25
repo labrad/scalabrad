@@ -4,7 +4,7 @@ import java.util.{Timer, TimerTask}
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.{Lock, ReentrantLock}
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration.Duration
 import scala.util.Try
 
@@ -117,6 +117,25 @@ object Go {
         future.onComplete { result =>
           cell.put(() => f(result))
         }
+      }
+    }
+  }
+
+  implicit class SelectablePromise[A](val promise: Promise[A])(implicit ec: ExecutionContext = executionContext) extends Send[Try[A]] {
+    def onSend[B](a: Try[A])(f: => B): Selection[B] = new Selection[B] {
+      def lock(): Unit = {}
+      def unlock(): Unit = {}
+
+      def isReady: Boolean = !promise.isCompleted
+      def select(): Option[() => B] = {
+        if (promise.tryComplete(a)) {
+          Some(() => f)
+        } else {
+          None
+        }
+      }
+      def register[BB >: B](cell: Cell[() => BB]): Unit = {
+        // Nothing to do here; once a promise isCompleted we can never send again
       }
     }
   }
