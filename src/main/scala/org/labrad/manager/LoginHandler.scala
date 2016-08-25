@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.util.concurrent.{ScheduledExecutorService, TimeoutException}
 import org.labrad.ContextCodec
-import org.labrad.concurrent.Chan
+import org.labrad.concurrent.{Chan, Coro}
 import org.labrad.concurrent.Go._
 import org.labrad.data._
 import org.labrad.errors._
@@ -104,7 +104,6 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
         false
     }
     log.info(s"remote=${ctx.channel.remoteAddress}, local=${ctx.channel.localAddress}, isLocalConnection=$isLocalConnection")
-    doLogin()
   }
 
   private val lock = new AsyncSemaphore(1)
@@ -112,9 +111,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
 
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
     val Packet(req, target, context, records) = packet
-    val promise = Promise[Data]
-    reqs.send(Req(packet, promise))
-    promise.future.recover {
+    protocol.sendFuture(packet).recover {
       case ex: LabradException =>
         log.debug("error during login", ex)
         ex.toData
@@ -138,87 +135,70 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     if (resp.isError) future.addListener(ChannelFutureListener.CLOSE)
   }
 
-  // TODO: need to capture overall goroutine errors, send them back and close the connection
-
-  private def doLogin(): Future[Unit] = go {
-    var request: Req = null
-    try {
-      if (canStartTls) {
-        request = reqs.recv()
-        request.packet match {
-          case Packet(req, 1, _, Seq(Record(1, Cluster(Str("STARTTLS"), Str(host))))) =>
-            val sslContext = tlsHostConfig.sslCtxs.map(host)
-            val engine = sslContext.newEngine(ctx.alloc())
-            val sslHandler = new SslHandler(engine, true)
-            ctx.pipeline.addFirst(sslHandler)
-            isSecure = true // now upgraded to TLS
-            request.promise.success(Str(tlsHostConfig.certs.map(host)))
-            request = reqs.recv()
-
-          case _ =>
-            val requireStartTls = tlsPolicy match {
-              case TlsPolicy.STARTTLS_FORCE => true
-              case TlsPolicy.STARTTLS if !isLocalConnection => true
-              case _ => false
-            }
-            if (requireStartTls) {
-              throw LabradException(2, "Expected STARTTLS")
-            }
+  private val protocol = Coro[Packet, Data] { (first, next) =>
+    var packet = first
+    packet match {
+      case Packet(req, 1, _, Seq(Record(1, Cluster(Str("STARTTLS"), Str(host))))) =>
+        if (!canStartTls) {
+          throw LabradException(2, "Unexpected STARTTLS")
         }
-      }
+        val sslContext = tlsHostConfig.sslCtxs.map(host)
+        val engine = sslContext.newEngine(ctx.alloc())
+        val sslHandler = new SslHandler(engine, true)
+        ctx.pipeline.addFirst(sslHandler)
+        isSecure = true // now upgraded to TLS
+        packet = next(Str(tlsHostConfig.certs.map(host)))
 
-      var loggedIn = false
-      while (!loggedIn) {
-        request.packet match {
-          case Packet(req, 1, _, Seq()) if req > 0 =>
-            val challenge = Array.ofDim[Byte](256)
-            Random.nextBytes(challenge)
-            // For compatibility, send 's' here, even though challenge is binary.
-            //Bytes(challenge)
-            val d = TreeData("s")
-            d.setBytes(challenge)
-            request.promise.success(d)
-            request = reqs.recv()
-            checkChallengeResponse(request.packet, challenge)
-            request.promise.success(Str("LabRAD 2.0"))
-            loggedIn = true
-
-          case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-            request.promise.success(("PONG", Seq("auth-server")).toData) // include manager features in ping response
-            request = reqs.recv()
-
-          case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
-            val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
-            request.promise.success((Seq("password") ++ resp.get[Seq[String]]).toData)
-            request = reqs.recv()
-
-          case Packet(req, 1, _, Seq(Record(Authenticator.INFO_SETTING_ID, data))) =>
-            val resp = doAuthRequest(Authenticator.INFO_SETTING_ID, data)
-            request.promise.success(resp)
-            request = reqs.recv()
-
-          case Packet(req, 1, _, Seq(Record(Authenticator.AUTH_SETTING_ID, data))) =>
-            val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
-            username = resp.get[String]
-            loggedIn = true
-            request.promise.success(Str("LabRAD 2.0"))
-
-          case _ =>
-            throw LabradException(1, "Invalid login packet")
+      case _ =>
+        val requireStartTls = tlsPolicy match {
+          case TlsPolicy.STARTTLS_FORCE => true
+          case TlsPolicy.STARTTLS if !isLocalConnection => true
+          case _ => false
         }
-      }
-
-      request = reqs.recv()
-      val id = handleIdentification(request.packet)
-      request.promise.success(UInt(id))
-    } catch {
-      case ex: LabradException =>
-        log.debug("error during login", ex)
-        request.promise.success(ex.toData)
-      case ex: Throwable =>
-        log.debug("error during login", ex)
-        request.promise.success(Error(1, ex.toString))
+        if (requireStartTls) {
+          throw LabradException(2, "Expected STARTTLS")
+        }
     }
+
+    var loggedIn = false
+    while (!loggedIn) {
+      packet match {
+        case Packet(req, 1, _, Seq()) if req > 0 =>
+          val challenge = Array.ofDim[Byte](256)
+          Random.nextBytes(challenge)
+          // For compatibility, send 's' here, even though challenge is binary.
+          //Bytes(challenge)
+          val d = TreeData("s")
+          d.setBytes(challenge)
+          packet = next(d)
+          checkChallengeResponse(packet, challenge)
+          packet = next(Str("LabRAD 2.0"))
+          loggedIn = true
+
+        case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
+          packet = next(("PONG", Seq("auth-server")).toData) // include manager features in ping response
+
+        case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
+          val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
+          packet = next((Seq("password") ++ resp.get[Seq[String]]).toData)
+
+        case Packet(req, 1, _, Seq(Record(Authenticator.INFO_SETTING_ID, data))) =>
+          val resp = doAuthRequest(Authenticator.INFO_SETTING_ID, data)
+          packet = next(resp)
+
+        case Packet(req, 1, _, Seq(Record(Authenticator.AUTH_SETTING_ID, data))) =>
+          val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
+          username = resp.get[String]
+          loggedIn = true
+          packet = next(Str("LabRAD 2.0"))
+
+        case _ =>
+          throw LabradException(1, "Invalid login packet")
+      }
+    }
+
+    val id = handleIdentification(packet)
+    UInt(id)
   }
 
   private def doAuthRequest(setting: Long, data: Data): Data = {
