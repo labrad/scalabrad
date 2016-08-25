@@ -123,7 +123,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   private val protocol = Coro[Packet, Data] { (first, next) =>
     var packet = first
     packet match {
-      case Packet(req, 1, _, Seq(Record(1, Cluster(Str("STARTTLS"), Str(host))))) =>
+      case LoginPacket(Record(1, Cluster(Str("STARTTLS"), Str(host)))) =>
         val canStartTls = tlsPolicy match {
           case STARTTLS | STARTTLS_OPT | STARTTLS_FORCE => true
           case ON | OFF => false
@@ -153,23 +153,23 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     var username = ""
     while (!loggedIn) {
       packet match {
-        case Packet(req, 1, _, Seq()) if req > 0 =>
+        case LoginPacket() =>
           doPasswordChallenge(next)
           loggedIn = true
 
-        case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
+        case LoginPacket(Record(2, Str("PING"))) =>
           // include manager features in ping response
           packet = next(("PONG", Seq("auth-server")).toData)
 
-        case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
+        case LoginPacket(Record(Authenticator.METHODS_SETTING_ID, data)) =>
           val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
           packet = next((Seq("password") ++ resp.get[Seq[String]]).toData)
 
-        case Packet(req, 1, _, Seq(Record(Authenticator.INFO_SETTING_ID, data))) =>
+        case LoginPacket(Record(Authenticator.INFO_SETTING_ID, data)) =>
           val resp = doAuthRequest(Authenticator.INFO_SETTING_ID, data)
           packet = next(resp)
 
-        case Packet(req, 1, _, Seq(Record(Authenticator.AUTH_SETTING_ID, data))) =>
+        case LoginPacket(Record(Authenticator.AUTH_SETTING_ID, data)) =>
           val resp = doAuthRequest(Authenticator.AUTH_SETTING_ID, data)
           username = resp.get[String]
           loggedIn = true
@@ -192,7 +192,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     val d = TreeData("s")
     d.setBytes(challenge)
     next(d) match {
-      case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
+      case LoginPacket(Record(0, Bytes(response))) =>
         if (!auth.authenticate(challenge, response)) {
           throw LabradException(2, "Incorrect password")
         }
@@ -223,7 +223,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   }
 
   private def handleIdentification(packet: Packet, username: String): Long = packet match {
-    case Packet(req, 1, _, Seq(Record(0, data))) if req > 0 =>
+    case LoginPacket(Record(0, data)) =>
       val (handler, id) = data match {
         case Cluster(UInt(ver), Str(name)) =>
           val id = hub.allocateClientId(name)
@@ -266,5 +266,15 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
 
     case _ =>
       throw LabradException(1, "Invalid identification packet")
+  }
+}
+
+object LoginPacket {
+  def unapplySeq(packet: Packet): Option[Seq[Record]] = {
+    if (packet.id >= 1 && packet.target == 1) {
+      Some(packet.records)
+    } else {
+      None
+    }
   }
 }
