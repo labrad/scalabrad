@@ -58,13 +58,13 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
   // connect to managers that are stored in the registry
   refresh()
 
-  def list(): Seq[(String, Int, Boolean)] = {
+  def list(): Seq[(String, Int, Boolean)] = synchronized {
     managers.toSeq.map { case ((host, port), reg) =>
       (host, port, reg.isConnected)
     }.sorted
   }
 
-  def refresh(): Unit = {
+  def refresh(): Unit = synchronized {
     // load the list of managers from the registry
     var dir = registry.root
     dir = registry.child(dir, "Servers", create = true)
@@ -91,7 +91,7 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
     }
   }
 
-  def add(host: String, port: Option[Int], password: Option[String]): Unit = {
+  def add(host: String, port: Option[Int], password: Option[String]): Unit = synchronized {
     val config = externalConfig.copy(
       host = host,
       port = port.getOrElse(externalConfig.port),
@@ -104,20 +104,20 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
     })
   }
 
-  def ping(hostPat: String = ".*", port: Int = 0): Unit = {
+  def ping(hostPat: String = ".*", port: Int = 0): Unit = synchronized {
     for ((_, connector) <- matchingManagers(hostPat, port)) {
       connector.ping()
     }
   }
 
-  def reconnect(hostPat: String, port: Int = 0): Unit = {
+  def reconnect(hostPat: String, port: Int = 0): Unit = synchronized {
     for ((key, connector) <- matchingManagers(hostPat, port.toInt)) {
       connector.reconnect()
       managers.remove(key)
     }
   }
 
-  def drop(hostPat: String, port: Int = 0): Unit = {
+  def drop(hostPat: String, port: Int = 0): Unit = synchronized {
     for ((key, connector) <- matchingManagers(hostPat, port.toInt)) {
       connector.stop()
       managers.remove(key)
