@@ -5,7 +5,25 @@ import org.labrad.data._
 import scala.collection.mutable
 import scala.reflect.runtime.universe._
 
-case class RequestContext(source: Long, context: Context, id: Long, data: Data)
+case class RequestContext(
+  source: Long,
+  context: Context,
+  id: Long,
+  data: Data,
+  private val values: Map[RequestContext.Key[_], Any] = Map()
+) {
+  def withValue[A](key: RequestContext.Key[A], value: A): RequestContext = {
+    copy(values = values + (key -> value))
+  }
+
+  def get[A](key: RequestContext.Key[A]): Option[A] = {
+    values.get(key).map(_.asInstanceOf[A])
+  }
+}
+
+object RequestContext {
+  case class Key[A](name: String)
+}
 
 object Reflect {
 
