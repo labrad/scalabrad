@@ -69,7 +69,9 @@ class LoginHandler(
   tracker: StatsTracker,
   messager: Messager,
   tlsHostConfig: TlsHostConfig,
-  tlsPolicy: TlsPolicy
+  tlsPolicy: TlsPolicy,
+  authTimeout: Duration,
+  registryTimeout: Duration
 )(implicit ec: ExecutionContext)
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
@@ -182,15 +184,15 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       throw LabradException(3, "External auth is only available with TLS")
     }
     try {
-      Await.result(hub.authServerConnected, 5.seconds)
+      Await.result(hub.authServerConnected, authTimeout)
     } catch {
       case _: TimeoutException =>
         throw LabradException(4, "Timeout while waiting for auth server to connect")
     }
     val id = hub.getServerId(Authenticator.NAME)
     val packet = Packet(1, 1, Context(1, 0), Seq(Record(setting, data)))
-    val f = hub.request(id, packet)(timeout = 5.seconds)
-    val respPacket = Await.result(f, 5.seconds)
+    val f = hub.request(id, packet)(timeout = authTimeout)
+    val respPacket = Await.result(f, authTimeout)
     val Packet(_, _, _, Seq(Record(_, resp))) = respPacket
     if (resp.isError) {
       throw LabradException(resp.getErrorCode, resp.getErrorMessage)
@@ -236,7 +238,7 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       }
 
       try {
-        Await.result(hub.registryConnected, 30.seconds)
+        Await.result(hub.registryConnected, registryTimeout)
       } catch {
         case _: TimeoutException =>
           throw LabradException(3, "Timeout while waiting for registry to connect")

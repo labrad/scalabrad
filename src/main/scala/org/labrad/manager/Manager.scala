@@ -50,7 +50,9 @@ class CentralNode(
   authStoreOpt: Option[AuthStore],
   oauthClients: Map[OAuthClientType, OAuthClientInfo],
   listeners: Seq[(Int, TlsPolicy)],
-  tlsConfig: TlsHostConfig
+  tlsConfig: TlsHostConfig,
+  authTimeout: Duration,
+  registryTimeout: Duration
 ) extends Logging {
   // start services
   val tracker = new StatsTrackerImpl
@@ -89,7 +91,8 @@ class CentralNode(
   }
 
   // start listening for incoming network connections
-  val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig)
+  val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig,
+                              authTimeout = authTimeout, registryTimeout = registryTimeout)
 
   def stop() {
     listener.stop()
@@ -269,7 +272,9 @@ object Manager extends Logging {
       authStoreOpt = authStoreOpt,
       oauthClients = config.oauthClients,
       listeners = listeners,
-      tlsConfig = tlsHostConfig)
+      tlsConfig = tlsHostConfig,
+      authTimeout = config.authTimeout,
+      registryTimeout = config.registryTimeout)
 
     // Optionally wait for EOF to stop the manager.
     // This is a convenience feature when developing in sbt, allowing the
@@ -295,6 +300,7 @@ object Manager extends Logging {
 case class ManagerConfig(
   port: Int,
   password: Array[Char],
+  registryTimeout: Duration,
   registryUri: URI,
   tlsPort: Int,
   tlsRequired: Boolean,
@@ -303,6 +309,7 @@ case class ManagerConfig(
   tlsCertPath: File,
   tlsKeyPath: File,
   authServer: Boolean,
+  authTimeout: Duration,
   authUsersFile: File,
   oauthClients: Map[OAuthClientType, OAuthClientInfo]
 )
@@ -359,6 +366,13 @@ object ManagerConfig {
         "variable, with the default being to store registry values in SQLite " +
         "format in $HOME/.labrad/registry.sqlite"
     )
+    val registryTimeout = parser.option[Int](
+      names = List("registry-timeout"),
+      valueName = "seconds",
+      description = "Time in seconds to wait for registry server to connect " +
+        "when clients or servers attempt to log in. If running an internal " +
+        "registry server, this has no effect. The default is 30 seconds."
+    )
     val authServerOpt = parser.option[String](
       names = List("auth-server"),
       valueName = "bool",
@@ -369,6 +383,14 @@ object ManagerConfig {
         "manager to provide username+password or OAuth authentication. " +
         "If not provided, fallback to the value in the LABRAD_AUTH_SERVER " +
         "environment variable."
+    )
+    val authTimeout = parser.option[Int](
+      names = List("auth-timeout"),
+      valueName = "seconds",
+      description = "Time in seconds to wait for auth server to connect " +
+        "and for auth requests to complete when clients or servers attempt " +
+        "to login with extended auth methods such as oauth_token. The " +
+        "default is 30 seconds."
     )
     val oauthClientIdOpt = parser.option[String](
       names = List("oauth-client-id"),
@@ -505,6 +527,7 @@ object ManagerConfig {
       ManagerConfig(
         port,
         password,
+        registryTimeout = registryTimeout.value.getOrElse(30).seconds,
         registryUri,
         tlsPort,
         tlsRequired,
@@ -513,6 +536,7 @@ object ManagerConfig {
         tlsCertPath,
         tlsKeyPath,
         authServer = authServerOpt.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
+        authTimeout = authTimeout.value.getOrElse(30).seconds,
         authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
         oauthClients = oauthClients.result
       )

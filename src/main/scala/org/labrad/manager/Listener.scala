@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicLong
 import org.labrad.PacketCodec
 import org.labrad.util._
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success, Try}
 
 /**
@@ -85,7 +86,9 @@ class Listener(
   tracker: StatsTracker,
   messager: Messager,
   listeners: Seq[(Int, TlsPolicy)],
-  tlsHostConfig: TlsHostConfig
+  tlsHostConfig: TlsHostConfig,
+  authTimeout: Duration,
+  registryTimeout: Duration
 )(implicit ec: ExecutionContext)
 extends Logging {
   val bossGroup = Listener.newBossGroup()
@@ -110,7 +113,8 @@ extends Logging {
            // Use a dedicated event loop group with its own thread pool for the
            // login handler, since it may block when making auth requests.
            p.addLast(loginGroup, "loginHandler",
-             new LoginHandler(auth, hub, tracker, messager, tlsHostConfig, tlsPolicy))
+             new LoginHandler(auth, hub, tracker, messager, tlsHostConfig, tlsPolicy,
+                              authTimeout = authTimeout, registryTimeout = registryTimeout))
          }
        })
 

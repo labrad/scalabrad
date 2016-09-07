@@ -43,7 +43,8 @@ object TestUtils extends {
       val tlsHosts = TlsHostConfig((ssc.certificate, sslCtx))
       val listeners = Seq(port -> tlsPolicy)
 
-      val manager = new CentralNode(password, Some(registryStore), None, Map(), listeners, tlsHosts)
+      val manager = new CentralNode(password, Some(registryStore), None, Map(), listeners, tlsHosts,
+                                    authTimeout = 1.second, registryTimeout = 1.second)
       try {
         f(ManagerInfo(host, port, credential, tlsPolicy, tlsHosts))
       } finally {
