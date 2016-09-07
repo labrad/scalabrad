@@ -64,12 +64,16 @@ object TlsPolicy {
 object Listener {
   private val bossFactoryCounter = new AtomicLong(0)
   private val workerFactoryCounter = new AtomicLong(0)
+  private val loginFactoryCounter = new AtomicLong(0)
 
   def newBossGroup(): EventLoopGroup =
     NettyUtil.newEventLoopGroup("LabradManagerBoss", bossFactoryCounter, 1)
 
   def newWorkerGroup(): EventLoopGroup =
     NettyUtil.newEventLoopGroup("LabradManagerWorker", workerFactoryCounter)
+
+  def newLoginGroup(): EventLoopGroup =
+    NettyUtil.newEventLoopGroup("LabradManagerLogin", loginFactoryCounter)
 }
 
 /**
@@ -86,6 +90,7 @@ class Listener(
 extends Logging {
   val bossGroup = Listener.newBossGroup()
   val workerGroup = Listener.newWorkerGroup()
+  val loginGroup = Listener.newLoginGroup()
 
   def bootServer(port: Int, tlsPolicy: TlsPolicy): Channel = {
     try {
@@ -101,7 +106,7 @@ extends Logging {
              p.addLast(new SniHandler(tlsHostConfig.sslCtxs))
            }
            p.addLast("packetCodec", new PacketCodec())
-           p.addLast("loginHandler",
+           p.addLast(loginGroup, "loginHandler",
              new LoginHandler(auth, hub, tracker, messager, tlsHostConfig, tlsPolicy))
          }
        })
