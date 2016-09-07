@@ -63,7 +63,7 @@ class AuthStoreImpl(
 
   private implicit val connection = cxn
 
-  def listUsers(): Seq[(String, Boolean)] = {
+  def listUsers(): Seq[(String, Boolean)] = synchronized {
     // get name and is_admin; handle SQLite storing bool as int
     val parser = (get[String]("name") ~ get[Int]("is_admin")) map {
       case name ~ isAdmin => (name, isAdmin != 0)
@@ -73,7 +73,11 @@ class AuthStoreImpl(
     """.as(parser.*)
   }
 
-  def addUser(username: String, isAdmin: Boolean, passwordOpt: Option[String]): Unit = {
+  def addUser(
+    username: String,
+    isAdmin: Boolean,
+    passwordOpt: Option[String]
+  ): Unit = synchronized {
     require(username.nonEmpty, "Cannot add user with empty username")
     passwordOpt match {
       case None | Some("") =>
@@ -94,7 +98,7 @@ class AuthStoreImpl(
     oldPasswordOpt: Option[String],
     newPasswordOpt: Option[String],
     isAdmin: Boolean
-  ): Unit = {
+  ): Unit = synchronized {
     val oldHashedOpt = SQL"""
       SELECT password_hash FROM users WHERE name = $username
     """.as(get[Option[String]]("password_hash").singleOpt)
@@ -123,14 +127,14 @@ class AuthStoreImpl(
     }
   }
 
-  def checkUser(username: String): Boolean = {
+  def checkUser(username: String): Boolean = synchronized {
     val n = SQL"""
       SELECT count(*) AS n FROM users WHERE name = $username
     """.as(get[Int]("n").single)
     n > 0
   }
 
-  def checkUserPassword(username: String, password: String): Boolean = {
+  def checkUserPassword(username: String, password: String): Boolean = synchronized {
     val hashed = SQL"""
       SELECT password_hash FROM users WHERE name = $username AND password_hash IS NOT NULL
     """.as(get[String]("password_hash").singleOpt)
@@ -139,7 +143,7 @@ class AuthStoreImpl(
     BCrypt.checkpw(password, hashed)
   }
 
-  def isAdmin(username: String): Boolean = {
+  def isAdmin(username: String): Boolean = synchronized {
     SQL"""
       SELECT is_admin FROM users WHERE name = $username
     """.as(get[Int]("is_admin").singleOpt) // SQLite stores bools as ints
@@ -147,14 +151,14 @@ class AuthStoreImpl(
        .getOrElse { sys.error(s"username $username does not exist") }
   }
 
-  def setAdmin(username: String, isAdmin: Boolean): Unit = {
+  def setAdmin(username: String, isAdmin: Boolean): Unit = synchronized {
     val nRows = SQL"""
       UPDATE users SET is_admin = $isAdmin WHERE name = $username
     """.executeUpdate()
     if (nRows == 0) sys.error(s"username $username does not exist")
   }
 
-  def removeUser(username: String): Unit = {
+  def removeUser(username: String): Unit = synchronized {
     SQL" DELETE FROM users WHERE name = $username ".execute()
   }
 }
