@@ -82,7 +82,7 @@ class CentralNode(
     val id = hub.allocateServerId(name)
     val registry = new Registry(id, name, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(registry.id, registry.name, registry.doc, registry.settings))
-    hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker))
+    hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker)(nettyExecutionContext))
   }
 
   for (authStore <- authStoreOpt) {
@@ -98,7 +98,7 @@ class CentralNode(
     }
     val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
-    hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
+    hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker)(nettyExecutionContext))
   }
 
   // start listening for incoming network connections
