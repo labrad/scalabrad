@@ -89,8 +89,8 @@ class Listener(
   tlsHostConfig: TlsHostConfig,
   authTimeout: Duration,
   registryTimeout: Duration
-)(implicit ec: ExecutionContext)
-extends Logging {
+) extends Logging {
+
   val bossGroup = Listener.newBossGroup()
   val workerGroup = Listener.newWorkerGroup()
   val loginGroup = Listener.newLoginGroup()
