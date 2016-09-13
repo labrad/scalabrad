@@ -106,6 +106,9 @@ extends Logging {
              p.addLast(new SniHandler(tlsHostConfig.sslCtxs))
            }
            p.addLast("packetCodec", new PacketCodec())
+
+           // Use a dedicated event loop group with its own thread pool for the
+           // login handler, since it may block when making auth requests.
            p.addLast(loginGroup, "loginHandler",
              new LoginHandler(auth, hub, tracker, messager, tlsHostConfig, tlsPolicy))
          }
