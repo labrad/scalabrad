@@ -15,22 +15,10 @@ import scala.util.Try
 
 object Go {
 
-  private val threadGroup = new ThreadGroup("Go")
-
-  private val threadFactory = new ThreadFactory {
-    val counter = new AtomicLong(0)
-    def newThread(r: Runnable): Thread = {
-      val i = counter.getAndIncrement()
-      val thread = new Thread(threadGroup, r, s"Go$i")
-      thread.setDaemon(true)
-      thread
-    }
-  }
-
-  private[concurrent] val executor = Executors.newCachedThreadPool(threadFactory)
   private[concurrent] val timer = new Timer("GoTimer", true)
 
-  private val executionContext = ExecutionContext.fromExecutorService(executor)
+  private val executionContext =
+    ExecutionContexts.newCachedThreadExecutionContext("Go")
 
   def go[A](f: => A): Future[A] = {
     Future(f)(executionContext)

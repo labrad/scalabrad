@@ -13,6 +13,7 @@ import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Password, ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
+import org.labrad.concurrent.ExecutionContexts
 import org.labrad.crypto.{CertConfig, Certs}
 import org.labrad.data._
 import org.labrad.errors._
@@ -21,8 +22,7 @@ import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
 import scala.annotation.tailrec
-import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
@@ -66,10 +66,14 @@ class CentralNode(
   // TODO: this should be configurable, for example passwords per host
   val externalConfig = ServerConfig(host = "", port = 0, credential = Password("", password))
 
+  // ExecutionContext for potentially long-running server work (auth server and registry)
+  lazy val serversExecutionContext =
+    ExecutionContexts.newCachedThreadExecutionContext("ServerWorkers")
+
   for (regStore <- regStoreOpt) {
     val name = Registry.NAME
     val id = hub.allocateServerId(name)
-    val registry = new Registry(id, name, regStore, externalConfig)
+    val registry = new Registry(id, name, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(registry.id, registry.name, registry.doc, registry.settings))
     hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker))
   }
@@ -85,7 +89,7 @@ class CentralNode(
     } else {
       Some(new OAuthVerifier(oauthClients))
     }
-    val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)
+    val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
     hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker))
   }
