@@ -152,7 +152,7 @@ class RemoteConnector(server: LocalServer, config: ServerConfig)(implicit ec: Ex
     private var cxn: Connection = _
     private var messageFunc: (Long, Packet) => Unit = _
 
-    def connected(cxn: Connection): Unit = {
+    def connected(cxn: Connection, ec: ExecutionContext): Unit = {
       this.cxn = cxn
       messageFunc = (target: Long, pkt: Packet) => {
         val msg = Request(target, pkt.context, pkt.records)
