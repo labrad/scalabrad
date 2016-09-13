@@ -4,7 +4,6 @@ import org.labrad.data._
 import org.scalatest.{FunSuite, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
-import scala.concurrent.ExecutionContext.Implicits.global
 
 class ManagerTest extends FunSuite with AsyncAssertions {
 
