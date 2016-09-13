@@ -140,6 +140,7 @@ class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging
 
   implicit val timeout = 30.seconds
   val reconnectDelay = 10.seconds
+  val pingDelay = 30.seconds
   val srcId = s"${config.host}:${config.port}"
 
   class ServerProxy(stopped: Send[Unit]) extends IServer {
@@ -200,6 +201,15 @@ class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging
           null
       }
 
+      def doPing(): Unit = {
+        log.info(s"$srcId: ping")
+        val mgr = new ManagerServerProxy(cxn)
+        mgr.echo(Str("ping")).onFailure {
+          case e: Exception =>
+            log.error(s"$srcId: error during ping", e)
+        }
+      }
+
       def doClose(): Unit = {
         try {
           cxn.close()
@@ -217,12 +227,7 @@ class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging
           },
           ctrl.onRecv {
             case Ping =>
-              log.info(s"$srcId: ping")
-              val mgr = new ManagerServerProxy(cxn)
-              mgr.echo(Str("ping")).onFailure {
-                case e: Exception =>
-                  log.error(s"$srcId: error during ping", e)
-              }
+              doPing()
 
             case Reconnect =>
               doClose()
@@ -234,6 +239,9 @@ class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging
               log.info(s"$srcId: stopped")
               connected = false
               done = true
+          },
+          Time.after(pingDelay).onRecv { _ =>
+            doPing()
           }
         )
       }
