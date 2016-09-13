@@ -54,9 +54,16 @@ class CentralNode(
   authTimeout: Duration,
   registryTimeout: Duration
 ) extends Logging {
+
+  val bossGroup = Listener.newBossGroup()
+  val workerGroup = Listener.newWorkerGroup()
+  val loginGroup = Listener.newLoginGroup()
+
+  val nettyExecutionContext = ExecutionContext.fromExecutor(workerGroup)
+
   // start services
   val tracker = new StatsTrackerImpl
-  val hub: Hub = new HubImpl(tracker, () => messager)
+  val hub: Hub = new HubImpl(tracker, () => messager)(nettyExecutionContext)
   val messager: Messager = new MessagerImpl(hub, tracker)
   val auth: AuthService = new AuthServiceImpl(password)
 
@@ -95,11 +102,16 @@ class CentralNode(
   }
 
   // start listening for incoming network connections
-  val listener = new Listener(auth, hub, tracker, messager, listeners, tlsConfig,
-                              authTimeout = authTimeout, registryTimeout = registryTimeout)
+  val listener = new Listener(
+      auth, hub, tracker, messager, listeners, tlsConfig,
+      authTimeout = authTimeout, registryTimeout = registryTimeout,
+      bossGroup = bossGroup, workerGroup = workerGroup, loginGroup = loginGroup)
 
   def stop() {
     listener.stop()
+    loginGroup.shutdownGracefully()
+    workerGroup.shutdownGracefully()
+    bossGroup.shutdownGracefully()
   }
 }
 

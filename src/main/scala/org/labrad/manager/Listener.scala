@@ -88,12 +88,11 @@ class Listener(
   listeners: Seq[(Int, TlsPolicy)],
   tlsHostConfig: TlsHostConfig,
   authTimeout: Duration,
-  registryTimeout: Duration
+  registryTimeout: Duration,
+  bossGroup: EventLoopGroup,
+  workerGroup: EventLoopGroup,
+  loginGroup: EventLoopGroup
 ) extends Logging {
-
-  val bossGroup = Listener.newBossGroup()
-  val workerGroup = Listener.newWorkerGroup()
-  val loginGroup = Listener.newLoginGroup()
 
   def bootServer(port: Int, tlsPolicy: TlsPolicy): Channel = {
     try {
@@ -145,14 +144,9 @@ class Listener(
   }
 
   private def shutdown(listeners: Seq[Channel]): Unit = {
-    try {
-      for (ch <- listeners) {
-        ch.close()
-        ch.closeFuture.sync()
-      }
-    } finally {
-      workerGroup.shutdownGracefully()
-      bossGroup.shutdownGracefully()
+    for (ch <- listeners) {
+      ch.close()
+      ch.closeFuture.sync()
     }
   }
 }
