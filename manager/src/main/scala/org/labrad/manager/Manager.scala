@@ -1,5 +1,6 @@
 package org.labrad.manager
 
+import com.google.common.cache.{Cache, CacheBuilder}
 import io.netty.handler.ssl.{SslContext, SslContextBuilder}
 import io.netty.handler.ssl.util.SelfSignedCert
 import io.netty.util.DomainNameMapping
@@ -9,6 +10,7 @@ import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
+import java.util.concurrent.TimeUnit
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Labrad, Password, ServerConfig, ServerInfo, TlsMode}
@@ -92,7 +94,14 @@ class CentralNode(
     val verifierOpt = if (oauthClients.isEmpty) {
       None
     } else {
-      Some(new OAuthVerifier(oauthClients))
+      val verifier = new OAuthVerifierImpl(oauthClients)
+      val tokenCache: Cache[String, String] = CacheBuilder
+        .newBuilder
+        .maximumSize(1000)
+        .expireAfterWrite(3600, TimeUnit.SECONDS)
+        .build()
+
+      Some(new CachingOAuthVerifier(verifier, tokenCache))
     }
     val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))

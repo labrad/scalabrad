@@ -7,10 +7,13 @@ import com.google.api.client.json.jackson2.JacksonFactory
 import com.google.api.client.http.{GenericUrl, HttpHeaders, HttpRequest, HttpRequestInitializer}
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.util.Key
+import com.google.common.cache.Cache
+import java.util.concurrent.{Callable, TimeUnit}
 import org.labrad.errors.LabradException
 import org.labrad.util.Logging
 import scala.annotation.meta.field
 import scala.collection.JavaConverters._
+import scala.concurrent.duration._
 
 sealed trait OAuthClientType
 object OAuthClientType {
@@ -43,7 +46,14 @@ class UserInfo extends GenericJson {
   @(Key @field)("verified_email") var verifiedEmail: Boolean = false
 }
 
-class OAuthVerifier(val clients: Map[OAuthClientType, OAuthClientInfo]) extends Logging {
+trait OAuthVerifier {
+  def clients: Map[OAuthClientType, OAuthClientInfo]
+  def verifyIdToken(idTokenString: String): String
+  def verifyAccessToken(accessTokenString: String): String
+}
+
+class OAuthVerifierImpl(val clients: Map[OAuthClientType, OAuthClientInfo])
+extends OAuthVerifier with Logging {
 
   private val transport = new NetHttpTransport()
   private val jsonFactory = JacksonFactory.getDefaultInstance()
@@ -83,5 +93,25 @@ class OAuthVerifier(val clients: Map[OAuthClientType, OAuthClientInfo]) extends 
     val userInfo = response.parseAs(classOf[UserInfo])
     if (!userInfo.verifiedEmail) throw LabradException(3, "Email not verified")
     userInfo.email
+  }
+}
+
+class CachingOAuthVerifier(
+  verifier: OAuthVerifier,
+  cache: Cache[String, String]
+) extends OAuthVerifier {
+
+  def clients = verifier.clients
+
+  def verifyIdToken(idTokenString: String): String = {
+    cache.get(idTokenString, new Callable[String] {
+      def call: String = verifier.verifyIdToken(idTokenString)
+    })
+  }
+
+  def verifyAccessToken(accessTokenString: String): String = {
+    cache.get(accessTokenString, new Callable[String] {
+      def call: String = verifier.verifyAccessToken(accessTokenString)
+    })
   }
 }
