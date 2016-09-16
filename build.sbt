@@ -40,7 +40,8 @@ libraryDependencies ++= Seq(
   "org.bouncycastle" % "bcprov-jdk15on" % "1.52",
   "org.bouncycastle" % "bcpkix-jdk15on" % "1.52",
   "org.mindrot" % "jbcrypt" % "0.3m",
-  "com.google.api-client" % "google-api-client" % "1.19.0"
+  "com.google.api-client" % "google-api-client" % "1.19.0",
+  "com.google.http-client" % "google-http-client" % "1.19.0"
 )
 
 // When running, connect std in and tell manager to stop on EOF (ctrl+D).
