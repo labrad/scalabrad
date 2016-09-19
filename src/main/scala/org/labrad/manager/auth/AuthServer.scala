@@ -63,7 +63,7 @@ class AuthServer(
   def authMethods(): Seq[String] = {
     oauth match {
       case None => Seq("username+password")
-      case Some(_) => Seq("username+password", "oauth_token")
+      case Some(_) => Seq("username+password", "oauth_token", "oauth_access_token")
     }
   }
 
@@ -83,7 +83,7 @@ class AuthServer(
         (("credential_tag", "(ss)"),
          ("credential_doc", "(username, password)")).toData
 
-      case "oauth_token" =>
+      case "oauth_token" | "oauth_access_token" =>
         val clients = oauth.map(_.clients).getOrElse {
           sys.error("OAuth authentication is not configured")
         }
@@ -125,10 +125,13 @@ class AuthServer(
         }
         username
 
-      case "oauth_token" =>
+      case "oauth_token" | "oauth_access_token" =>
         val verifier = oauth.getOrElse { sys.error("OAuth authentication is not configured") }
-        val idTokenString = credentials.get[String]
-        val username = verifier.verifyToken(idTokenString)
+        val token = credentials.get[String]
+        val username = method match {
+          case "oauth_token" => verifier.verifyIdToken(token)
+          case "oauth_access_token" => verifier.verifyAccessToken(token)
+        }
         if (!auth.checkUser(username)) {
           sys.error(s"Unknown username: $username")
         }

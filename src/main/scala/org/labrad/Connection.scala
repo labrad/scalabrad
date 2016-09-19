@@ -67,7 +67,8 @@ object Connection {
 
 sealed trait Credential
 case class Password(username: String, password: Array[Char]) extends Credential
-case class OAuthToken(idToken: String) extends Credential
+case class OAuthIdToken(idToken: String) extends Credential
+case class OAuthAccessToken(accessToken: String) extends Credential
 
 /**
  * A client or server connection to the Labrad manager.
@@ -236,9 +237,14 @@ trait Connection {
           val data = ("username+password", (username, new String(password))).toData
           Await.result(sendManagerRequest(Authenticator.AUTH_SETTING_ID, data), timeout)
 
-        case OAuthToken(idToken) =>
+        case OAuthIdToken(idToken) =>
           require(isSecureOrLocal, "oauth_token requires secure connection")
           val data = ("oauth_token", idToken).toData
+          Await.result(sendManagerRequest(Authenticator.AUTH_SETTING_ID, data), timeout)
+
+        case OAuthAccessToken(accessToken) =>
+          require(isSecureOrLocal, "oauth_access_token requires secure connection")
+          val data = ("oauth_access_token", accessToken).toData
           Await.result(sendManagerRequest(Authenticator.AUTH_SETTING_ID, data), timeout)
       }
 
