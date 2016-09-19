@@ -10,8 +10,7 @@ import org.labrad.manager.{LocalServer, MultiheadServer, RemoteConnector, Server
 import org.labrad.types._
 import org.labrad.util.{AsyncSemaphore, Logging}
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 trait RegistryStore {
@@ -69,6 +68,7 @@ object Registry {
 }
 
 class Registry(val id: Long, val name: String, store: RegistryStore, externalConfig: ServerConfig)
+              (implicit ec: ExecutionContext)
 extends LocalServer with Logging {
 
   // enforce doing one thing at a time using an async semaphore

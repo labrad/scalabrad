@@ -9,8 +9,7 @@ import org.labrad.registry.RegistryStore
 import org.labrad.types._
 import org.labrad.util.{AsyncSemaphore, Logging}
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 class AuthServer(
@@ -21,7 +20,7 @@ class AuthServer(
   oauth: Option[OAuthVerifier],
   registry: RegistryStore,
   externalConfig: ServerConfig
-) extends LocalServer with Logging {
+)(implicit ec: ExecutionContext) extends LocalServer with Logging {
 
   val doc = "Provides various methods of authenticating users who wish to log in."
   private val (_settings, bind) = Reflect.makeHandler[AuthServer]
@@ -49,8 +48,8 @@ class AuthServer(
   def message(src: String, packet: Packet): Unit = {}
 
   def request(src: String, packet: Packet, messageFunc: (Long, Packet) => Unit)(implicit timeout: Duration): Future[Packet] = {
-    Server.handleAsync(packet) { req =>
-      Future {
+    Future {
+      Server.handle(packet) { req =>
         handler(req.withValue(srcKey, src))
       }
     }

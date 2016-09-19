@@ -9,7 +9,6 @@ import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
 import scala.collection._
 import scala.concurrent.{Await, Future}
-import scala.concurrent.ExecutionContext.Implicits.global
 
 class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
 

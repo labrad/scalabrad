@@ -72,7 +72,7 @@ class LoginHandler(
   tlsPolicy: TlsPolicy,
   authTimeout: Duration,
   registryTimeout: Duration
-)(implicit ec: ExecutionContext)
+)
 extends SimpleChannelInboundHandler[Packet] with Logging {
 
   override def channelActive(ctx: ChannelHandlerContext): Unit = {

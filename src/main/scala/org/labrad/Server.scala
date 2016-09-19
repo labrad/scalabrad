@@ -6,12 +6,12 @@ import java.util.regex.Pattern
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.annotations.IsServer
+import org.labrad.concurrent.ExecutionContexts
 import org.labrad.data._
 import org.labrad.errors.LabradException
 import org.labrad.util.{AsyncSemaphore, Logging, Util}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
@@ -27,7 +27,7 @@ trait IServer {
   val doc: String
   val settings: Seq[SettingInfo]
 
-  def connected(cxn: Connection)
+  def connected(cxn: Connection, ec: ExecutionContext)
   def handleRequest(packet: Packet): Future[Packet]
   def expire(context: Context)
   def stop()
@@ -39,12 +39,14 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   val doc: String
 
   private var _cxn: Connection = _
+  private var _ec: ExecutionContext = _
   private val shutdownCalled = new AtomicBoolean(false)
 
   /**
    * Allow subclasses to access (but not modify) the server connection
    */
   protected def cxn: Connection = _cxn
+  implicit protected def ec: ExecutionContext = _ec
 
   protected val contexts = mutable.Map.empty[Context, ContextState]
 
@@ -92,8 +94,9 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
     Await.result(shutdownPromise.future, timeout)
   }
 
-  def connected(cxn: Connection): Unit = {
+  def connected(cxn: Connection, ec: ExecutionContext): Unit = {
     _cxn = cxn
+    _ec = ec
     init()
   }
 
@@ -295,7 +298,14 @@ object Server {
       sys.ShutdownHookThread { server.stop() }
       cxn.addConnectionListener { case false => server.stop() }
 
-      server.connected(cxn)
+      // get ExecutionContext for handling server requests
+      implicit val executionContext = if (config.directExecutor) {
+        cxn.executionContext
+      } else {
+        ExecutionContexts.newCachedThreadExecutionContext(s"$name Worker")
+      }
+
+      server.connected(cxn, executionContext)
 
       val msgId = cxn.getMessageId
       val msgCtx = cxn.newContext
@@ -339,7 +349,8 @@ case class ServerConfig(
   credential: Credential,
   nameOpt: Option[String] = None,
   tls: TlsMode = ServerConfig.Defaults.tls,
-  tlsPort: Int = ServerConfig.Defaults.tlsPort
+  tlsPort: Int = ServerConfig.Defaults.tlsPort,
+  directExecutor: Boolean = false
 )
 
 object ServerConfig {

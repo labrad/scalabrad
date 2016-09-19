@@ -40,8 +40,20 @@ class ClientHandler(
   id: Long,
   name: String,
   val username: String
-)(implicit ec: ExecutionContext)
+)
 extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport with Logging {
+
+  // handle scala Future callbacks on netty threads
+  private var _executionContext: ExecutionContext = null
+
+  protected implicit def executionContext: ExecutionContext = {
+    require(_executionContext != null, "No ExecutionContext set!")
+    _executionContext
+  }
+
+  override def handlerAdded(ctx: ChannelHandlerContext): Unit = {
+    _executionContext = ExecutionContext.fromExecutorService(ctx.channel.eventLoop)
+  }
 
   // handle incoming packets
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
@@ -65,6 +77,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
       case Packet(_, target, _, _) => hub.request(target, packet.copy(target=id))
     }) recover {
       case e: Throwable =>
+        e.printStackTrace()
         val err = Error(1, e.toString)
         packet.copy(id = -packet.id, records = Seq(Record(1, err)))
     } onComplete {
@@ -144,7 +157,7 @@ class ServerHandler(
   name: String,
   doc: String,
   username: String
-)(implicit ec: ExecutionContext)
+)
 extends ClientHandler(hub, tracker, messager, channel, id, name, username)
 with ServerActor with ManagerSupport with Logging {
 

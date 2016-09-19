@@ -10,8 +10,7 @@ import org.labrad.registry.RegistryStore
 import org.labrad.types._
 import org.labrad.util.Logging
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 trait LocalServer {
@@ -27,7 +26,8 @@ trait LocalServer {
   def expireAll(src: String)(implicit timeout: Duration): Future[Unit]
 }
 
-class LocalServerActor(server: LocalServer, hub: Hub, tracker: StatsTracker) extends ServerActor {
+class LocalServerActor(server: LocalServer, hub: Hub, tracker: StatsTracker)(implicit ec: ExecutionContext)
+extends ServerActor {
   val username = ""// Local servers running in manager process act like global user
   val srcId = ""
   private val messageFunc = (target: Long, pkt: Packet) => hub.message(target, pkt)
@@ -52,7 +52,8 @@ class LocalServerActor(server: LocalServer, hub: Hub, tracker: StatsTracker) ext
   def close(): Unit = {}
 }
 
-class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer, externalConfig: ServerConfig) extends Logging {
+class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer, externalConfig: ServerConfig)
+                     (implicit ec: ExecutionContext) extends Logging {
   private val managers = mutable.Map.empty[(String, Int), RemoteConnector]
 
   // connect to managers that are stored in the registry
@@ -136,7 +137,7 @@ class MultiheadServer(name: String, registry: RegistryStore, server: LocalServer
   }
 }
 
-class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging {
+class RemoteConnector(server: LocalServer, config: ServerConfig)(implicit ec: ExecutionContext) extends Logging {
 
   implicit val timeout = 30.seconds
   val reconnectDelay = 10.seconds
@@ -151,7 +152,7 @@ class RemoteConnector(server: LocalServer, config: ServerConfig) extends Logging
     private var cxn: Connection = _
     private var messageFunc: (Long, Packet) => Unit = _
 
-    def connected(cxn: Connection): Unit = {
+    def connected(cxn: Connection, ec: ExecutionContext): Unit = {
       this.cxn = cxn
       messageFunc = (target: Long, pkt: Packet) => {
         val msg = Request(target, pkt.context, pkt.records)
