@@ -59,11 +59,9 @@ class CentralNode(
   val workerGroup = Listener.newWorkerGroup()
   val loginGroup = Listener.newLoginGroup()
 
-  val nettyExecutionContext = ExecutionContext.fromExecutor(workerGroup)
-
   // start services
   val tracker = new StatsTrackerImpl
-  val hub: Hub = new HubImpl(tracker, () => messager)(nettyExecutionContext)
+  val hub: Hub = new HubImpl(tracker, () => messager)(ExecutionContext.global)
   val messager: Messager = new MessagerImpl(hub, tracker)
   val auth: AuthService = new AuthServiceImpl(password)
 
@@ -82,7 +80,7 @@ class CentralNode(
     val id = hub.allocateServerId(name)
     val registry = new Registry(id, name, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(registry.id, registry.name, registry.doc, registry.settings))
-    hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker)(nettyExecutionContext))
+    hub.connectServer(id, name, new LocalServerActor(registry, hub, tracker)(ExecutionContext.global))
   }
 
   for (authStore <- authStoreOpt) {
@@ -98,7 +96,7 @@ class CentralNode(
     }
     val auth = new AuthServer(id, name, hub, authStore, verifierOpt, regStore, externalConfig)(serversExecutionContext)
     hub.setServerInfo(ServerInfo(auth.id, auth.name, auth.doc, auth.settings))
-    hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker)(nettyExecutionContext))
+    hub.connectServer(id, name, new LocalServerActor(auth, hub, tracker)(ExecutionContext.global))
   }
 
   // start listening for incoming network connections

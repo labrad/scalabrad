@@ -43,17 +43,8 @@ class ClientHandler(
 )
 extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport with Logging {
 
-  // handle scala Future callbacks on netty threads
-  private var _executionContext: ExecutionContext = null
-
-  protected implicit def executionContext: ExecutionContext = {
-    require(_executionContext != null, "No ExecutionContext set!")
-    _executionContext
-  }
-
-  override def handlerAdded(ctx: ChannelHandlerContext): Unit = {
-    _executionContext = ExecutionContext.fromExecutorService(ctx.channel.eventLoop)
-  }
+  // Handle scala Future callbacks on the global execution context.
+  protected implicit def executionContext = ExecutionContext.global
 
   // handle incoming packets
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {

@@ -60,9 +60,6 @@ object Connection {
     }
     group
   }
-
-  lazy val defaultExecutionContext =
-    ExecutionContext.fromExecutor(defaultWorkerGroup)
 }
 
 sealed trait Credential
