@@ -19,7 +19,7 @@ class ServerConnection(
   handler: Packet => Future[Packet],
   val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
 )(
-  implicit val executionContext: ExecutionContext = Connection.defaultExecutionContext
+  implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection with Logging {
 
   protected def loginData = Cluster(

@@ -14,7 +14,7 @@ class Client(
   val tlsCerts: Map[String, File] = Map(),
   val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
 )(
-  implicit val executionContext: ExecutionContext = Connection.defaultExecutionContext
+  implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection {
   protected def loginData = Cluster(UInt(Client.PROTOCOL_VERSION), Str(name))
 }
