@@ -94,7 +94,7 @@ class Listener(
   loginGroup: EventLoopGroup
 ) extends Logging {
 
-  def bootServer(port: Int, tlsPolicy: TlsPolicy): Channel = {
+  private def bootServer(port: Int, tlsPolicy: TlsPolicy): NioServerSocketChannel = {
     try {
       val b = new ServerBootstrap()
       b.group(bossGroup, workerGroup)
@@ -118,7 +118,7 @@ class Listener(
        })
 
       // Bind and start to accept incoming connections.
-      val ch = b.bind(port).sync().channel
+      val ch = b.bind(port).sync().channel.asInstanceOf[NioServerSocketChannel]
       log.info(s"now accepting labrad connections: port=$port, tlsPolicy=$tlsPolicy")
       ch
     } catch {

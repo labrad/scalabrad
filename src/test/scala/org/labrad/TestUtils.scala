@@ -32,7 +32,7 @@ object TestUtils extends {
     registryStore: Option[RegistryStore] = None
   )(f: ManagerInfo => T): T = {
     val host = "localhost"
-    val port = 10000 + Random.nextInt(50000)
+    val port = 0 // OS will choose a free port for us.
 
     val password = "testPassword12345!@#$%".toCharArray
     val credential = Password("", password)
@@ -45,8 +45,9 @@ object TestUtils extends {
 
       val manager = new CentralNode(password, Some(registryStore), None, Map(), listeners, tlsHosts,
                                     authTimeout = 1.second, registryTimeout = 1.second)
+      val address = manager.listener.channels.head.localAddress
       try {
-        f(ManagerInfo(host, port, credential, tlsPolicy, tlsHosts))
+        f(ManagerInfo(host, address.getPort, credential, tlsPolicy, tlsHosts))
       } finally {
         manager.stop()
       }
