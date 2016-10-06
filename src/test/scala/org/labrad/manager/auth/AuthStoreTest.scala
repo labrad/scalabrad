@@ -1,15 +1,8 @@
 package org.labrad.manager.auth
 
-import org.labrad.TestUtils
-import org.labrad.annotations._
-import org.labrad.data._
 import org.labrad.registry._
-import org.labrad.types._
+import org.labrad.util.Files
 import org.scalatest.fixture.FunSuite
-import org.scalatest.concurrent.AsyncAssertions
-import org.scalatest.time.SpanSugar._
-import scala.collection._
-import scala.concurrent.{Await, Future}
 
 class AuthStoreTest extends FunSuite {
 
@@ -17,7 +10,7 @@ class AuthStoreTest extends FunSuite {
   type FixtureParam = Fixture
 
   def withFixture(test: OneArgTest) = {
-    TestUtils.withTempFile { file =>
+    Files.withTempFile { file =>
       val authStore = AuthStore(file)
       withFixture(test.toNoArgTest(Fixture(authStore)))
     }

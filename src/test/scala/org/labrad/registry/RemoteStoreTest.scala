@@ -1,19 +1,20 @@
 package org.labrad.registry
 
-import org.labrad.{ManagerInfo, RegistryServerProxy, TlsMode}
+import org.labrad.{RegistryServerProxy, TlsMode}
 import org.labrad.annotations._
 import org.labrad.data._
+import org.labrad.manager.ManagerUtils
 import org.labrad.registry._
 import org.labrad.types._
+import org.labrad.util.Await
 import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
 import scala.collection._
-import scala.concurrent.{Await, Future}
 
 class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
-  import org.labrad.TestUtils._
+  import ManagerUtils._
 
   def withManagers()(func: (ManagerInfo, ManagerInfo, ManagerInfo) => Unit): Unit = {
     withManager() { root =>
@@ -28,8 +29,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is created") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
+      withClient(leaf1) { c1 =>
+        withClient(leaf2) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)
@@ -44,13 +45,13 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          await(r1.mkDir("test"))
-          await(r1.cd("test"))
+          Await(r1.mkDir("test"))
+          Await(r1.cd("test"))
 
-          await(r2.notifyOnChange(msgId, true))
-          await(r2.cd("test"))
+          Await(r2.notifyOnChange(msgId, true))
+          Await(r2.cd("test"))
 
-          await(r1.set("a", Str("test")))
+          Await(r1.set("a", Str("test")))
           w.await(timeout(10.seconds))
         }
       }
@@ -59,8 +60,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is changed") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
+      withClient(leaf1) { c1 =>
+        withClient(leaf2) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)
@@ -75,14 +76,14 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          await(r1.mkDir("test"))
-          await(r1.cd("test"))
-          await(r1.set("a", Str("first")))
+          Await(r1.mkDir("test"))
+          Await(r1.cd("test"))
+          Await(r1.set("a", Str("first")))
 
-          await(r2.notifyOnChange(msgId, true))
-          await(r2.cd("test"))
+          Await(r2.notifyOnChange(msgId, true))
+          Await(r2.cd("test"))
 
-          await(r1.set("a", Str("second")))
+          Await(r1.set("a", Str("second")))
           w.await(timeout(10.seconds))
         }
       }
@@ -91,8 +92,8 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
 
   test("remote registry gets message when key is deleted") {
     withManagers() { (root, leaf1, leaf2) =>
-      withClient(leaf1.host, leaf1.port, leaf1.credential) { c1 =>
-        withClient(leaf2.host, leaf2.port, leaf2.credential) { c2 =>
+      withClient(leaf1) { c1 =>
+        withClient(leaf2) { c2 =>
 
           val r1 = new RegistryServerProxy(c1)
           val r2 = new RegistryServerProxy(c2)
@@ -107,14 +108,14 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          await(r1.mkDir("test"))
-          await(r1.cd("test"))
-          await(r1.set("a", Str("first")))
+          Await(r1.mkDir("test"))
+          Await(r1.cd("test"))
+          Await(r1.set("a", Str("first")))
 
-          await(r2.notifyOnChange(msgId, true))
-          await(r2.cd("test"))
+          Await(r2.notifyOnChange(msgId, true))
+          Await(r2.cd("test"))
 
-          await(r1.del("a"))
+          Await(r1.del("a"))
           w.await(timeout(10.seconds))
         }
       }

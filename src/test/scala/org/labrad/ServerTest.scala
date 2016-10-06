@@ -3,12 +3,23 @@ package org.labrad
 import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue, TimeUnit}
 import org.labrad.annotations._
 import org.labrad.data._
-import org.labrad.util.Logging
+import org.labrad.manager.ManagerUtils
+import org.labrad.util.{Await, Logging}
 import org.scalatest.fixture.FunSuite
 import scala.collection._
-import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration._
-import scala.reflect.runtime.universe
+
+object TestSrv {
+  def withServer[T](m: ManagerUtils.ManagerInfo)(body: TestSrv => T) = {
+    val s = new TestSrv
+    Server.start(s, ServerConfig(m.host, m.port, m.credential))
+    try {
+      body(s)
+    } finally {
+      try s.stop() catch { case _: Throwable => }
+    }
+  }
+}
 
 class TestSrv extends Server[TestSrv, TestCtx] with Logging {
 
@@ -186,22 +197,20 @@ class TestCtx(
 
 class ServerTest extends FunSuite {
 
-  import TestUtils._
+  import ManagerUtils._
 
   case class Fixture(
     server: TestSrv,
     client: Client,
-    host: String,
-    port: Int,
-    credential: Credential
+    manager: ManagerInfo
   )
   type FixtureParam = Fixture
 
   def withFixture(test: OneArgTest) = {
     withManager() { m =>
-      withServer(m.host, m.port, m.credential) { server =>
-        withClient(m.host, m.port, m.credential) { client =>
-          withFixture(test.toNoArgTest(Fixture(server, client, m.host, m.port, m.credential)))
+      TestSrv.withServer(m) { server =>
+        withClient(m) { client =>
+          withFixture(test.toNoArgTest(Fixture(server, client, m)))
         }
       }
     }
@@ -209,37 +218,37 @@ class ServerTest extends FunSuite {
 
   test("server can log in and log out of manager") { fix =>
     val msg = "This is a test"
-    val result = await(fix.client.send("Scala Test Server", "Echo" -> Str(msg)))
+    val result = Await(fix.client.send("Scala Test Server", "Echo" -> Str(msg)))
     val Str(s) = result(0)
     assert(s == msg)
 
     val aVal = 1
-    await(fix.client.send("Scala Test Server", "Set" -> Cluster(Str("a"), UInt(aVal))))
-    val result2 = await(fix.client.send("Scala Test Server", "Get" -> Str("a")))
+    Await(fix.client.send("Scala Test Server", "Set" -> Cluster(Str("a"), UInt(aVal))))
+    val result2 = Await(fix.client.send("Scala Test Server", "Get" -> Str("a")))
     val UInt(a) = result2(0)
     assert(a == 1)
   }
 
   test("can call setting defined on server object") { fix =>
     val msg = "This is a test"
-    val result = await(fix.client.send("Scala Test Server", "Srv Echo" -> Str(msg)))
+    val result = Await(fix.client.send("Scala Test Server", "Srv Echo" -> Str(msg)))
     val Str(s) = result(0)
     assert(s == msg)
   }
 
   test("can expire context in a separate packet") { fix =>
-    await(fix.client.send("Scala Test Server", "Set" -> Cluster(Str("a"), Str("test"))))
-    val keys = await(fix.client.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
+    Await(fix.client.send("Scala Test Server", "Set" -> Cluster(Str("a"), Str("test"))))
+    val keys = Await(fix.client.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
     assert(keys.contains("a"))
 
-    await(fix.client.send("Scala Test Server", "Expire Context" -> Data.NONE))
+    Await(fix.client.send("Scala Test Server", "Expire Context" -> Data.NONE))
 
-    val keys2 = await(fix.client.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
+    val keys2 = Await(fix.client.send("Scala Test Server", "Keys" -> Data.NONE))(0).get[Seq[String]]
     assert(!keys2.contains("a"))
   }
 
   test("can expire context within a single packet") { fix =>
-    val result = await(fix.client.send("Scala Test Server",
+    val result = Await(fix.client.send("Scala Test Server",
                                 "Set" -> Cluster(Str("a"), Str("test")),
                                 "Keys" -> Data.NONE,
                                 "Expire Context" -> Data.NONE,
@@ -251,15 +260,15 @@ class ServerTest extends FunSuite {
   }
 
   test("server gets context expiration message when client disconnects") { fix =>
-    val ctx = withClient(fix.host, fix.port, fix.credential) { client2 =>
+    val ctx = withClient(fix.manager) { client2 =>
       val ctx = client2.newContext.copy(high = client2.id)
-      await(client2.send("Scala Test Server", ctx,
+      Await(client2.send("Scala Test Server", ctx,
                          "Set" -> Cluster(Str("a"), Str("test"))))
       ctx
     }
     val expiredCtx = fix.server.expiredContexts.poll(1, TimeUnit.SECONDS)
     assert(expiredCtx == ctx)
-    val result = await(fix.client.send("Scala Test Server", ctx,
+    val result = Await(fix.client.send("Scala Test Server", ctx,
                                        "Keys" -> Data.NONE))
     val keys = result(0).get[Seq[String]]
     assert(keys == Seq("Test"))  // should just be the test key
