@@ -4,7 +4,7 @@ import java.io.File
 import java.nio.ByteOrder
 import java.util.{Date, Random}
 import org.labrad.data._
-import org.labrad.manager.CentralNode
+import org.labrad.manager.ManagerUtils
 import org.labrad.types._
 import org.labrad.util.{Logging, Util}
 import org.scalatest.FunSuite
@@ -14,8 +14,8 @@ import scala.concurrent.duration._
 class ClientTest extends FunSuite {
 
   def testWithClient(name: String)(func: Client => Unit) = test(name) {
-    TestUtils.withManager() { m =>
-      TestUtils.withClient(host = m.host, port = m.port, credential = m.credential) { c =>
+    ManagerUtils.withManager() { m =>
+      ManagerUtils.withClient(m) { c =>
         func(c)
       }
     }

@@ -2,7 +2,7 @@ package org.labrad
 
 import java.io.File
 import org.labrad.data._
-import org.labrad.manager.TlsPolicy
+import org.labrad.manager.{ManagerUtils, TlsPolicy}
 import org.labrad.types._
 import org.scalatest.FunSuite
 import scala.concurrent.Await
@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 class TlsTest extends FunSuite {
 
-  import TestUtils._
+  import ManagerUtils._
 
   def connectWithMode(tls: TlsMode, includeCerts: Boolean = true)(implicit m: ManagerInfo): Unit = {
     val certs = if (includeCerts) {
@@ -18,7 +18,7 @@ class TlsTest extends FunSuite {
     } else {
       Map.empty[String, File]
     }
-    withClient(m.host, m.port, m.credential, tls = tls, tlsCerts = certs) { c =>
+    withClient(m, tls = tls, tlsCerts = certs) { c =>
       val mgr = new ManagerServerProxy(c)
       Await.result(mgr.servers(), 1.second)
     }

@@ -1,25 +1,27 @@
 package org.labrad
 
 import org.labrad.data._
+import org.labrad.manager.ManagerUtils
+import org.labrad.util.Await
 import org.scalatest.{FunSuite, Tag}
 import org.scalatest.concurrent.AsyncAssertions
 import org.scalatest.time.SpanSugar._
 
 class ManagerTest extends FunSuite with AsyncAssertions {
 
-  import TestUtils._
+  import ManagerUtils._
 
   def mgr(c: Client) = new ManagerServerProxy(c)
 
   test("manager returns lists of servers and settings") {
     withManager() { m =>
-      withClient(m.host, m.port, m.credential) { c =>
-        val servers = await(mgr(c).servers)
+      withClient(m) { c =>
+        val servers = Await(mgr(c).servers)
         assert(servers.size == 2)
         assert(servers.exists { case (1L, "Manager") => true; case _ => false })
         assert(servers.exists { case (_, "Registry") => true; case _ => false })
-        withServer(m.host, m.port, m.credential) { s =>
-          val servers2 = await(mgr(c).servers)
+        TestSrv.withServer(m) { s =>
+          val servers2 = Await(mgr(c).servers)
           assert(servers2.size == 3)
           assert(servers2.exists { case (_, "Scala Test Server") => true; case _ => false })
         }
@@ -29,15 +31,15 @@ class ManagerTest extends FunSuite with AsyncAssertions {
 
   test("manager uses same id when a server reconnects") {
     withManager() { m =>
-      withClient(m.host, m.port, m.credential) { c =>
-        val id = withServer(m.host, m.port, m.credential) { s =>
-          await(mgr(c).lookupServer("Scala Test Server"))
+      withClient(m) { c =>
+        val id = TestSrv.withServer(m) { s =>
+          Await(mgr(c).lookupServer("Scala Test Server"))
         }
         Thread.sleep(10000)
-        val servers = await(mgr(c).servers)
+        val servers = Await(mgr(c).servers)
         assert(!servers.exists { case (_, "Scala Test Server") => true; case _ => false })
-        val id2 = withServer(m.host, m.port, m.credential) { s =>
-          await(mgr(c).lookupServer("Scala Test Server"))
+        val id2 = TestSrv.withServer(m) { s =>
+          Await(mgr(c).lookupServer("Scala Test Server"))
         }
         assert(id == id2)
       }
@@ -46,7 +48,7 @@ class ManagerTest extends FunSuite with AsyncAssertions {
 
   test("manager sends message when server connects and disconnects") {
     withManager() { m =>
-      withClient(m.host, m.port, m.credential) { c =>
+      withClient(m) { c =>
 
         val connectWaiter = new Waiter
         val disconnectWaiter = new Waiter
@@ -66,9 +68,9 @@ class ManagerTest extends FunSuite with AsyncAssertions {
             disconnectWaiter.dismiss
         }
 
-        await(mgr(c).subscribeToNamedMessage("Server Connect", connectId, true))
-        await(mgr(c).subscribeToNamedMessage("Server Disconnect", disconnectId, true))
-        withServer(m.host, m.port, m.credential) { s =>
+        Await(mgr(c).subscribeToNamedMessage("Server Connect", connectId, true))
+        Await(mgr(c).subscribeToNamedMessage("Server Disconnect", disconnectId, true))
+        TestSrv.withServer(m) { s =>
           connectWaiter.await(timeout(30.seconds))
         }
         disconnectWaiter.await(timeout(30.seconds))
@@ -86,11 +88,11 @@ class ManagerTest extends FunSuite with AsyncAssertions {
       val expireAllId = 1234
       val expireContextId = 2345
 
-      withClient(m.host, m.port, m.credential) { c =>
+      withClient(m) { c =>
 
-        await(mgr(c).subscribeToNamedMessage("Expire All", expireAllId, true))
-        await(mgr(c).subscribeToNamedMessage("Expire Context", expireContextId, true))
-        withClient(m.host, m.port, m.credential) { c2 =>
+        Await(mgr(c).subscribeToNamedMessage("Expire All", expireAllId, true))
+        Await(mgr(c).subscribeToNamedMessage("Expire Context", expireContextId, true))
+        withClient(m) { c2 =>
           // after requesting expiration, should get an expire context message
           val context = Context(c2.id, 20)
           c.addMessageListener {

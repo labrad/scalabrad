@@ -2,7 +2,6 @@ package org.labrad.util
 
 import java.io.{File, IOException}
 import java.net.{DatagramSocket, ServerSocket, URI}
-import java.nio.file.Files
 import java.util.regex.Pattern
 
 
@@ -169,7 +168,7 @@ object Util {
    */
   def copy(src: File, dst: File): Unit = {
     Util.ensureDir(dst.getParentFile)
-    Files.copy(src.toPath, dst.toPath)
+    java.nio.file.Files.copy(src.toPath, dst.toPath)
   }
 
   /**
