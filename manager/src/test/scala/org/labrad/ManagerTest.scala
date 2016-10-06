@@ -1,27 +1,35 @@
 package org.labrad
 
+import org.labrad.concurrent.Futures._
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
 import org.labrad.util.Await
-import org.scalatest.{FunSuite, Tag}
 import org.scalatest.concurrent.AsyncAssertions
-import org.scalatest.time.SpanSugar._
+import org.scalatest.fixture
+import scala.concurrent.duration._
 
-class ManagerTest extends FunSuite with AsyncAssertions {
+class ManagerTest extends fixture.FunSuite with AsyncAssertions {
 
   import ManagerUtils._
 
+  case class FixtureParam(deadline: Deadline)
+  implicit def testDeadline(implicit f: FixtureParam) = f.deadline
+
+  def withFixture(test: OneArgTest) = {
+    withFixture(test.toNoArgTest(FixtureParam(Deadline.now + 1.minute)))
+  }
+
   def mgr(c: Client) = new ManagerServerProxy(c)
 
-  test("manager returns lists of servers and settings") {
+  test("manager returns lists of servers and settings") { implicit f =>
     withManager() { m =>
       withClient(m) { c =>
-        val servers = Await(mgr(c).servers)
+        val servers = mgr(c).servers.await()
         assert(servers.size == 2)
         assert(servers.exists { case (1L, "Manager") => true; case _ => false })
         assert(servers.exists { case (_, "Registry") => true; case _ => false })
         TestSrv.withServer(m) { s =>
-          val servers2 = Await(mgr(c).servers)
+          val servers2 = mgr(c).servers.await()
           assert(servers2.size == 3)
           assert(servers2.exists { case (_, "Scala Test Server") => true; case _ => false })
         }
@@ -29,24 +37,24 @@ class ManagerTest extends FunSuite with AsyncAssertions {
     }
   }
 
-  test("manager uses same id when a server reconnects") {
+  test("manager uses same id when a server reconnects") { implicit f =>
     withManager() { m =>
       withClient(m) { c =>
         val id = TestSrv.withServer(m) { s =>
-          Await(mgr(c).lookupServer("Scala Test Server"))
+          mgr(c).lookupServer("Scala Test Server").await()
         }
         Thread.sleep(10000)
-        val servers = Await(mgr(c).servers)
+        val servers = mgr(c).servers.await()
         assert(!servers.exists { case (_, "Scala Test Server") => true; case _ => false })
         val id2 = TestSrv.withServer(m) { s =>
-          Await(mgr(c).lookupServer("Scala Test Server"))
+          mgr(c).lookupServer("Scala Test Server").await()
         }
         assert(id == id2)
       }
     }
   }
 
-  test("manager sends message when server connects and disconnects") {
+  test("manager sends message when server connects and disconnects") { implicit f =>
     withManager() { m =>
       withClient(m) { c =>
 
@@ -68,8 +76,8 @@ class ManagerTest extends FunSuite with AsyncAssertions {
             disconnectWaiter.dismiss
         }
 
-        Await(mgr(c).subscribeToNamedMessage("Server Connect", connectId, true))
-        Await(mgr(c).subscribeToNamedMessage("Server Disconnect", disconnectId, true))
+        mgr(c).subscribeToNamedMessage("Server Connect", connectId, true).await()
+        mgr(c).subscribeToNamedMessage("Server Disconnect", disconnectId, true).await()
         TestSrv.withServer(m) { s =>
           connectWaiter.await(timeout(30.seconds))
         }
@@ -80,7 +88,7 @@ class ManagerTest extends FunSuite with AsyncAssertions {
     }
   }
 
-  test("manager sends named messages when contexts expire") {
+  test("manager sends named messages when contexts expire") { implicit f =>
     withManager() { m =>
       val expireAllWaiter = new Waiter
       val expireContextWaiter = new Waiter
@@ -90,8 +98,8 @@ class ManagerTest extends FunSuite with AsyncAssertions {
 
       withClient(m) { c =>
 
-        Await(mgr(c).subscribeToNamedMessage("Expire All", expireAllId, true))
-        Await(mgr(c).subscribeToNamedMessage("Expire Context", expireContextId, true))
+        mgr(c).subscribeToNamedMessage("Expire All", expireAllId, true).await()
+        mgr(c).subscribeToNamedMessage("Expire Context", expireContextId, true).await()
         withClient(m) { c2 =>
           // after requesting expiration, should get an expire context message
           val context = Context(c2.id, 20)

@@ -6,14 +6,6 @@ import scala.concurrent.duration._
 
 object Await {
   /**
-   * Convenience method to await a Future with a default timeout, which
-   * can be overridden if desired
-   */
-  def apply[A](f: Future[A], timeout: Duration = 30.seconds): A = {
-    result(f, timeout)
-  }
-
-  /**
    * Await the result of a Future, or raise a TimeoutException if the result
    * does not arrive within the given timeout. This has the same interface as
    * scala.concurrent.Await except that if the Future fails we throw a new

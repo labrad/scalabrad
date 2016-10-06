@@ -2,19 +2,25 @@ package org.labrad.registry
 
 import org.labrad.{RegistryServerProxy, TlsMode}
 import org.labrad.annotations._
+import org.labrad.concurrent.Futures._
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
 import org.labrad.registry._
 import org.labrad.types._
-import org.labrad.util.Await
-import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.AsyncAssertions
-import org.scalatest.time.SpanSugar._
-import scala.collection._
+import org.scalatest.fixture
+import scala.concurrent.duration._
 
-class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
+class RemoteStoreTest extends fixture.FunSuite with AsyncAssertions {
 
   import ManagerUtils._
+
+  case class FixtureParam(deadline: Deadline)
+  implicit def testDeadline(implicit f: FixtureParam): Deadline = f.deadline
+
+  def withFixture(test: OneArgTest) = {
+    withFixture(test.toNoArgTest(FixtureParam(Deadline.now + 1.minute)))
+  }
 
   def withManagers()(func: (ManagerInfo, ManagerInfo, ManagerInfo) => Unit): Unit = {
     withManager() { root =>
@@ -27,7 +33,7 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
     }
   }
 
-  test("remote registry gets message when key is created") {
+  test("remote registry gets message when key is created") { implicit f =>
     withManagers() { (root, leaf1, leaf2) =>
       withClient(leaf1) { c1 =>
         withClient(leaf2) { c2 =>
@@ -45,20 +51,20 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          Await(r1.mkDir("test"))
-          Await(r1.cd("test"))
+          r1.mkDir("test").await()
+          r1.cd("test").await()
 
-          Await(r2.notifyOnChange(msgId, true))
-          Await(r2.cd("test"))
+          r2.notifyOnChange(msgId, true).await()
+          r2.cd("test").await()
 
-          Await(r1.set("a", Str("test")))
+          r1.set("a", Str("test")).await()
           w.await(timeout(10.seconds))
         }
       }
     }
   }
 
-  test("remote registry gets message when key is changed") {
+  test("remote registry gets message when key is changed") { implicit f =>
     withManagers() { (root, leaf1, leaf2) =>
       withClient(leaf1) { c1 =>
         withClient(leaf2) { c2 =>
@@ -76,21 +82,21 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          Await(r1.mkDir("test"))
-          Await(r1.cd("test"))
-          Await(r1.set("a", Str("first")))
+          r1.mkDir("test").await()
+          r1.cd("test").await()
+          r1.set("a", Str("first")).await()
 
-          Await(r2.notifyOnChange(msgId, true))
-          Await(r2.cd("test"))
+          r2.notifyOnChange(msgId, true).await()
+          r2.cd("test").await()
 
-          Await(r1.set("a", Str("second")))
+          r1.set("a", Str("second")).await()
           w.await(timeout(10.seconds))
         }
       }
     }
   }
 
-  test("remote registry gets message when key is deleted") {
+  test("remote registry gets message when key is deleted") { implicit f =>
     withManagers() { (root, leaf1, leaf2) =>
       withClient(leaf1) { c1 =>
         withClient(leaf2) { c2 =>
@@ -108,14 +114,14 @@ class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
               w.dismiss
           }
 
-          Await(r1.mkDir("test"))
-          Await(r1.cd("test"))
-          Await(r1.set("a", Str("first")))
+          r1.mkDir("test").await()
+          r1.cd("test").await()
+          r1.set("a", Str("first")).await()
 
-          Await(r2.notifyOnChange(msgId, true))
-          Await(r2.cd("test"))
+          r2.notifyOnChange(msgId, true).await()
+          r2.cd("test").await()
 
-          Await(r1.del("a"))
+          r1.del("a").await()
           w.await(timeout(10.seconds))
         }
       }
