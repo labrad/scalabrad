@@ -221,17 +221,17 @@ class AuthServer(
    * requests made from remote managers.
    */
   private def requestInfo(ctx: RequestContext): RequestInfo = {
-    val username = hub.username(ctx.source)
-    val isAdminUser = username == "" || auth.isAdmin(username)
-    val isLocalRequest = ctx.get(srcKey) match {
-      case Some("") => true
-      case _ => false
+    ctx.get(srcKey) match {
+      case Some("") =>
+        // local request; check whether user is an admin.
+        val username = hub.username(ctx.source)
+        val isAdmin = username == "" || auth.isAdmin(username)
+        RequestInfo(username, isAdmin = isAdmin, isLocalRequest = true)
+
+      case _ =>
+        // remote request; no admin privileges.
+        RequestInfo(username = "", isAdmin = false, isLocalRequest = false)
     }
-    RequestInfo(
-      username,
-      isAdmin = isAdminUser && isLocalRequest,
-      isLocalRequest = isLocalRequest
-    )
   }
 
   private def localErrorMsg(operation: String): String = {
