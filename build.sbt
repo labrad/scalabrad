@@ -74,12 +74,11 @@ lazy val manager = project.in(file("manager"))
     name := "scalabrad-manager",
 
     packSettings,
-
     packMain := Map(
       "labrad" -> "org.labrad.manager.Manager",
       "labrad-migrate-registry" -> "org.labrad.registry.Migrate",
       "labrad-sql-test" -> "org.labrad.registry.SQLTest"
     ),
-
-    packGenerateWindowsBatFile := true
+    packGenerateWindowsBatFile := true,
+    packArchivePrefix := "scalabrad"
   )
