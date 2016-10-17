@@ -11,7 +11,7 @@ import java.nio.file.Files
 import java.security.{MessageDigest, SecureRandom}
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.{Password, ServerConfig, ServerInfo, TlsMode}
+import org.labrad.{Labrad, Password, ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
 import org.labrad.concurrent.ExecutionContexts
 import org.labrad.crypto.{CertConfig, Certs}
@@ -115,18 +115,15 @@ class CentralNode(
 
 
 object Manager extends Logging {
-  val VERSION = {
-    val url = getClass.getResource("/org/labrad/version.txt")
-    scala.io.Source.fromURL(url).mkString
-  }
-  val ID = 1L
-  val NAME = "Manager"
+  val VERSION = Labrad.VERSION
+  val ID = Labrad.Manager.ID
+  val NAME = Labrad.Manager.NAME
   val DOC = "Provides basic support for all labrad connections, including discovery of other servers and lookup of metadata about them."
 
   // setting ids
-  val SERVERS = 1L
-  val SETTINGS = 2L
-  val LOOKUP = 3L
+  val SERVERS = Labrad.Manager.SERVERS
+  val SETTINGS = Labrad.Manager.SETTINGS
+  val LOOKUP = Labrad.Manager.LOOKUP
 
   // first client id
   val ClientIdStart = 1000000000L
