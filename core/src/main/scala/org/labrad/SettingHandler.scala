@@ -80,7 +80,7 @@ object SettingHandler extends Logging {
     // function arguments included in the pattern and the number of function
     // arguments omitted from the pattern.
     val acceptPats = patterns match {
-      case Seq() => Seq((TNone, 0, 0))
+      case Seq() => Seq((TNone, 0, 0, false), (PCluster(), 0, 0, true))
       case ps    =>
         // trailing parameters are omittable if they have a default or take Option
         val omittable = (defaults zip unpackTypes).reverse.takeWhile {
@@ -89,21 +89,27 @@ object SettingHandler extends Logging {
         }.length
 
         // create additional patterns with trailing optional arguments omitted
-        val patterns = for (omitted <- omittable to 0 by -1) yield {
-          val pattern = ps.dropRight(omitted) match {
-            case Seq()  => TNone
-            case Seq(p) => p
-            case ps     => PCluster(ps: _*)
+        val patterns = {
+          val b = Seq.newBuilder[(Pattern, Int, Int, Boolean)]
+          for (omitted <- omittable to 0 by -1) yield {
+            val pats = ps.dropRight(omitted) match {
+              case Seq()  => Seq((TNone, false), (PCluster(), true))
+              case Seq(p) => Seq((p, false), (PCluster(p), true))
+              case ps     => Seq((PCluster(ps: _*), true))
+            }
+            for ((pattern, tupled) <- pats) {
+              b += ((pattern, ps.length - omitted, omitted, tupled))
+            }
           }
-          (pattern, ps.length - omitted, omitted)
+          b.result
         }
 
         // ensure that patterns with omitted arguments are unambiguous
         // ambiguity can occur if the first argument accepts a cluster
         // that matches another pattern with multiple arguments
         for {
-          (p1, 1, _) <- patterns
-          (pn, n, _) <- patterns
+          (p1, 1, _, _) <- patterns
+          (pn, n, _, _) <- patterns
           if n > 1
           p <- pn.expand
         } require(!p1.accepts(p),
@@ -133,16 +139,15 @@ object SettingHandler extends Logging {
       val unpack = (defaultUnpackers, includeRequestContext) match {
         case (Seq(), true)   => (r: RequestContext) => Seq(r)
         case (Seq(), false)  => (r: RequestContext) => Seq()
-        case (Seq(f), true)  => (r: RequestContext) => Seq(r, f(r.data))
-        case (Seq(f), false) => (r: RequestContext) => Seq(f(r.data))
         case (fs, rc)        => (r: RequestContext) => {
           // extract data into args, adding empty for omitted args based on matching pattern
           val xs = acceptPats.find {
-            case (p, _, _) => p.accepts(r.data.t)
+            case (p, _, _, _) => p.accepts(r.data.t)
           }.map {
-            case (p, 0, k) => Seq.fill(k)(Data.NONE)
-            case (p, 1, k) => Seq(r.data) ++ Seq.fill(k)(Data.NONE)
-            case (p, n, k) => r.data.clusterIterator.toSeq ++ Seq.fill(k)(Data.NONE)
+            case (p, 0, k, _) => Seq.fill(k)(Data.NONE)
+            case (p, 1, k, false) => Seq(r.data) ++ Seq.fill(k)(Data.NONE)
+            case (p, 1, k, true) => Seq(r.data(0)) ++ Seq.fill(k)(Data.NONE)
+            case (p, n, k, _) => r.data.clusterIterator.toSeq ++ Seq.fill(k)(Data.NONE)
           }.getOrElse {
             sys.error(s"data of type ${r.data.t} not accepted")
           }
@@ -267,7 +272,13 @@ object SettingHandler extends Logging {
 
     case TypeRef(_, Sym("Option"), Seq(t)) => patternFor(t)
 
-    case TypeRef(_, Sym("Either"), Seq(aL, aR)) => PChoice(patternFor(aL), patternFor(aR))
+    case TypeRef(_, Sym("Either"), Seq(aL, aR)) =>
+      (patternFor(aL), patternFor(aR)) match {
+        case (PChoice(lPats @ _*), PChoice(rPats @ _*)) => PChoice((lPats ++ rPats): _*)
+        case (PChoice(lPats @ _*), r) => PChoice((lPats :+ r): _*)
+        case (l, PChoice(rPats @ _*)) => PChoice((l +: rPats): _*)
+        case (l, r) => PChoice(l, r)
+      }
 
     case TypeRef(_, Sym("Tuple1"), Seq(a1)) => PCluster(patternFor(a1))
     case TypeRef(_, Sym("Tuple2"), Seq(a1, a2)) => PCluster(patternFor(a1), patternFor(a2))

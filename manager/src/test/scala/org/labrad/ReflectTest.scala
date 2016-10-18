@@ -23,8 +23,8 @@ class NoInput extends Testable("methods with no input params") {
   def noInput2(r: RequestContext): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "noInput", "", "?"),
-    (2L, "noInput2", "", "?")
+    (1L, "noInput", "_|()", "?"),
+    (2L, "noInput2", "_|()", "?")
   )
 }
 
@@ -42,9 +42,9 @@ class NoOutput extends Testable("methods with no output params") {
   def noOutput4(r: RequestContext, arg: Data) {}
 
   val settings = Seq(
-    (1L, "noOutput", "", ""),
+    (1L, "noOutput", "_|()", ""),
     (2L, "noOutput2", "?", ""),
-    (3L, "noOutput3", "", ""),
+    (3L, "noOutput3", "_|()", ""),
     (4L, "noOutput4", "?", "")
   )
 }
@@ -72,13 +72,13 @@ class Primitives extends Testable("simple primitive input/output types") {
   def g(r: RequestContext, s: Array[Byte]): Array[Byte] = s ++ s
 
   val settings = Seq(
-    (1L, "a", "b", "b"),
-    (2L, "b", "i", "i"),
-    (3L, "c", "w", "w"),
-    (4L, "d", "v", "v"),
-    (5L, "e", "t", "t"),
-    (6L, "f", "s", "s"),
-    (7L, "g", "y", "y")
+    (1L, "a", "b|(b)", "b"),
+    (2L, "b", "i|(i)", "i"),
+    (3L, "c", "w|(w)", "w"),
+    (4L, "d", "v|(v)", "v"),
+    (5L, "e", "t|(t)", "t"),
+    (6L, "f", "s|(s)", "s"),
+    (7L, "g", "y|(y)", "y")
   )
 }
 
@@ -90,7 +90,7 @@ class Overloads extends Testable("overloaded methods") {
   def a(r: RequestContext, s: String, b: Boolean, d: Data): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "overloaded", "_|s|sb|sb?", "?")
+    (1L, "overloaded", "_|()|s|(s)|sb|sb?", "?")
   )
 }
 
@@ -117,8 +117,8 @@ class Eithers extends Testable("translate Either into type alternatives") {
   def b(r: RequestContext, id: Either[Either[Int, Long], String]): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "a", "w|s", "?"),
-    (2L, "b", "i|w|s", "?")
+    (1L, "a", "w|s|(<w|s>)", "?"),
+    (2L, "b", "i|w|s|(<i|w|s>)", "?")
   )
 }
 
@@ -150,10 +150,10 @@ class Options extends Testable("allow trailing Option parameters to be omitted")
   def e(r: RequestContext, name: String, foo: Option[Int], bar: String, baz: Option[Long]): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "a", "s|_", "?"),
-    (2L, "b", "s|sb", "?"),
-    (3L, "c", "s|s<w|s>", "?"),
-    (4L, "d", "s|si|sis|sisw", "?"),
+    (1L, "a", "s|(s)|_|()", "?"),
+    (2L, "b", "s|(s)|sb", "?"),
+    (3L, "c", "s|(s)|s<w|s>", "?"),
+    (4L, "d", "s|(s)|si|sis|sisw", "?"),
     (5L, "e", "sis|sisw", "?")
   )
 }
@@ -182,11 +182,11 @@ class TypeAlias extends Testable("type aliases do not affect inference") {
   def e(devices: Seq[DeviceDef]): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "a", "s", "?"),
-    (2L, "b", "w|s", "?"),
-    (3L, "c", "", "w|s"),
-    (4L, "d", "*s", "?"),
-    (5L, "e", "*(s, *(s, (s, *s)))", "?")
+    (1L, "a", "s|(s)", "?"),
+    (2L, "b", "w|s|(<w|s>)", "?"),
+    (3L, "c", "_|()", "w|s"),
+    (4L, "d", "*s|(*s)", "?"),
+    (5L, "e", "*(s, *(s, (s, *s)))|(*(s, *(s, (s, *s))))", "?")
   )
 }
 
@@ -202,9 +202,9 @@ object Container {
     def c(r: RequestContext, name: String, create: Option[Either[Long, String]]): Data = Data.NONE
 
     val settings = Seq(
-      (1L, "a", "s|_", "?"),
-      (2L, "b", "s|sb", "?"),
-      (3L, "c", "s|s<w|s>", "?")
+      (1L, "a", "s|(s)|_|()", "?"),
+      (2L, "b", "s|(s)|sb", "?"),
+      (3L, "c", "s|(s)|s<w|s>", "?")
     )
   }
 }
@@ -233,10 +233,10 @@ class DefaultArgs extends Testable("allow parameters with default values to be o
   }
 
   val settings = Seq(
-    (1L, "a", "s | ss | ssw", "?"),
+    (1L, "a", "s | (s) | ss | ssw", "?"),
     (2L, "b", "ssw", "?"),
-    (3L, "c", "s | _", "?"),
-    (4L, "d", "_ | *s | *sb", "*s")
+    (3L, "c", "s | (s) | _ | ()", "?"),
+    (4L, "d", "_ | () | *s | (*s) | *sb", "*s")
   )
 }
 
@@ -254,10 +254,10 @@ class AcceptAnnotations extends Testable("allow parameters to be annotated with 
   def d(r: RequestContext, @Accept("*(ss)") ids: Seq[Data]): Data = Data.NONE
 
   val settings = Seq(
-    (1L, "a", "v[s]", "?"),
-    (2L, "b", "s|ss", "?"),
+    (1L, "a", "v[s]|(v[s])", "?"),
+    (2L, "b", "s|ss|(<s|ss>)", "?"),
     (3L, "c", "<s|(ss)><s|(ss)>", "?"),
-    (4L, "d", "*(ss)", "?")
+    (4L, "d", "*(ss)|(*(ss))", "?")
   )
 }
 
