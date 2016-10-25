@@ -21,10 +21,10 @@ import org.labrad.manager.auth._
 import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
+import org.labrad.util.cli.Command
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
 
 
 trait AuthService {
@@ -164,14 +164,14 @@ object Manager extends Logging {
 
   def main(args: Array[String]) {
 
-    val config = ManagerConfig.fromCommandLine(args) match {
-      case Success(managerArgs) => managerArgs
-
-      case Failure(e: ArgotUsageException) =>
+    val config = try {
+      ManagerConfig.fromCommandLine(args)
+    } catch {
+      case e: ArgotUsageException =>
         println(e.message)
         return
 
-      case Failure(e: Throwable) =>
+      case e: Throwable =>
         println(s"unexpected error: $e")
         return
     }
@@ -327,40 +327,22 @@ case class ManagerConfig(
 
 object ManagerConfig {
 
-  /**
-   * Create ManagerConfig from command line and map of environment variables.
-   *
-   * @param args command line parameters
-   * @param env map of environment variables, which defaults to the actual
-   *        environment variables in scala.sys.env
-   * @return a Try containing a ManagerArgs instance (on success) or a Failure
-   *         in the case something went wrong. The Failure will contain an
-   *         ArgotUsageException if the command line parsing failed or the
-   *         -h or --help options were supplied.
-   */
-  def fromCommandLine(
-    args: Array[String],
-    env: Map[String, String] = scala.sys.env
-  ): Try[ManagerConfig] = {
-    val parser = new ArgotParser("labrad",
-      preUsage = Some("The labrad manager."),
-      sortUsage = false
-    )
-    val portOpt = parser.option[Int](
+  trait Options { _: Command =>
+    val port = parser.option[Int](
       names = List("port"),
       valueName = "int",
       description = "Port on which to listen for incoming connections. " +
         "If not provided, fallback to the value given in the LABRADPORT " +
         "environment variable, with default value 7682."
     )
-    val passwordOpt = parser.option[String](
+    val password = parser.option[String](
       names = List("password"),
       valueName = "string",
       description = "Password to use to authenticate incoming connections. " +
         "If not provided, fallback to the value given in the LABRADPASSWORD " +
         "environment variable, with default value '' (empty password)."
     )
-    val registryOpt = parser.option[String](
+    val registry = parser.option[String](
       names = List("registry"),
       valueName = "uri",
       description = "URI giving the registry storage location. " +
@@ -384,7 +366,7 @@ object ManagerConfig {
         "when clients or servers attempt to log in. If running an internal " +
         "registry server, this has no effect. The default is 30 seconds."
     )
-    val authServerOpt = parser.option[String](
+    val authServer = parser.option[String](
       names = List("auth-server"),
       valueName = "bool",
       description = "Whether to run auth server locally and store database " +
@@ -403,49 +385,49 @@ object ManagerConfig {
         "to login with extended auth methods such as oauth_token. The " +
         "default is 30 seconds."
     )
-    val oauthClientIdOpt = parser.option[String](
+    val oauthClientId = parser.option[String](
       names = List("oauth-client-id"),
       valueName = "string",
       description = "Client ID to use for authenticating users with OAuth. " +
         "If not given, fallback to the value in the LABRAD_OAUTH_CLIENT_ID " +
         "environment variable."
     )
-    val oauthClientSecretOpt = parser.option[String](
+    val oauthClientSecret = parser.option[String](
       names = List("oauth-client-secret"),
       valueName = "string",
       description = "Client Secret to use for authenticating users with OAuth. " +
         "If not given, fallback to the value in the LABRAD_OAUTH_CLIENT_SECRET " +
         "environment variable."
     )
-    val oauthWebClientIdOpt = parser.option[String](
+    val oauthWebClientId = parser.option[String](
       names = List("oauth-web-client-id"),
       valueName = "string",
       description = "Client ID to use for authenticating users with OAuth on " +
         "the web. If not given, fallback to the value in the LABRAD_OAUTH_WEB_CLIENT_ID " +
         "environment variable."
     )
-    val oauthWebClientSecretOpt = parser.option[String](
+    val oauthWebClientSecret = parser.option[String](
       names = List("oauth-web-client-secret"),
       valueName = "string",
       description = "Client Secret to use for authenticating users with OAuth on " +
         "the web. If not given, fallback to the value in the LABRAD_OAUTH_WEB_CLIENT_SECRET " +
         "environment variable."
     )
-    val tlsPortOpt = parser.option[Int](
+    val tlsPort = parser.option[Int](
       names = List("tls-port"),
       valueName = "int",
       description = "Port on which to listen for incoming TLS connections. " +
         "If not provided, fallback to the value given in the LABRAD_TLS_PORT " +
         "environment variable, with default value 7643."
     )
-    val tlsRequiredOpt = parser.option[String](
+    val tlsRequired = parser.option[String](
       names = List("tls-required"),
       valueName = "bool",
       description = "Whether to require TLS for incoming connections from " +
         "remote hosts. If not provided, fallback to the value given in the " +
         "LABRAD_TLS_REQUIRED environment variable, with default value true."
     )
-    val tlsRequiredLocalhostOpt = parser.option[String](
+    val tlsRequiredLocalhost = parser.option[String](
       names = List("tls-required-localhost"),
       valueName = "bool",
       description = "Whether to require TLS for incoming connections from " +
@@ -453,7 +435,7 @@ object ManagerConfig {
         "LABRAD_TLS_REQUIRED_LOCALHOST environment variable, with default " +
         "value false."
     )
-    val tlsHostsOpt = parser.option[String](
+    val tlsHosts = parser.option[String](
       names = List("tls-hosts"),
       valueName = "string",
       description = "A list of hostnames for which to use TLS. " +
@@ -470,7 +452,7 @@ object ManagerConfig {
         "LABRAD_TLS_HOSTS environment variable, we the default being to " +
         "generate a single self-signed certificate for the 'localhost'."
     )
-    val tlsCertPathOpt = parser.option[String](
+    val tlsCertPath = parser.option[String](
       names = List("tls-cert-path"),
       valueName = "directory",
       description = "Path to a directory where self-signed TLS certificates " +
@@ -481,7 +463,7 @@ object ManagerConfig {
         "in the tls-hosts option, named <hostname>.cert. If this directory " +
         "does not exist, it will be created."
     )
-    val tlsKeyPathOpt = parser.option[String](
+    val tlsKeyPath = parser.option[String](
       names = List("tls-key-path"),
       valueName = "directory",
       description = "Path to a directory where keys for self-signed TLS " +
@@ -492,66 +474,78 @@ object ManagerConfig {
         "in the tls-hosts option, named <hostname>.key. If this directory " +
         "does not exist, it will be created."
     )
-    val help = parser.flag[Boolean](List("h", "help"),
-      "Print usage information and exit")
+  }
 
-    Try {
-      parser.parse(args)
-      if (help.value.getOrElse(false)) parser.usage()
+  /**
+   * Create ManagerConfig from command line and map of environment variables.
+   *
+   * @param args command line parameters
+   * @param env map of environment variables, which defaults to the actual
+   *        environment variables in scala.sys.env
+   * @return a Try containing a ManagerArgs instance (on success) or a Failure
+   *         in the case something went wrong. The Failure will contain an
+   *         ArgotUsageException if the command line parsing failed or the
+   *         -h or --help options were supplied.
+   */
+  def fromCommandLine(
+    args: Array[String],
+    env: Map[String, String] = scala.sys.env
+  ): ManagerConfig = {
 
-      val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
-      val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
-      val registryUri = registryOpt.value.orElse(env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
-        (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
-      }
-      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(7643)
-      val tlsRequired = tlsRequiredOpt.value.orElse(env.get("LABRAD_TLS_REQUIRED")).map(Util.parseBooleanOpt).getOrElse(true)
-      val tlsRequiredLocalhost = tlsRequiredLocalhostOpt.value.orElse(env.get("LABRAD_TLS_REQUIRED_LOCALHOST")).map(Util.parseBooleanOpt).getOrElse(false)
-      val tlsHosts = parseTlsHostsConfig(tlsHostsOpt.value.orElse(env.get("LABRAD_TLS_HOSTS")).getOrElse(""))
-      val tlsCertPath = tlsCertPathOpt.value.orElse(env.get("LABRAD_TLS_CERT_PATH")).map(new File(_)).getOrElse {
-        CertConfig.Defaults.tlsCertPath
-      }
-      val tlsKeyPath = tlsKeyPathOpt.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
-        CertConfig.Defaults.tlsKeyPath
-      }
+    val opts = (new Command("labrad", "The labrad manager.") with Options).parse(args)
 
-      val oauthClients = Map.newBuilder[OAuthClientType, OAuthClientInfo]
-      val oauthClientId = oauthClientIdOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_ID"))
-      val oauthClientSecret = oauthClientSecretOpt.value.orElse(env.get("LABRAD_OAUTH_CLIENT_SECRET"))
-      (oauthClientId, oauthClientSecret) match {
-        case (None, None) =>
-        case (Some(id), Some(secret)) =>
-          oauthClients += OAuthClientType.Desktop -> OAuthClientInfo(id, secret)
-        case _ =>
-          sys.error("Must specify both or neither of oauth client id and client secret.")
-      }
-      val oauthWebClientId = oauthWebClientIdOpt.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_ID"))
-      val oauthWebClientSecret = oauthWebClientSecretOpt.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_SECRET"))
-      (oauthWebClientId, oauthWebClientSecret) match {
-        case (None, None) =>
-        case (Some(id), Some(secret)) =>
-          oauthClients += OAuthClientType.Web -> OAuthClientInfo(id, secret)
-        case _ =>
-          sys.error("Must specify both or neither of oauth web client id and web client secret.")
-      }
-
-      ManagerConfig(
-        port,
-        password,
-        registryTimeout = registryTimeout.value.getOrElse(30).seconds,
-        registryUri,
-        tlsPort,
-        tlsRequired,
-        tlsRequiredLocalhost,
-        tlsHosts,
-        tlsCertPath,
-        tlsKeyPath,
-        authServer = authServerOpt.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
-        authTimeout = authTimeout.value.getOrElse(30).seconds,
-        authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
-        oauthClients = oauthClients.result
-      )
+    val port = opts.port.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
+    val password = opts.password.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+    val registryUri = opts.registry.value.orElse(env.get("LABRADREGISTRY")).map(new URI(_)).getOrElse {
+      (sys.props("user.home") / ".labrad" / "registry.sqlite").toURI
     }
+    val tlsPort = opts.tlsPort.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(7643)
+    val tlsRequired = opts.tlsRequired.value.orElse(env.get("LABRAD_TLS_REQUIRED")).map(Util.parseBooleanOpt).getOrElse(true)
+    val tlsRequiredLocalhost = opts.tlsRequiredLocalhost.value.orElse(env.get("LABRAD_TLS_REQUIRED_LOCALHOST")).map(Util.parseBooleanOpt).getOrElse(false)
+    val tlsHosts = parseTlsHostsConfig(opts.tlsHosts.value.orElse(env.get("LABRAD_TLS_HOSTS")).getOrElse(""))
+    val tlsCertPath = opts.tlsCertPath.value.orElse(env.get("LABRAD_TLS_CERT_PATH")).map(new File(_)).getOrElse {
+      CertConfig.Defaults.tlsCertPath
+    }
+    val tlsKeyPath = opts.tlsKeyPath.value.orElse(env.get("LABRAD_TLS_KEY_PATH")).map(new File(_)).getOrElse {
+      CertConfig.Defaults.tlsKeyPath
+    }
+
+    val oauthClients = Map.newBuilder[OAuthClientType, OAuthClientInfo]
+    val oauthClientId = opts.oauthClientId.value.orElse(env.get("LABRAD_OAUTH_CLIENT_ID"))
+    val oauthClientSecret = opts.oauthClientSecret.value.orElse(env.get("LABRAD_OAUTH_CLIENT_SECRET"))
+    (oauthClientId, oauthClientSecret) match {
+      case (None, None) =>
+      case (Some(id), Some(secret)) =>
+        oauthClients += OAuthClientType.Desktop -> OAuthClientInfo(id, secret)
+      case _ =>
+        sys.error("Must specify both or neither of oauth client id and client secret.")
+    }
+    val oauthWebClientId = opts.oauthWebClientId.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_ID"))
+    val oauthWebClientSecret = opts.oauthWebClientSecret.value.orElse(env.get("LABRAD_OAUTH_WEB_CLIENT_SECRET"))
+    (oauthWebClientId, oauthWebClientSecret) match {
+      case (None, None) =>
+      case (Some(id), Some(secret)) =>
+        oauthClients += OAuthClientType.Web -> OAuthClientInfo(id, secret)
+      case _ =>
+        sys.error("Must specify both or neither of oauth web client id and web client secret.")
+    }
+
+    ManagerConfig(
+      port,
+      password,
+      registryTimeout = opts.registryTimeout.value.getOrElse(30).seconds,
+      registryUri,
+      tlsPort,
+      tlsRequired,
+      tlsRequiredLocalhost,
+      tlsHosts,
+      tlsCertPath,
+      tlsKeyPath,
+      authServer = opts.authServer.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
+      authTimeout = opts.authTimeout.value.getOrElse(30).seconds,
+      authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
+      oauthClients = oauthClients.result
+    )
   }
 
   /**
