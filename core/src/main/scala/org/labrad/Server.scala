@@ -10,12 +10,12 @@ import org.labrad.concurrent.ExecutionContexts
 import org.labrad.data._
 import org.labrad.errors.LabradException
 import org.labrad.util.{AsyncSemaphore, Logging, Util}
+import org.labrad.util.cli.{Command, Environment}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
-import scala.util.{Success, Failure, Try}
 
 trait ServerContext {
   def init(): Unit
@@ -261,14 +261,14 @@ object Server {
    * Includes basic parsing of command line options.
    */
   def run(s: IServer, args: Array[String]): Unit = {
-    val config = ServerConfig.fromCommandLine(args) match {
-      case Success(config) => config
-
-      case Failure(e: ArgotUsageException) =>
+    val config = try {
+      ServerConfig.fromCommandLine(args)
+    } catch {
+      case e: ArgotUsageException =>
         println(e.message)
         return
 
-      case Failure(e: Throwable) =>
+      case e: Throwable =>
         println(s"unexpected error: $e")
         return
     }
@@ -360,25 +360,10 @@ object ServerConfig {
   }
 
   /**
-   * Create ServerConfig from command line and map of environment variables.
-   *
-   * @param args command line parameters
-   * @param env map of environment variables, which defaults to the actual
-   *        environment variables in scala.sys.env
-   * @return a Try containing a ServerArgs instance (on success) or a Failure
-   *         in the case something went wrong. The Failure will contain an
-   *         ArgotUsageException if the command line parsing failed or the
-   *         -h or --help options were supplied.
+   * Command line options for creating ServerConfig.
    */
-  def fromCommandLine(
-    args: Array[String],
-    env: Map[String, String] = scala.sys.env
-  ): Try[ServerConfig] = {
-    val parser = new ArgotParser("labrad-server",
-      preUsage = Some("Run a labrad server."),
-      sortUsage = false
-    )
-    val nameOpt = parser.option[String](
+  trait Options { _: Command =>
+    val name = parser.option[String](
       names = List("name"),
       valueName = "string",
       description = "The name to use for this server when connecting to the " +
@@ -386,21 +371,21 @@ object ServerConfig {
         "This is generally not needed, but can be useful in testing if you " +
         "want to run several copies of a given server without name conflicts."
     )
-    val hostOpt = parser.option[String](
+    val host = parser.option[String](
       names = List("host"),
       valueName = "string",
       description = "The hostname where the labrad manager is running. " +
         "If not provided, fallback to the value given in the LABRADHOST " +
         "environment variable, with default value 'localhost'."
     )
-    val portOpt = parser.option[Int](
+    val port = parser.option[Int](
       names = List("port"),
       valueName = "int",
       description = "Port on which to connect to the labrad manager. " +
         "If not provided, fallback to the value given in the LABRADPORT " +
         "environment variable, with default value 7682."
     )
-    val tlsOpt = parser.option[String](
+    val tls = parser.option[String](
       names = List("tls"),
       valueName = "string",
       description = "The TLS mode to use for secure connections to the " +
@@ -415,42 +400,65 @@ object ServerConfig {
         "localhost. Finally, 'off' will disable TLS entirely; this is " +
         "recommended only for use with legacy managers."
     )
-    val tlsPortOpt = parser.option[Int](
+    val tlsPort = parser.option[Int](
       names = List("tls-port"),
       valueName = "int",
       description = "Port on which to connect to the labrad manager with " +
         "TLS. If not provided, fallback to the value given in the " +
         "LABRAD_TLS_PORT environment variable, with default value 7643."
     )
-    val usernameOpt = parser.option[String](
+    val username = parser.option[String](
       names = List("username"),
       valueName = "string",
       description = "Username to use to authenticate to the manager. " +
         "If not provided, fallback to the value given in the LABRADUSER " +
         "environment variable, with default value '' (global user)."
     )
-    val passwordOpt = parser.option[String](
+    val password = parser.option[String](
       names = List("password"),
       valueName = "string",
       description = "Password to use to authenticate to the manager. " +
         "If not provided, fallback to the value given in the LABRADPASSWORD " +
         "environment variable, with default value '' (empty password)."
     )
-    val help = parser.flag[Boolean](List("h", "help"),
-      "Print usage information and exit")
+  }
 
-    Try {
-      parser.parse(args)
-      if (help.value.getOrElse(false)) parser.usage()
+  /**
+   * Create ServerConfig from command line and map of environment variables.
+   *
+   * @param args command line parameters
+   * @param env environment variables; defaults to the actual environment from scala.sys.env
+   * @return a ServerConfig instance if the args were parsed successfully.
+   * @throws org.clapper.argot.ArgotUsageException if the command line parsing failed or if called
+   *         with the -h or --help options.
+   */
+  def fromCommandLine(args: Array[String])
+                     (implicit env: Environment = Environment.sys): ServerConfig = {
+    val opts = new Command("labrad-server") with Options
+    opts.parse(args)
+    fromOptions(opts)
+  }
 
-      val host = hostOpt.value.orElse(env.get("LABRADHOST")).getOrElse("localhost")
-      val port = portOpt.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682)
-      val tls = tlsOpt.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(ServerConfig.Defaults.tls)
-      val tlsPort = tlsPortOpt.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(ServerConfig.Defaults.tlsPort)
-      val username = usernameOpt.value.orElse(env.get("LABRADUSER")).getOrElse("")
-      val password = passwordOpt.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
-
-      ServerConfig(host, port, Password(username, password), nameOpt.value, tls, tlsPort)
-    }
+  /**
+   * Create ServerConfig from Options instance and map of environment variables.
+   *
+   * @param args command line parameters
+   * @param env environment variables; defaults to the actual environment from scala.sys.env
+   * @return a ServerConfig instance if the args were parsed successfully.
+   * @throws org.clapper.argot.ArgotUsageException if the command line parsing
+   *         failed or the -h or --help options were supplied.
+   */
+  def fromOptions(opts: Options)(implicit env: Environment = Environment.sys): ServerConfig = {
+    ServerConfig(
+      host = opts.host.value.orElse(env.get("LABRADHOST")).getOrElse("localhost"),
+      port = opts.port.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682),
+      credential = Password(
+        username = opts.username.value.orElse(env.get("LABRADUSER")).getOrElse(""),
+        password = opts.password.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+      ),
+      nameOpt = opts.name.value,
+      tls = opts.tls.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(Defaults.tls),
+      tlsPort = opts.tlsPort.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(Defaults.tlsPort)
+    )
   }
 }
