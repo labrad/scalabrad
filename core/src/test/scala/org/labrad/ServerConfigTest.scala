@@ -1,19 +1,22 @@
 package org.labrad
 
 import java.net.URI
+import org.labrad.util.cli.Environment
 import org.scalatest.FunSuite
 import scala.util.{Failure, Success}
 
 class ServerConfigTest extends FunSuite {
+
+  // If not otherwise specified, use empty environment for these tests.
+  implicit val defaultEnv = Environment()
 
   test("default manager config works with empty command line and env") {
     ServerConfig.fromCommandLine(Array())
   }
 
   test("host can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array(),
-      env = Map("LABRADHOST" -> "foo.com"))
+    val env = Environment("LABRADHOST" -> "foo.com")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     assert(config.host == "foo.com")
   }
 
@@ -26,14 +29,14 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("host command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--host=foo.com"),
-      env = Map("LABRADHOST" -> "bar.com"))
+    val env = Environment("LABRADHOST" -> "bar.com")
+    val config = ServerConfig.fromCommandLine(Array("--host=foo.com"))(env)
     assert(config.host == "foo.com")
   }
 
   test("port can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(Array(), env = Map("LABRADPORT" -> "7777"))
+    val env = Environment("LABRADPORT" -> "7777")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     assert(config.port == 7777)
   }
 
@@ -46,15 +49,15 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("port command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--port=1234"),
-      env = Map("LABRADPORT" -> "2345"))
+    val env = Environment("LABRADPORT" -> "2345")
+    val config = ServerConfig.fromCommandLine(Array("--port=1234"))(env)
     assert(config.port == 1234)
   }
 
   test("port env var must be an integer") {
+    val env = Environment("LABRADPORT" -> "foo")
     intercept[Exception] {
-      ServerConfig.fromCommandLine(Array(), env = Map("LABRADPORT" -> "foo"))
+      ServerConfig.fromCommandLine(Array())(env)
     }
   }
 
@@ -66,9 +69,8 @@ class ServerConfigTest extends FunSuite {
 
 
   test("username can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array(),
-      env = Map("LABRADUSER" -> "foo"))
+    val env = Environment("LABRADUSER" -> "foo")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     val Password(username, _) = config.credential
     assert(username == "foo")
   }
@@ -84,9 +86,8 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("username command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--username=foo"),
-      env = Map("LABRADUSER" -> "bar"))
+    val env = Environment("LABRADUSER" -> "bar")
+    val config = ServerConfig.fromCommandLine(Array("--username=foo"))(env)
     val Password(username, _) = config.credential
     assert(username == "foo")
   }
@@ -98,9 +99,8 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("password can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array(),
-      env = Map("LABRADPASSWORD" -> "foo"))
+    val env = Environment("LABRADPASSWORD" -> "foo")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     checkPassword(config, "foo")
   }
 
@@ -113,9 +113,8 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("password command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--password=foo"),
-      env = Map("LABRADPASSWORD" -> "bar"))
+    val env = Environment("LABRADPASSWORD" -> "bar")
+    val config = ServerConfig.fromCommandLine(Array("--password=foo"))(env)
     checkPassword(config, "foo")
   }
 
@@ -135,7 +134,8 @@ class ServerConfigTest extends FunSuite {
 
 
   test("tls-port can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS_PORT" -> "7777"))
+    val env = Environment("LABRAD_TLS_PORT" -> "7777")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     assert(config.tlsPort == 7777)
   }
 
@@ -148,15 +148,15 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("tls-port command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--tls-port=1234"),
-      env = Map("LABRAD_TLS_PORT" -> "2345"))
+    val env = Environment("LABRAD_TLS_PORT" -> "2345")
+    val config = ServerConfig.fromCommandLine(Array("--tls-port=1234"))(env)
     assert(config.tlsPort == 1234)
   }
 
   test("tls-port env var must be an integer") {
+    val env = Environment("LABRAD_TLS_PORT" -> "foo")
     intercept[Exception] {
-      ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS_PORT" -> "foo"))
+      ServerConfig.fromCommandLine(Array())(env)
     }
   }
 
@@ -168,7 +168,8 @@ class ServerConfigTest extends FunSuite {
 
 
   test("tls mode can be set from environment variable") {
-    val config = ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS" -> "on"))
+    val env = Environment("LABRAD_TLS" -> "on")
+    val config = ServerConfig.fromCommandLine(Array())(env)
     assert(config.tls == TlsMode.ON)
   }
 
@@ -181,15 +182,15 @@ class ServerConfigTest extends FunSuite {
   }
 
   test("tls mode command line arg overrides environment variable") {
-    val config = ServerConfig.fromCommandLine(
-      Array("--tls=off"),
-      env = Map("LABRAD_TLS" -> "on"))
+    val env = Environment("LABRAD_TLS" -> "on")
+    val config = ServerConfig.fromCommandLine(Array("--tls=off"))(env)
     assert(config.tls == TlsMode.OFF)
   }
 
   test("tls mode env var must be a valid option") {
+    val env = Environment("LABRAD_TLS" -> "foo")
     intercept[Exception] {
-      ServerConfig.fromCommandLine(Array(), env = Map("LABRAD_TLS" -> "foo"))
+      ServerConfig.fromCommandLine(Array())(env)
     }
   }
 

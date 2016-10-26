@@ -10,13 +10,12 @@ import org.labrad.concurrent.ExecutionContexts
 import org.labrad.data._
 import org.labrad.errors.LabradException
 import org.labrad.util.{AsyncSemaphore, Logging, Util}
-import org.labrad.util.cli.Command
+import org.labrad.util.cli.{Command, Environment}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
-import scala.util.{Success, Failure, Try}
 
 trait ServerContext {
   def init(): Unit
@@ -428,44 +427,38 @@ object ServerConfig {
    * Create ServerConfig from command line and map of environment variables.
    *
    * @param args command line parameters
-   * @param env map of environment variables, which defaults to the actual
-   *        environment variables in scala.sys.env
+   * @param env environment variables; defaults to the actual environment from scala.sys.env
    * @return a ServerConfig instance if the args were parsed successfully.
-   * @raises ArgotUsageException if the command line parsing failed or the
-   *         -h or --help options were supplied.
+   * @throws org.clapper.argot.ArgotUsageException if the command line parsing failed or if called
+   *         with the -h or --help options.
    */
-  def fromCommandLine(
-    args: Array[String],
-    env: Map[String, String] = scala.sys.env
-  ): ServerConfig = {
-    val options = (new Command("labrad-server") with Options).parse(args)
-    fromOptions(options, env)
+  def fromCommandLine(args: Array[String])
+                     (implicit env: Environment = Environment.sys): ServerConfig = {
+    val opts = new Command("labrad-server") with Options
+    opts.parse(args)
+    fromOptions(opts)
   }
 
   /**
    * Create ServerConfig from Options instance and map of environment variables.
    *
    * @param args command line parameters
-   * @param env map of environment variables, which defaults to the actual
-   *        environment variables in scala.sys.env
+   * @param env environment variables; defaults to the actual environment from scala.sys.env
    * @return a ServerConfig instance if the args were parsed successfully.
-   * @raises ArgotUsageException if the command line parsing failed or the
-   *         -h or --help options were supplied.
+   * @throws org.clapper.argot.ArgotUsageException if the command line parsing
+   *         failed or the -h or --help options were supplied.
    */
-  def fromOptions(
-    options: Options,
-    env: Map[String, String] = scala.sys.env
-  ): ServerConfig = {
+  def fromOptions(opts: Options)(implicit env: Environment = Environment.sys): ServerConfig = {
     ServerConfig(
-      host = options.host.value.orElse(env.get("LABRADHOST")).getOrElse("localhost"),
-      port = options.port.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682),
+      host = opts.host.value.orElse(env.get("LABRADHOST")).getOrElse("localhost"),
+      port = opts.port.value.orElse(env.get("LABRADPORT").map(_.toInt)).getOrElse(7682),
       credential = Password(
-        username = options.username.value.orElse(env.get("LABRADUSER")).getOrElse(""),
-        password = options.password.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
+        username = opts.username.value.orElse(env.get("LABRADUSER")).getOrElse(""),
+        password = opts.password.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
       ),
-      nameOpt = options.name.value,
-      tls = options.tls.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(Defaults.tls),
-      tlsPort = options.tlsPort.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(Defaults.tlsPort)
+      nameOpt = opts.name.value,
+      tls = opts.tls.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(Defaults.tls),
+      tlsPort = opts.tlsPort.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(Defaults.tlsPort)
     )
   }
 }

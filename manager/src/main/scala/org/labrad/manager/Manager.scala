@@ -21,7 +21,7 @@ import org.labrad.manager.auth._
 import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
-import org.labrad.util.cli.Command
+import org.labrad.util.cli.{Command, Environment}
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration._
@@ -480,17 +480,13 @@ object ManagerConfig {
    * Create ManagerConfig from command line and map of environment variables.
    *
    * @param args command line parameters
-   * @param env map of environment variables, which defaults to the actual
-   *        environment variables in scala.sys.env
-   * @return a Try containing a ManagerArgs instance (on success) or a Failure
-   *         in the case something went wrong. The Failure will contain an
-   *         ArgotUsageException if the command line parsing failed or the
-   *         -h or --help options were supplied.
+   * @param env environment variables; defaults to the actual environment from scala.sys.env
+   * @return a ManagerArgs instance
+   * @throws org.clapper.argot.ArgotUsageException if the command line parsing failed or if called
+   *         with the -h or --help options.
    */
-  def fromCommandLine(
-    args: Array[String],
-    env: Map[String, String] = scala.sys.env
-  ): ManagerConfig = {
+  def fromCommandLine(args: Array[String])
+                     (implicit env: Environment = Environment.sys): ManagerConfig = {
 
     val opts = (new Command("labrad", "The labrad manager.") with Options).parse(args)
 
