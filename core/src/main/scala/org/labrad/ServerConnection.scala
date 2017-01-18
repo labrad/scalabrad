@@ -2,6 +2,7 @@ package org.labrad
 
 import io.netty.channel.EventLoopGroup
 import java.io.File
+import java.net.InetSocketAddress
 import org.labrad.data._
 import org.labrad.util.Logging
 import scala.concurrent.{ExecutionContext, Future}
@@ -17,7 +18,9 @@ class ServerConnection(
   val tls: TlsMode = TlsMode.STARTTLS,
   val tlsCerts: Map[String, File] = Map(),
   handler: Packet => Future[Packet],
-  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val bossGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val listenAddress: Option[InetSocketAddress] = None
 )(
   implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection with Logging {

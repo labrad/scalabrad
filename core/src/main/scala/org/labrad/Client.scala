@@ -2,6 +2,7 @@ package org.labrad
 
 import io.netty.channel.EventLoopGroup
 import java.io.File
+import java.net.InetSocketAddress
 import org.labrad.data._
 import scala.concurrent.ExecutionContext
 
@@ -12,7 +13,9 @@ class Client(
   val credential: Credential = Client.defaults.credential,
   val tls: TlsMode = Client.defaults.tls,
   val tlsCerts: Map[String, File] = Map(),
-  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val bossGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val listenAddress: Option[InetSocketAddress] = None
 )(
   implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection {

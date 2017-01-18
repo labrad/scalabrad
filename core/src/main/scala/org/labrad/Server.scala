@@ -1,6 +1,7 @@
 package org.labrad
 
 import java.io.{File, PrintWriter, StringWriter}
+import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
 import org.clapper.argot._
@@ -287,12 +288,17 @@ object Server {
       host = config.host,
       port = port,
       credential = config.credential,
+      listenAddress = config.listenAddress,
       tls = config.tls,
       tlsCerts = Map(),
       handler = packet => server.handleRequest(packet)
     )
     try {
-      cxn.connect()
+      if (config.listenAddress.isDefined) {
+        cxn.listen()
+      } else {
+        cxn.connect()
+      }
 
       // if the vm goes down or we lose the connection, shutdown
       sys.ShutdownHookThread { server.stop() }
@@ -347,6 +353,7 @@ case class ServerConfig(
   host: String,
   port: Int,
   credential: Credential,
+  listenAddress: Option[InetSocketAddress] = None,
   nameOpt: Option[String] = None,
   tls: TlsMode = ServerConfig.Defaults.tls,
   tlsPort: Int = ServerConfig.Defaults.tlsPort,
@@ -421,6 +428,21 @@ object ServerConfig {
         "If not provided, fallback to the value given in the LABRADPASSWORD " +
         "environment variable, with default value '' (empty password)."
     )
+    val listen = parser.option[String](
+      names = List("listen"),
+      valueName = "bool",
+      description = "Whether to listen for incoming connections, instead of connecting to the manager."
+    )
+    val listenHost = parser.option[String](
+      names = List("listen-host"),
+      valueName = "string",
+      description = "Host to bind when listening for incoming connections from the manager."
+    )
+    val listenPort = parser.option[Int](
+      names = List("listen-port"),
+      valueName = "int",
+      description = "Port to bind when listening for incoming connections from the manager."
+    )
   }
 
   /**
@@ -456,6 +478,14 @@ object ServerConfig {
         username = opts.username.value.orElse(env.get("LABRADUSER")).getOrElse(""),
         password = opts.password.value.orElse(env.get("LABRADPASSWORD")).getOrElse("").toCharArray
       ),
+      listenAddress = if (opts.listen.value.map(Util.parseBooleanOpt).getOrElse(false)) {
+        Some(new InetSocketAddress(
+          opts.listenHost.value.getOrElse("127.0.0.1"),
+          opts.listenPort.value.get
+        ))
+      } else {
+        None
+      },
       nameOpt = opts.name.value,
       tls = opts.tls.value.orElse(env.get("LABRAD_TLS")).map(TlsMode.fromString).getOrElse(Defaults.tls),
       tlsPort = opts.tlsPort.value.orElse(env.get("LABRAD_TLS_PORT").map(_.toInt)).getOrElse(Defaults.tlsPort)

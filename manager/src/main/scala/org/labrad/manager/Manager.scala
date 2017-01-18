@@ -105,6 +105,19 @@ class CentralNode(
       authTimeout = authTimeout, registryTimeout = registryTimeout,
       bossGroup = bossGroup, workerGroup = workerGroup, loginGroup = loginGroup)
 
+  val serverConnector = new ServerConnector(
+    nodeName = "test", // TODO
+    registry = regStoreOpt.getOrElse(sys.error("cannot connect to external servers without direct registry access")),
+    auth = auth,
+    hub = hub,
+    tracker = tracker,
+    messager = messager,
+    tlsHostConfig = tlsConfig,
+    authTimeout = authTimeout,
+    registryTimeout = registryTimeout,
+    workerGroup = workerGroup
+  )(serversExecutionContext)
+
   def stop() {
     listener.stop()
     loginGroup.shutdownGracefully()

@@ -1,10 +1,10 @@
 package org.labrad
 
-import io.netty.bootstrap.Bootstrap
+import io.netty.bootstrap.{Bootstrap, ServerBootstrap}
 import io.netty.channel.{Channel, ChannelHandlerContext, ChannelOption, ChannelInitializer, EventLoopGroup, SimpleChannelInboundHandler}
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
-import io.netty.channel.socket.nio.NioSocketChannel
+import io.netty.channel.socket.nio.{NioServerSocketChannel, NioSocketChannel}
 import io.netty.handler.ssl.{SslContext, SslContextBuilder}
 import java.io.{File, IOException}
 import java.net.{InetAddress, InetSocketAddress}
@@ -22,7 +22,7 @@ import org.labrad.events.MessageListener
 import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 
 /**
@@ -75,9 +75,11 @@ trait Connection {
   val name: String
   val host: String
   val port: Int
+  val listenAddress: Option[InetSocketAddress]
   val tls: TlsMode
   val tlsCerts: Map[String, File]
   val workerGroup: EventLoopGroup
+  val bossGroup: EventLoopGroup
   implicit val executionContext: ExecutionContext
 
   def credential: Credential
@@ -115,7 +117,8 @@ trait Connection {
   protected val lookupProvider = new LookupProvider(this.send)
   protected val requestDispatcher = new RequestDispatcher(sendPacket)
 
-  private var channel: Channel = _
+  private var channel: SocketChannel = _
+  private var serverChannel: NioServerSocketChannel = _
 
   private def certsDirectory = sys.props("user.home") / ".labrad" / "client" / "certs"
   private def certFile(hostname: String): File = certsDirectory / s"${hostname}.cert"
@@ -169,8 +172,53 @@ trait Connection {
         }
      })
 
-    channel = b.connect(host, port).sync().channel
+    channel = b.connect(host, port).sync().channel.asInstanceOf[SocketChannel]
 
+    doConnect(channel, login, timeout)
+  }
+
+  def listen(login: Boolean = true, timeout: Duration = 10.seconds): Unit = {
+    val promise = Promise[Unit]
+
+    val b = new ServerBootstrap()
+    b.group(bossGroup, workerGroup)
+     .channel(classOf[NioServerSocketChannel])
+     .option[java.lang.Boolean](ChannelOption.TCP_NODELAY, true)
+     .option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
+     .childHandler(new ChannelInitializer[SocketChannel] {
+        override def initChannel(ch: SocketChannel): Unit = {
+          channel = ch
+
+          val p = ch.pipeline
+//          if (tls == TlsMode.ON) {
+//            p.addLast("sslContext", makeSslContext(host).newHandler(ch.alloc(), host, port))
+//          }
+          p.addLast("packetCodec", new PacketCodec(forceByteOrder = ByteOrder.BIG_ENDIAN))
+          p.addLast("packetHandler", new SimpleChannelInboundHandler[Packet] {
+            override def channelActive(ctx: ChannelHandlerContext): Unit = {
+              Future {
+                doConnect(ch, login, timeout)
+                promise.success(())
+              }
+            }
+            override protected def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
+              handlePacket(packet)
+            }
+            override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
+              closeNoWait(cause)
+            }
+            override def channelInactive(ctx: ChannelHandlerContext): Unit = {
+              closeNoWait(new Exception("channel closed"))
+            }
+          })
+        }
+     })
+
+    serverChannel = b.bind(listenAddress.get).sync().channel.asInstanceOf[NioServerSocketChannel]
+    Await.result(promise.future, Duration.Inf)
+  }
+
+  private def doConnect(channel: SocketChannel, login: Boolean, timeout: Duration): Unit = {
     connected = true
 
     try {
@@ -276,7 +324,7 @@ trait Connection {
         connected = false
         requestDispatcher.failAll(cause)
 
-        channel.close()
+        if (channel != null) channel.close()
         connectionListeners.map(_.lift)
       } else {
         Seq()
