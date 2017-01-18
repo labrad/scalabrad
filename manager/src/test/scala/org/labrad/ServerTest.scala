@@ -115,9 +115,15 @@ class TestCtx(
   @Setting(id = 5,
            name = "Get All",
            doc = "Gets all of the key-value pairs defined in this context.")
-  def getAll(): Seq[(String, Data)] = {
+  def getAll(): Data = {
     log.debug("Get All")
-    registry.toSeq.sortBy(_._1)
+    val b = DataBuilder()
+    b.clusterStart()
+    for ((key, value) <- registry.toSeq.sortBy(_._1)) {
+      b.clusterStart().string(key).add(value).clusterEnd()
+    }
+    b.clusterEnd()
+    b.result()
   }
 
   @Setting(id = 6,
