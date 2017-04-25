@@ -38,6 +38,79 @@ object Getter {
     def get(data: Data): Complex = data.getComplex
   }
 
+  implicit val boolArrayGetter: Getter[Array[Boolean]] = new Getter[Array[Boolean]] {
+    val t = TArr(TBool)
+    val elemWidth = t.elem.dataWidth
+
+    def get(data: Data): Array[Boolean] = {
+      require(data.t == t, s"invalid type: expected ${t}, got ${data.t}")
+      val bytes = data.arrayBytes
+      val n = data.arraySize
+      val result = Array.ofDim[Boolean](n)
+      var i = 0
+      while (i < n) {
+        result(i) = bytes.getBool(elemWidth * i)
+        i += 1
+      }
+      result
+    }
+  }
+
+  implicit val intArrayGetter: Getter[Array[Int]] = new Getter[Array[Int]] {
+    val t = TArr(TInt)
+    val elemWidth = t.elem.dataWidth
+
+    def get(data: Data): Array[Int] = {
+      require(data.t == t, s"invalid type: expected ${t}, got ${data.t}")
+      val bytes = data.arrayBytes
+      val n = data.arraySize
+      val result = Array.ofDim[Int](n)
+      var i = 0
+      while (i < n) {
+        result(i) = bytes.getInt(elemWidth * i)
+        i += 1
+      }
+      result
+    }
+  }
+
+  implicit val uintArrayGetter: Getter[Array[Long]] = new Getter[Array[Long]] {
+    val t = TArr(TUInt)
+    val elemWidth = t.elem.dataWidth
+
+    def get(data: Data): Array[Long] = {
+      require(data.t == t, s"invalid type: expected ${t}, got ${data.t}")
+      val bytes = data.arrayBytes
+      val n = data.arraySize
+      val result = Array.ofDim[Long](n)
+      var i = 0
+      while (i < n) {
+        result(i) = bytes.getUInt(elemWidth * i)
+        i += 1
+      }
+      result
+    }
+  }
+
+  implicit val doubleArrayGetter: Getter[Array[Double]] = new Getter[Array[Double]] {
+    val t = TArr(TValue())
+    val elemWidth = t.elem.dataWidth
+
+    def get(data: Data): Array[Double] = {
+      require(data.t == t, s"invalid type: expected ${t}, got ${data.t}")
+      val bytes = data.arrayBytes
+      val n = data.arraySize
+      assert(bytes.length == elemWidth * n)
+      val result = Array.ofDim[Double](n)
+      var i = 0
+      while (i < n) {
+        result(i) = bytes.getDouble(elemWidth * i)
+        i += 1
+      }
+      result
+    }
+  }
+
   implicit def arrayGetter[T](implicit elemGetter: Getter[T], elemTag: ClassTag[T]): Getter[Array[T]] = new Getter[Array[T]] {
     def get(data: Data): Array[T] = {
       data.flatIterator.map(elemGetter.get).toArray
