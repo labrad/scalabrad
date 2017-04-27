@@ -229,7 +229,7 @@ object Manager extends Logging {
     }
 
     val authStoreOpt = if (config.authServer) {
-      Some(AuthStore(file = config.authUsersFile))
+      Some(AuthStore(file = config.authUsersFile, globalPassword = config.password))
     } else {
       None
     }
