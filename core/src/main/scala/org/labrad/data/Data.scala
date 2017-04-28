@@ -179,6 +179,7 @@ trait Data {
   // structures
   def arraySize: Int
   def arrayShape: Array[Int]
+  def arrayBytes: EndianAwareByteSlice
 
   def setArrayShape(shape: Array[Int]): Unit
   def setArrayShape(shape: Int*): Unit = setArrayShape(shape.toArray)
@@ -522,6 +523,17 @@ extends Data with Serializable with Cloneable {
     case _ => sys.error("arrayShape is only defined for arrays")
   }
 
+  def arrayBytes: EndianAwareByteSlice = {
+    t match {
+      case TArr(elem, depth) =>
+        require(elem.fixedWidth, s"arrayBytes only allowed for fixed-width elem types: $elem")
+        val size = arrayShape.product
+        EndianAwareByteSlice(buf, ofs + 4 * depth, elem.dataWidth * size)
+      case _ =>
+        sys.error("arrayBytes is only defined for arrays")
+    }
+  }
+
   def setArrayShape(shape: Array[Int]): Unit = t match {
     case TArr(elem, depth) =>
       require(shape.length == depth)
@@ -823,6 +835,18 @@ extends Data with Serializable with Cloneable {
   def arrayShape = t match {
     case TArr(_, depth) => Array.tabulate(depth) { i => buf.getInt(ofs + 4*i) }
     case _ => sys.error("arrayShape is only defined for arrays")
+  }
+
+  def arrayBytes: EndianAwareByteSlice = {
+    t match {
+      case TArr(elem, depth) =>
+        require(elem.fixedWidth, s"arrayBytes only allowed for fixed-width elem types: $elem")
+        val size = arrayShape.product
+        val arrBuf = heap(buf.getInt(ofs + 4 * depth))
+        EndianAwareByteSlice(arrBuf, 0, elem.dataWidth * size)
+      case _ =>
+        sys.error("arrayBytes is only defined for arrays")
+    }
   }
 
   def setArrayShape(shape: Array[Int]): Unit = t match {
@@ -1190,7 +1214,7 @@ object Cluster {
 }
 
 object Arr {
-  private def make[T: Setter](a: Array[T], elemType: Type) = {
+  private def make[T: Setter](a: Array[T], elemType: Type): Data = {
     val data = Data(TArr(elemType, 1))
     val m = a.length
     data.setArrayShape(m)
@@ -1208,12 +1232,72 @@ object Arr {
   def apply(elems: Seq[Data]): Data = apply(elems.toArray)
   def apply(elem: Data, elems: Data*): Data = apply(elem +: elems)
 
-  def apply(a: Array[Boolean]): Data = make[Boolean](a, TBool)
-  def apply(a: Array[Int]): Data = make[Int](a, TInt)
-  def apply(a: Array[Long]): Data = make[Long](a, TUInt)
+  def apply(a: Array[Boolean]): Data = {
+    val elem = TBool
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setBool(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Int]): Data = {
+    val elem = TInt
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setInt(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Long]): Data = {
+    val elem = TUInt
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setUInt(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
   def apply(a: Array[String]): Data = make[String](a, TStr)
-  def apply(a: Array[Double]): Data = make[Double](a, TValue())
-  def apply(a: Array[Double], units: String) = make[Double](a, TValue(units))
+  def apply(a: Array[Double]): Data = {
+    val elem = TValue()
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setDouble(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Double], units: String) = {
+    val elem = TValue(units)
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setDouble(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
 
   def unapplySeq(data: Data): Option[Seq[Data]] =
     if (data.isArray) Some(data.get[Array[Data]])
