@@ -6,13 +6,14 @@ import org.scalatest.fixture.FunSuite
 
 class AuthStoreTest extends FunSuite {
 
-  case class Fixture(store: AuthStore)
+  case class Fixture(store: AuthStore, globalPassword: String)
   type FixtureParam = Fixture
 
   def withFixture(test: OneArgTest) = {
     Files.withTempFile { file =>
-      val authStore = AuthStore(file)
-      withFixture(test.toNoArgTest(Fixture(authStore)))
+      val globalPassword = "VerySecurePassword"
+      val authStore = AuthStore(file, globalPassword.toCharArray)
+      withFixture(test.toNoArgTest(Fixture(authStore, globalPassword)))
     }
   }
 
@@ -68,6 +69,10 @@ class AuthStoreTest extends FunSuite {
     intercept[Exception] {
       fix.store.checkUserPassword("user", "abc")
     }
+  }
+
+  test("checkUserPassword works for global user and password") { fix =>
+    assert(fix.store.checkUserPassword("", fix.globalPassword))
   }
 
   test("removeUser") { fix =>
