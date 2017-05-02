@@ -18,6 +18,27 @@ object EndianAwareByteArray {
     def setLong(ofs: Int, data: Long)(implicit bo: ByteOrder) = ByteManip.setLong(buf, ofs, data)
     def setDouble(ofs: Int, data: Double)(implicit bo: ByteOrder) = ByteManip.setDouble(buf, ofs, data)
   }
+
+  /**
+   * Provides a view onto an existing byte array with a certain offset.
+   *
+   * This allows us to get and set multi-byte values into the underlying array with the specified
+   * endianness.
+   */
+  case class EndianAwareByteSlice(buf: Array[Byte], ofs: Int, length: Int)
+                                 (implicit byteOrder: ByteOrder) {
+    def getBool(ofs: Int): Boolean = ByteManip.getBool(buf, ofs + this.ofs)
+    def getInt(ofs: Int): Int = ByteManip.getInt(buf, ofs + this.ofs)
+    def getUInt(ofs: Int): Long = ByteManip.getUInt(buf, ofs + this.ofs)
+    def getLong(ofs: Int): Long = ByteManip.getLong(buf, ofs + this.ofs)
+    def getDouble(ofs: Int): Double = ByteManip.getDouble(buf, ofs + this.ofs)
+
+    def setBool(ofs: Int, data: Boolean) = ByteManip.setBool(buf, ofs + this.ofs, data)
+    def setInt(ofs: Int, data: Int) = ByteManip.setInt(buf, ofs + this.ofs, data)
+    def setUInt(ofs: Int, data: Long) = ByteManip.setUInt(buf, ofs + this.ofs, data)
+    def setLong(ofs: Int, data: Long) = ByteManip.setLong(buf, ofs + this.ofs, data)
+    def setDouble(ofs: Int, data: Double) = ByteManip.setDouble(buf, ofs + this.ofs, data)
+  }
 }
 
 /** Functions for converting basic data types to/from arrays of bytes */
