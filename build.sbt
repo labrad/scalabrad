@@ -2,8 +2,7 @@ lazy val commonSettings = Seq(
   organization := "org.labrad",
 
   version := {
-    val f = file("core/src/main/resources/org/labrad/version.txt")
-    scala.io.Source.fromFile(f).mkString
+    IO.read(file("core/src/main/resources/org/labrad/version.txt")).trim()
   },
 
   scalaVersion := "2.11.7",
