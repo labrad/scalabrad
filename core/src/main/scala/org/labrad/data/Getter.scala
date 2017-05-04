@@ -94,10 +94,11 @@ object Getter {
 
   implicit val doubleArrayGetter: Getter[Array[Double]] = new Getter[Array[Double]] {
     val t = TArr(TValue())
+    val tEmpty = TArr(TValue(""))  // empty units are currently treated as a distinct type
     val elemWidth = t.elem.dataWidth
 
     def get(data: Data): Array[Double] = {
-      require(data.t == t, s"invalid type: expected ${t}, got ${data.t}")
+      require(data.t == t || data.t == tEmpty, s"invalid type: expected ${t}, got ${data.t}")
       val bytes = data.arrayBytes
       val n = data.arraySize
       assert(bytes.length == elemWidth * n)
