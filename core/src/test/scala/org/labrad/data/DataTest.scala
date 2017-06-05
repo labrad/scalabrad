@@ -206,4 +206,21 @@ class DataTest extends FunSuite {
     assert(Data.parse(""" 'no "escape".' """).get[String] == """no "escape".""")
     assert(Data.parse(""" "no 'escape'." """).get[String] == """no 'escape'.""")
   }
+
+  test("clusters of items can be parsed from map syntax") {
+    val data = Data.parse(""" {"a": +1, "b": 3.0} """)
+    val items = data.get[((String, Int), (String, Double))]
+    assert(items == (("a", 1), ("b", 3.0)))
+  }
+
+  test("map syntax requires that all key types are the same") {
+    intercept[Exception] {
+      Data.parse(""" {"a": +1, 1: 3.0} """)
+    }
+  }
+
+  test("clusters of items are use map syntax when converted to string") {
+    val data = Data.parse(""" {"a": +1, "b": 3.0} """)
+    assert(data.toString == """{"a": +1, "b": 3.0}""")
+  }
 }

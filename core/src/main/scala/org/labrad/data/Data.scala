@@ -137,8 +137,22 @@ trait Data {
       buildString(0)
       sb.toString
 
-    case TCluster(_*) =>
-      "(" + clusterIterator.mkString(", ") + ")"
+    case TCluster(elems @ _*) =>
+      def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
+      val keyTypes = elems.map {
+        case TCluster(keyType, valueType) if isKeyType(keyType) => Some(keyType)
+        case _ => None
+      }
+      if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
+        // show this as a map
+        val items = clusterIterator.map {
+          case Cluster(key, value) => s"$key: $value"
+        }
+        "{" + items.mkString(", ") + "}"
+      } else {
+        // show as a regular cluster
+        "(" + clusterIterator.mkString(", ") + ")"
+      }
 
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
@@ -1473,7 +1487,7 @@ object Parsers {
   val data: Parser[Data] = P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
+    P( none | bool | complex | value | time | int | uint | bytes | string | cluster | map)
 
   val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
@@ -1565,6 +1579,13 @@ object Parsers {
      )
 
   val cluster: Parser[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
+  val map: Parser[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
+    val keyTypes = items.map { case (key, value) => key.t }.toSet
+    require(keyTypes.size <= 1, s"all map keys must have the same type: ${keyTypes.mkString(",")}")
+    Cluster(items.map { case (key, value) => Cluster(key, value) }: _*)
+  }
+
+  val mapItem: Parser[(Data, Data)] = P( data ~ ":" ~ data )
 }
 
 object Translate {
