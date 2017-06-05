@@ -532,6 +532,18 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
                |over the wire for long-term storage.""")
   def dataToString(data: Data): String = data.toString
 
+  @Setting(id = 202,
+           name = "Data To Pretty String",
+           doc = """Convert data into a pretty-printed human-readable string representation.
+               |
+               |String representation can be parsed and converted back to data by calling the
+               |"String To Data" setting.
+               |
+               |The string representation is subject to change and should not be used for long-term
+               |storage of labrad data. Instead, it is recommended to use the binary format as sent
+               |over the wire for long-term storage.""")
+  def dataToPrettyString(width: Int, data: Data): String = data.toPrettyString(width)
+
   @Setting(id = 201,
            name = "String To Data",
            doc = """Parse a string from human-readable representation into labrad data.
