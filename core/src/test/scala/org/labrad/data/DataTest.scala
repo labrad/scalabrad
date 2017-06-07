@@ -146,45 +146,67 @@ class DataTest extends FunSuite {
     assert(d3 == d4)
   }
 
-  test("data can be parsed from string representation") {
-    val strs = Seq(
-        "_",
-        "true", "false",
-        "+1", "-1", "+0", "-0", "+2147483647", "-2147483648",
-        "1", "0", "4294967295",
-        "1.0",
-        "-1.0",
-        "0.0",
-        "2.0",
-        "1e5",
-        "1E5",
-        "1e-1",
-        "1E-1",
-        "1.0E8",
-        "1.0 m",
-        "1.0 m/s",
-        "1.0 kg*m/s^2",
-        """ "abcdefgh" """,
-        """ "\"\n\t' \r\f\"" """,
-        " \"\\u0000\\u0001\\u0002\\u00FF\\u00ff\" ",
-        """ b"\x00\x01\x02\xFF\xff" """,
-        "2012-01-02T03:04:05.678Z",
-        "()",
-        "(_)",
-        "(_,_)",
-        "(((())))",
-        "(1, 2.0, 3.0 m)",
-        "[]",
-        "[[]]",
-        "[[[]]]",
-        "[1, 2, 3]"
-    )
+  val dataStrs = Seq(
+      "_",
+      "true", "false",
+      "+1", "-1", "+0", "-0", "+2147483647", "-2147483648",
+      "1", "0", "4294967295",
+      "1.0",
+      "-1.0",
+      "0.0",
+      "2.0",
+      "1e5",
+      "1E5",
+      "1e-1",
+      "1E-1",
+      "1.0E8",
+      "1.0 m",
+      "1.0 m/s",
+      "1.0 kg*m/s^2",
+      """ "abcdefgh" """,
+      """ "\"\n\t' \r\f\"" """,
+      " \"\\u0000\\u0001\\u0002\\u00FF\\u00ff\" ",
+      """ b"\x00\x01\x02\xFF\xff" """,
+      "2012-01-02T03:04:05.678Z",
+      "()",
+      "(_)",
+      "(_,_)",
+      "(((())))",
+      "(1, 2.0, 3.0 m)",
+      "[]",
+      "[[]]",
+      "[[[]]]",
+      "[1, 2, 3]",
+      """[
+           [
+             [1, 2, 3, 4],
+             [5, 6, 7, 8],
+             [9, 10, 11, 12],
+             [13, 14, 15, 16],
+             [17, 18, 19, 20],
+             [21, 22, 23, 24],
+             [25, 26, 27, 28],
+             [29, 30, 31, 32]
+           ]
+         ]"""
+  )
 
-    strs foreach { s =>
+  test("data can be parsed from string representation") {
+    for (s <- dataStrs) {
       val d = Data.parse(s)
       val d2 = Data.parse(d.toString)
       assert(d == d2)
-      //assert(d ~== d2)
+    }
+  }
+
+  test("pretty-printed data can be parsed") {
+    for {
+      s <- dataStrs
+      width <- Seq(20, 30, 40, 50, 60, 70, 80)
+    } {
+      val d = Data.parse(s)
+      val d2 = Data.parse(d.toPrettyString(width))
+      assert(d == d2)
     }
   }
 
@@ -205,5 +227,22 @@ class DataTest extends FunSuite {
     assert(Data.parse(""" "this is a test" """).get[String] == """this is a test""")
     assert(Data.parse(""" 'no "escape".' """).get[String] == """no "escape".""")
     assert(Data.parse(""" "no 'escape'." """).get[String] == """no 'escape'.""")
+  }
+
+  test("clusters of items can be parsed from map syntax") {
+    val data = Data.parse(""" {"a": +1, "b": 3.0} """)
+    val items = data.get[((String, Int), (String, Double))]
+    assert(items == (("a", 1), ("b", 3.0)))
+  }
+
+  test("map syntax requires that all key types are the same") {
+    intercept[Exception] {
+      Data.parse(""" {"a": +1, 1: 3.0} """)
+    }
+  }
+
+  test("clusters of items use map syntax when converted to string") {
+    val data = Data.parse(""" {"a": +1, "b": 3.0} """)
+    assert(data.toString == """{"a": +1, "b": 3.0}""")
   }
 }

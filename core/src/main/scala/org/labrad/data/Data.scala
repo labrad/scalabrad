@@ -137,11 +137,82 @@ trait Data {
       buildString(0)
       sb.toString
 
-    case TCluster(_*) =>
-      "(" + clusterIterator.mkString(", ") + ")"
+    case TCluster(elems @ _*) =>
+      def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
+      val keyTypes = elems.map {
+        case TCluster(keyType, valueType) if isKeyType(keyType) => Some(keyType)
+        case _ => None
+      }
+      if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
+        // show as a map
+        val items = clusterIterator.map {
+          case Cluster(key, value) => s"$key: $value"
+        }
+        "{" + items.mkString(", ") + "}"
+      } else {
+        // show as a regular cluster
+        "(" + clusterIterator.mkString(", ") + ")"
+      }
 
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
+  }
+
+  def toPrettyString(width: Int = 80): String = toDoc.pretty(width)
+
+  def toDoc: Pretty.Doc = {
+    import Pretty._
+    t match {
+      case TNone => text(this.toString)
+      case TBool => text(this.toString)
+      case TInt => text(this.toString)
+      case TUInt => text(this.toString)
+      case TValue(u) => text(this.toString)
+      case TComplex(u) => text(this.toString)
+      case TTime => text(this.toString)
+      case TStr => text(this.toString)
+      case TBytes => text(this.toString)
+      case TArr(elem, depth) =>
+        val shape = arrayShape
+        def buildDoc(idx: Array[Int]): Doc = {
+          val k = idx.length
+          val items = if (k == shape.length - 1) {
+            // array elements converted to docs
+            Stream.tabulate(shape(k)) { i => this((idx :+ i): _*).toDoc }
+          } else {
+            // subarrays converted to docs
+            Stream.tabulate(shape(k)) { i => buildDoc((idx :+ i)) }
+          }
+          bracketAll("[", items, "]")
+        }
+        buildDoc(Array())
+
+      case TCluster(elems @ _*) =>
+        def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
+        val keyTypes = elems.map {
+          case TCluster(keyType, valueType) if isKeyType(keyType) => Some(keyType)
+          case _ => None
+        }
+        if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
+          // show as a map
+          val items = clusterIterator.toStream.map {
+            case Cluster(key, value) => text(key.toString) <> text(": ") <> value.toDoc
+          }
+          bracketAll("{", items, "}")
+        } else {
+          // show as a regular cluster
+          val elems = clusterIterator.toStream.map { _.toDoc }
+          bracketAll("(", elems, ")")
+        }
+
+      case TError(_) =>
+        val items = Stream(
+          text(getErrorCode.toString),
+          text(getErrorMessage.toString),
+          getErrorPayload.toDoc
+        )
+        bracketAll("Error(", items, ")")
+    }
   }
 
   def convertTo(pattern: String): Data
@@ -1473,7 +1544,7 @@ object Parsers {
   val data: Parser[Data] = P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
+    P( none | bool | complex | value | time | int | uint | bytes | string | cluster | map)
 
   val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
@@ -1565,6 +1636,14 @@ object Parsers {
      )
 
   val cluster: Parser[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
+
+  val map: Parser[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
+    val keyTypes = items.map { case (key, value) => key.t }.toSet
+    require(keyTypes.size <= 1, s"all map keys must have the same type: ${keyTypes.mkString(",")}")
+    Cluster(items.map { case (key, value) => Cluster(key, value) }: _*)
+  }
+
+  val mapItem: Parser[(Data, Data)] = P( data ~ ":" ~ data )
 }
 
 object Translate {
