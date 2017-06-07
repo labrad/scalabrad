@@ -241,7 +241,7 @@ class DataTest extends FunSuite {
     }
   }
 
-  test("clusters of items are use map syntax when converted to string") {
+  test("clusters of items use map syntax when converted to string") {
     val data = Data.parse(""" {"a": +1, "b": 3.0} """)
     assert(data.toString == """{"a": +1, "b": 3.0}""")
   }

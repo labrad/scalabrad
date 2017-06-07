@@ -536,6 +536,11 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
            name = "Data To Pretty String",
            doc = """Convert data into a pretty-printed human-readable string representation.
                |
+               |Takes an integer "width" and arbitrary data, and attempts to pretty-print the data
+               |to be no more that "width" columns wide. The pretty-printed is not _guaranteed_ to
+               |fit within the specified width since some things like string literals may be longer,
+               |but the pretty-printer will try to make things fit.
+               |
                |String representation can be parsed and converted back to data by calling the
                |"String To Data" setting.
                |

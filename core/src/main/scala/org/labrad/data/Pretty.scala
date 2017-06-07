@@ -71,10 +71,13 @@ object Pretty {
     case class Line(i: Int, doc: SimpleDoc) extends SimpleDoc
   }
 
+  // Find the best SimpleDoc representation of a Doc.
+  // The implementation uses Stream which is like List except that the tail is lazily-evaluated
+  // (like Haskell lists). Note that #:: is the Stream concatenation operator (like :: for List).
   private def best(w: Int, k: Int, x: Doc): SimpleDoc = be(w, k, Stream((0, x)))
 
   private def be(w: Int, k: Int, xs: Stream[(Int, Doc)]): SimpleDoc = xs match {
-    case Stream.Empty          => SimpleDoc.Empty
+    case Stream.Empty                => SimpleDoc.Empty
     case (i, Doc.Empty)        #:: z => be(w, k, z)
     case (i, Doc.Line)         #:: z => SimpleDoc.Line(i, be(w, i, z))
     case (i, Doc.Text(s))      #:: z => SimpleDoc.Text(s, be(w, k + s.length, z))

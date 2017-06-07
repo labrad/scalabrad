@@ -144,7 +144,7 @@ trait Data {
         case _ => None
       }
       if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
-        // show this as a map
+        // show as a map
         val items = clusterIterator.map {
           case Cluster(key, value) => s"$key: $value"
         }
