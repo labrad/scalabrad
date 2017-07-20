@@ -17,6 +17,7 @@ trait RegistryStore {
   type Dir
 
   def root: Dir
+  def isRoot(dir: Dir): Boolean = pathTo(dir) == Seq("")
   def pathTo(dir: Dir): Seq[String]
   def parent(dir: Dir): Dir
   def dir(curDir: Dir): (Seq[String], Seq[String])
@@ -146,7 +147,7 @@ extends LocalServer with Logging {
       store.dir(curDir)
     }
 
-    private def dirForPath(dirs: Seq[String], create: Boolean): store.Dir = {
+    private def dirForPath(dirs: Seq[String], create: Boolean = false): store.Dir = {
       var newDir = curDir
       for ((dir, i) <- dirs.zipWithIndex) dir match {
         case ""   => if (i == 0) newDir = store.root
@@ -302,6 +303,72 @@ extends LocalServer with Logging {
           curDir = other.curDir
           // XXX: Any other state to copy here?
       }
+    }
+
+    private def doCopyKey(src: store.Dir, key: String, dest: store.Dir, newKey: String): Unit = {
+      val value = store.getValue(src, key, default = None)
+      store.setValue(dest, newKey, value)
+    }
+
+    private def doCopyDir(src: store.Dir, dest: store.Dir): Unit = {
+      val (dirs, keys) = store.dir(src)
+      for (dir <- dirs) {
+        doCopyDir(store.child(src, dir, create = false), store.child(dest, dir, create = true))
+      }
+      for (key <- keys) {
+        doCopyKey(src, key, dest, key)
+      }
+    }
+
+    private def doRemoveDir(parent: store.Dir, name: String): Unit = {
+      val dir = store.child(parent, name, create = false)
+      val (dirs, keys) = store.dir(dir)
+      for (subdir <- dirs) {
+        doRemoveDir(dir, subdir)
+      }
+      for (key <- keys) {
+        store.delete(dir, key)
+      }
+      store.rmDir(parent, name)
+    }
+
+    def copyKey(path: Seq[String], key: String, newPath: Seq[String], newKey: String): Unit = {
+      doCopyKey(dirForPath(path), key, dirForPath(newPath), newKey)
+    }
+
+    def copyDir(path: Seq[String], dir: String, newPath: Seq[String], newDir: String): Unit = {
+      val (srcDir, destDir) = (dirForPath(path), dirForPath(newPath))
+      doCopyDir(
+        store.child(srcDir, dir, create = false),
+        store.child(destDir, newDir, create = true)
+      )
+    }
+
+    def renameKey(path: Seq[String], key: String, newKey: String): Unit = {
+      moveKey(path, key, path, newKey)
+    }
+
+    def renameDir(path: Seq[String], dir: String, newDir: String): Unit = {
+      moveDir(path, dir, path, newDir)
+    }
+
+    def moveKey(path: Seq[String], key: String, newPath: Seq[String], newKey: String): Unit = {
+      val (srcDir, destDir) = (dirForPath(path), dirForPath(newPath))
+      doCopyKey(srcDir, key, destDir, newKey)
+      store.delete(srcDir, key)
+    }
+
+    def moveDir(path: Seq[String], dir: String, newPath: Seq[String], newDir: String): Unit = {
+      val (srcDir, destDir) = (dirForPath(path), dirForPath(newPath))
+      require(!isAncestor(srcDir, destDir), "Cannot move a directory into itself")
+      copyDir(path, dir, newPath, newDir)
+      doRemoveDir(srcDir, dir)
+    }
+
+    def isAncestor(src: store.Dir, dest: store.Dir): Boolean = {
+      val srcPath = store.pathTo(src)
+      val destPath = store.pathTo(dest)
+      destPath.take(srcPath.length) == srcPath
     }
 
     @Setting(id = 1000,
