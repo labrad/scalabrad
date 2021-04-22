@@ -79,6 +79,9 @@ trait ManagerServer extends Requester {
   def dataToString(data: Data): Future[String] =
     call[String]("Data To String", data)
 
+  def dataToPrettyString(width: Int, data: Data): Future[String] =
+    call[String]("Data To Pretty String", Integer(width), data)
+
   def stringToData(s: String): Future[Data] =
     call("String To Data", Str(s))
 

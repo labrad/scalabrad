@@ -32,7 +32,7 @@ trait AuthStore {
 }
 
 object AuthStore {
-  def apply(file: File): AuthStore = {
+  def apply(file: File, globalPassword: Array[Char]): AuthStore = {
     Class.forName("org.sqlite.JDBC")
     val url = s"jdbc:sqlite:${file.getAbsolutePath}"
     implicit val conn = DriverManager.getConnection(url)
@@ -53,12 +53,15 @@ object AuthStore {
       CREATE INDEX IF NOT EXISTS idx_list_users ON users(name)
     """.execute()
 
-    new AuthStoreImpl(conn)
+    val globalPasswordHash = BCrypt.hashpw(new String(globalPassword), BCrypt.gensalt())
+
+    new AuthStoreImpl(conn, globalPasswordHash)
   }
 }
 
 class AuthStoreImpl(
-  cxn: Connection
+  cxn: Connection,
+  globalPasswordHash: String
 ) extends AuthStore with Logging {
 
   private implicit val connection = cxn
@@ -135,10 +138,14 @@ class AuthStoreImpl(
   }
 
   def checkUserPassword(username: String, password: String): Boolean = synchronized {
-    val hashed = SQL"""
-      SELECT password_hash FROM users WHERE name = $username AND password_hash IS NOT NULL
-    """.as(get[String]("password_hash").singleOpt)
-       .getOrElse { sys.error(s"username $username does not exist or has no password") }
+    val hashed = if (username.isEmpty) {
+      globalPasswordHash
+    } else {
+      SQL"""
+        SELECT password_hash FROM users WHERE name = $username AND password_hash IS NOT NULL
+      """.as(get[String]("password_hash").singleOpt)
+         .getOrElse { sys.error(s"username $username does not exist or has no password") }
+    }
 
     BCrypt.checkpw(password, hashed)
   }

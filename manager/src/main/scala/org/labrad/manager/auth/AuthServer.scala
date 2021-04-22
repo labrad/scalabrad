@@ -121,7 +121,12 @@ class AuthServer(
       case "username+password" =>
         val (username, password) = credentials.get[(String, String)]
         if (!auth.checkUserPassword(username, password)) {
-          sys.error("invalid username or password")
+          val message = if (username.isEmpty) {
+            "invalid password"
+          } else {
+            "invalid username or password"
+          }
+          sys.error(message)
         }
         username
 

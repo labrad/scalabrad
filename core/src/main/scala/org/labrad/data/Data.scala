@@ -137,11 +137,82 @@ trait Data {
       buildString(0)
       sb.toString
 
-    case TCluster(_*) =>
-      "(" + clusterIterator.mkString(", ") + ")"
+    case TCluster(elems @ _*) =>
+      def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
+      val keyTypes = elems.map {
+        case TCluster(keyType, valueType) if isKeyType(keyType) => Some(keyType)
+        case _ => None
+      }
+      if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
+        // show as a map
+        val items = clusterIterator.map {
+          case Cluster(key, value) => s"$key: $value"
+        }
+        "{" + items.mkString(", ") + "}"
+      } else {
+        // show as a regular cluster
+        "(" + clusterIterator.mkString(", ") + ")"
+      }
 
     case TError(_) =>
       s"Error($getErrorCode, $getErrorMessage, $getErrorPayload)"
+  }
+
+  def toPrettyString(width: Int = 80): String = toDoc.pretty(width)
+
+  def toDoc: Pretty.Doc = {
+    import Pretty._
+    t match {
+      case TNone => text(this.toString)
+      case TBool => text(this.toString)
+      case TInt => text(this.toString)
+      case TUInt => text(this.toString)
+      case TValue(u) => text(this.toString)
+      case TComplex(u) => text(this.toString)
+      case TTime => text(this.toString)
+      case TStr => text(this.toString)
+      case TBytes => text(this.toString)
+      case TArr(elem, depth) =>
+        val shape = arrayShape
+        def buildDoc(idx: Array[Int]): Doc = {
+          val k = idx.length
+          val items = if (k == shape.length - 1) {
+            // array elements converted to docs
+            Stream.tabulate(shape(k)) { i => this((idx :+ i): _*).toDoc }
+          } else {
+            // subarrays converted to docs
+            Stream.tabulate(shape(k)) { i => buildDoc((idx :+ i)) }
+          }
+          bracketAll("[", items, "]")
+        }
+        buildDoc(Array())
+
+      case TCluster(elems @ _*) =>
+        def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
+        val keyTypes = elems.map {
+          case TCluster(keyType, valueType) if isKeyType(keyType) => Some(keyType)
+          case _ => None
+        }
+        if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
+          // show as a map
+          val items = clusterIterator.toStream.map {
+            case Cluster(key, value) => text(key.toString) <> text(": ") <> value.toDoc
+          }
+          bracketAll("{", items, "}")
+        } else {
+          // show as a regular cluster
+          val elems = clusterIterator.toStream.map { _.toDoc }
+          bracketAll("(", elems, ")")
+        }
+
+      case TError(_) =>
+        val items = Stream(
+          text(getErrorCode.toString),
+          text(getErrorMessage.toString),
+          getErrorPayload.toDoc
+        )
+        bracketAll("Error(", items, ")")
+    }
   }
 
   def convertTo(pattern: String): Data
@@ -179,6 +250,7 @@ trait Data {
   // structures
   def arraySize: Int
   def arrayShape: Array[Int]
+  def arrayBytes: EndianAwareByteSlice
 
   def setArrayShape(shape: Array[Int]): Unit
   def setArrayShape(shape: Int*): Unit = setArrayShape(shape.toArray)
@@ -522,6 +594,17 @@ extends Data with Serializable with Cloneable {
     case _ => sys.error("arrayShape is only defined for arrays")
   }
 
+  def arrayBytes: EndianAwareByteSlice = {
+    t match {
+      case TArr(elem, depth) =>
+        require(elem.fixedWidth, s"arrayBytes only allowed for fixed-width elem types: $elem")
+        val size = arrayShape.product
+        EndianAwareByteSlice(buf, ofs + 4 * depth, elem.dataWidth * size)
+      case _ =>
+        sys.error("arrayBytes is only defined for arrays")
+    }
+  }
+
   def setArrayShape(shape: Array[Int]): Unit = t match {
     case TArr(elem, depth) =>
       require(shape.length == depth)
@@ -823,6 +906,18 @@ extends Data with Serializable with Cloneable {
   def arrayShape = t match {
     case TArr(_, depth) => Array.tabulate(depth) { i => buf.getInt(ofs + 4*i) }
     case _ => sys.error("arrayShape is only defined for arrays")
+  }
+
+  def arrayBytes: EndianAwareByteSlice = {
+    t match {
+      case TArr(elem, depth) =>
+        require(elem.fixedWidth, s"arrayBytes only allowed for fixed-width elem types: $elem")
+        val size = arrayShape.product
+        val arrBuf = heap(buf.getInt(ofs + 4 * depth))
+        EndianAwareByteSlice(arrBuf, 0, elem.dataWidth * size)
+      case _ =>
+        sys.error("arrayBytes is only defined for arrays")
+    }
   }
 
   def setArrayShape(shape: Array[Int]): Unit = t match {
@@ -1190,7 +1285,7 @@ object Cluster {
 }
 
 object Arr {
-  private def make[T: Setter](a: Array[T], elemType: Type) = {
+  private def make[T: Setter](a: Array[T], elemType: Type): Data = {
     val data = Data(TArr(elemType, 1))
     val m = a.length
     data.setArrayShape(m)
@@ -1208,12 +1303,72 @@ object Arr {
   def apply(elems: Seq[Data]): Data = apply(elems.toArray)
   def apply(elem: Data, elems: Data*): Data = apply(elem +: elems)
 
-  def apply(a: Array[Boolean]): Data = make[Boolean](a, TBool)
-  def apply(a: Array[Int]): Data = make[Int](a, TInt)
-  def apply(a: Array[Long]): Data = make[Long](a, TUInt)
+  def apply(a: Array[Boolean]): Data = {
+    val elem = TBool
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setBool(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Int]): Data = {
+    val elem = TInt
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setInt(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Long]): Data = {
+    val elem = TUInt
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setUInt(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
   def apply(a: Array[String]): Data = make[String](a, TStr)
-  def apply(a: Array[Double]): Data = make[Double](a, TValue())
-  def apply(a: Array[Double], units: String) = make[Double](a, TValue(units))
+  def apply(a: Array[Double]): Data = {
+    val elem = TValue()
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setDouble(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
+  def apply(a: Array[Double], units: String) = {
+    val elem = TValue(units)
+    val data = Data(TArr(elem, 1))
+    val m = a.length
+    data.setArrayShape(m)
+    val bytes = data.arrayBytes
+    var i = 0
+    while (i < m) {
+      bytes.setDouble(elem.dataWidth * i, a(i))
+      i += 1
+    }
+    data
+  }
 
   def unapplySeq(data: Data): Option[Seq[Data]] =
     if (data.isArray) Some(data.get[Array[Data]])
@@ -1389,7 +1544,7 @@ object Parsers {
   val data: Parser[Data] = P( nonArrayData | array )
 
   val nonArrayData: Parser[Data] =
-    P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
+    P( none | bool | complex | value | time | int | uint | bytes | string | cluster | map)
 
   val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
 
@@ -1481,6 +1636,14 @@ object Parsers {
      )
 
   val cluster: Parser[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
+
+  val map: Parser[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
+    val keyTypes = items.map { case (key, value) => key.t }.toSet
+    require(keyTypes.size <= 1, s"all map keys must have the same type: ${keyTypes.mkString(",")}")
+    Cluster(items.map { case (key, value) => Cluster(key, value) }: _*)
+  }
+
+  val mapItem: Parser[(Data, Data)] = P( data ~ ":" ~ data )
 }
 
 object Translate {
