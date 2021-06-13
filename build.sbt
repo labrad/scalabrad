@@ -13,9 +13,6 @@ lazy val commonSettings = Seq(
     "-feature"
   ),
 
-  EclipseKeys.withSource := true,
-  EclipseKeys.eclipseOutput := Some("target/eclipseOutput"),
-
   licenses += ("GPL-2.0", url("http://www.gnu.org/licenses/gpl-2.0.html")),
 
   // dependencies
@@ -39,8 +36,8 @@ lazy val commonSettings = Seq(
 
   // When running, connect std in and tell manager to stop on EOF (ctrl+D).
   // This allows us to stop the manager without using ctrl+C, which kills sbt.
-  fork in run := true,
-  connectInput in run := true,
+  run / fork := true,
+  run / connectInput := true,
   javaOptions += "-Dorg.labrad.stopOnEOF=true",
 
   // testing
@@ -48,13 +45,9 @@ lazy val commonSettings = Seq(
     "org.scalatest" %% "scalatest" % "2.2.6" % "test"
   ),
 
-  fork in Test := true,
-  parallelExecution in Test := false,
-  javaOptions in Test += "-Xmx1g",
-
-  // use bintray to publish library jars
-  bintrayOrganization := Some("labrad"),
-  bintrayReleaseOnPublish in ThisBuild := false
+  Test / fork := true,
+  Test / parallelExecution := false,
+  Test / javaOptions += "-Xmx1g",
 )
 
 lazy val all = project.in(file("."))
@@ -68,11 +61,11 @@ lazy val core = project.in(file("core"))
 
 lazy val manager = project.in(file("manager"))
   .dependsOn(core)
+  .enablePlugins(PackPlugin)
   .settings(commonSettings)
   .settings(
     name := "scalabrad-manager",
 
-    packSettings,
     packMain := Map(
       "labrad" -> "org.labrad.manager.Manager",
       "labrad-migrate-registry" -> "org.labrad.registry.Migrate",
