@@ -1,5 +1,6 @@
 target/
 project/boot/
+/.bsp
 /.classpath
 /.project
 /scalabrad.tmproj
