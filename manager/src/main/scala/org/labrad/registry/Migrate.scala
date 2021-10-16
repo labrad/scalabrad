@@ -202,7 +202,7 @@ object Migrate {
   }
 
   /**
-   * SQLite registry format on disk (source or sink).
+   * Registry on local disk (source or sink).
    */
   class LocalRegistry(store: RegistryStore) extends Registry {
     private def find(path: Seq[String], create: Boolean = false): store.Dir = {
@@ -219,7 +219,7 @@ object Migrate {
 
       val values = Map.newBuilder[String, Data]
       for (key <- keys) {
-        val data = store.getValue(loc, key, default = None)
+        val (data, textOpt) = store.getValue(loc, key, default = None)
         values += key -> data
       }
       (dirs, values.result)
@@ -228,7 +228,7 @@ object Migrate {
     def set(path: Seq[String], keys: Map[String, Data]): Unit = {
       val loc = find(path, create = true)
       for ((key, value) <- keys) {
-        store.setValue(loc, key, value)
+        store.setValue(loc, key, value, None)
       }
     }
   }

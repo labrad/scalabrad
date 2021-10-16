@@ -29,13 +29,23 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
     }
   }
 
+  def testBinaryBackends(testName: String)(func: RegistryStore => Unit): Unit = {
+    test(s"BinaryFileStore: $testName") {
+      Files.withTempDir { dir => func(new BinaryFileStore(dir)) }
+    }
+
+    test(s"SQLiteStore: $testName") {
+      Files.withTempFile { file => func(SQLiteStore(file)) }
+    }
+  }
+
   testAllBackends("registry can store and retrieve arbitrary data") { (backend, exact) =>
     val loc = backend.child(backend.root, "test", create = true)
     for (i <- 0 until 100) {
       val tpe = Hydrant.randomType
       val data = Hydrant.randomData(tpe)
-      backend.setValue(loc, "a", data)
-      val resp = backend.getValue(loc, "a", default = None)
+      backend.setValue(loc, "a", data, None)
+      val (resp, _) = backend.getValue(loc, "a", default = None)
       backend.delete(loc, "a")
 
       // Inexact matching function used for semi-lossy registry backends (e.g. delphi).
@@ -81,10 +91,10 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
   testAllBackends("registry can deal with unicode and strange characters in key names") { (backend, exact) =>
     val key = "<\u03C0|\u03C1>??+*\\/:|"
     val data = Str("Hello!")
-    backend.setValue(backend.root, key, data)
+    backend.setValue(backend.root, key, data, None)
     val (_, keys) = backend.dir(backend.root)
     assert(keys contains key)
-    val result = backend.getValue(backend.root, key, default = None)
+    val (result, _) = backend.getValue(backend.root, key, default = None)
     assert(result == data)
   }
 
@@ -296,5 +306,33 @@ class RegistryTest extends FunSuite with Matchers with AsyncAssertions {
         }
       }
     }
+  }
+
+  testBinaryBackends("text form of stored data is preserved") { backend =>
+    val text = """
+      [("a", 1),
+       ("b", 2),
+       ("c", 3)]
+    """
+    val data = Data.parse(text)
+    backend.setValue(backend.root, "foo", data, Some(text))
+    val (resultData, resultTextOpt) = backend.getValue(backend.root, "foo", None)
+    assert(resultTextOpt == Some(text))
+    assert(resultData == data)
+  }
+
+  testBinaryBackends("text form is cleared if set without it") { backend =>
+    val text = """
+      [("a", 1),
+       ("b", 2),
+       ("c", 3)]
+    """
+    val data = Data.parse(text)
+    backend.setValue(backend.root, "foo", data, Some(text))
+    backend.setValue(backend.root, "foo", data, None)
+    val (resultData, resultTextOpt) = backend.getValue(backend.root, "foo", None)
+    assert(resultTextOpt == None)
+    assert(resultData == data)
+
   }
 }

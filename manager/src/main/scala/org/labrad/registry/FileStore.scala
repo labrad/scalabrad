@@ -33,8 +33,8 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
   /**
    * Encode and decode data for storage in individual key files.
    */
-  def encodeData(data: Data): Array[Byte]
-  def decodeData(bytes: Array[Byte]): Data
+  def encodeData(data: Data, textOpt: Option[String]): Array[Byte]
+  def decodeData(bytes: Array[Byte]): (Data, Option[String])
 
   /**
    * Convert the given directory into a registry path.
@@ -82,7 +82,7 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     if (!ok) sys.error(s"failed to remove directory: $name")
   }
 
-  def getValue(dir: File, key: String, default: Option[(Boolean, Data)]): Data = {
+  def getValue(dir: File, key: String, default: Option[(Boolean, Data)]): (Data, Option[String]) = {
     val path = keyFile(dir, key)
     if (path.exists) {
       val bytes = readFile(path)
@@ -91,15 +91,15 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
       default match {
         case None => sys.error(s"key does not exist: $key")
         case Some((set, default)) =>
-          if (set) setValue(dir, key, default)
-          default
+          if (set) setValue(dir, key, default, None)
+          (default, None)
       }
     }
   }
 
-  def setValueImpl(dir: File, key: String, value: Data): Unit = {
+  def setValueImpl(dir: File, key: String, value: Data, textOpt: Option[String]): Unit = {
     val path = keyFile(dir, key)
-    val bytes = encodeData(value)
+    val bytes = encodeData(value, textOpt)
     writeFile(path, bytes)
   }
 
@@ -166,12 +166,26 @@ class BinaryFileStore(rootDir: File) extends FileStore(rootDir) {
   /**
    * Encode and decode data for storage in individual key files.
    */
-  override def encodeData(data: Data): Array[Byte] = {
-    Cluster(Str(data.t.toString), Bytes(data.toBytes)).toBytes
+  override def encodeData(data: Data, textOpt: Option[String]): Array[Byte] = {
+    val b = DataBuilder()
+    b.clusterStart()
+    b.string(data.t.toString)
+    b.bytes(data.toBytes)
+    for (text <- textOpt) {
+      b.string(text)
+    }
+    b.clusterEnd()
+    b.result.toBytes
   }
 
-  override def decodeData(bytes: Array[Byte]): Data = {
-    val (typ, data) = Data.fromBytes(Type("sy"), bytes).get[(String, Array[Byte])]
-    Data.fromBytes(Type(typ), data)
+  override def decodeData(bytes: Array[Byte]): (Data, Option[String]) = {
+    try {
+      val (typ, data, text) = Data.fromBytes(Type("sys"), bytes).get[(String, Array[Byte], String)]
+      (Data.fromBytes(Type(typ), data), Some(text))
+    } catch {
+      case _: Exception =>
+        val (typ, data) = Data.fromBytes(Type("sy"), bytes).get[(String, Array[Byte])]
+        (Data.fromBytes(Type(typ), data), None)
+    }
   }
 }

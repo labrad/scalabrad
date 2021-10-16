@@ -36,13 +36,13 @@ trait RegistryStore {
   }
   def rmDirImpl(dir: Dir, name: String): Unit
 
-  def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): Data
+  def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): (Data, Option[String])
 
-  def setValue(dir: Dir, key: String, value: Data): Unit = {
-    setValueImpl(dir, key, value)
+  def setValue(dir: Dir, key: String, value: Data, textOpt: Option[String]): Unit = {
+    setValueImpl(dir, key, value, textOpt)
     notifyListener(dir, key, isDir=false, addOrChange=true)
   }
-  def setValueImpl(dir: Dir, key: String, value: Data): Unit
+  def setValueImpl(dir: Dir, key: String, value: Data, textOpt: Option[String]): Unit
 
   def delete(dir: Dir, key: String): Unit = {
     deleteImpl(dir, key)
@@ -235,9 +235,31 @@ extends LocalServer with Logging {
     def getValue(key: String, pat: String, set: Boolean, default: Data): Data = _getValue(key, pat, Some((set, default)))
 
     def _getValue(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Data = {
-      val data = store.getValue(curDir, key, default)
+      val (data, textOpt) = store.getValue(curDir, key, default)
       val pattern = Pattern(pat)
       data.convertTo(pattern)
+    }
+
+    @Setting(id=21,
+             name="get as string",
+             doc="""Get the content of the given key in the current directory as a string.""")
+    def getAsString(key: String): (Data, String) = _getAsString(key)
+    def getAsString(key: String, pat: String): (Data, String) = _getAsString(key, pat)
+    def getAsString(key: String, set: Boolean, default: Data): (Data, String) = _getAsString(key, default = Some((set, default)))
+    def getAsString(key: String, pat: String, set: Boolean, default: Data): (Data, String) = _getAsString(key, pat, Some((set, default)))
+
+    def _getAsString(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): (Data, String) = {
+      val (data, textOpt) = store.getValue(curDir, key, default)
+      val pattern = Pattern(pat)
+      val converted = data.convertTo(pattern)
+      val text = textOpt match {
+        case None =>
+          converted.toString
+
+        case Some(text) =>
+          if (converted == data) text else converted.toString
+      }
+      (converted, text)
     }
 
     @Setting(id = 30,
@@ -245,7 +267,16 @@ extends LocalServer with Logging {
              doc = """Set the given key in the current directory to the given value.""")
     def setValue(key: String, value: Data): Unit = {
       require(key.nonEmpty, "Cannot create a key with empty name")
-      store.setValue(curDir, key, value)
+      store.setValue(curDir, key, value, None)
+    }
+
+    @Setting(id=31,
+             name="set as string",
+             doc="""Set the content of the given key in the current directory to the given data in text form.""")
+    def setAsString(key: String, text: String): Unit = {
+      require(key.nonEmpty, "Cannot create a key with empty name")
+      val value = Data.parse(text)
+      store.setValue(curDir, key, value, Some(text))
     }
 
     @Setting(id = 40,

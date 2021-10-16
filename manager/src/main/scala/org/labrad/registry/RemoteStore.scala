@@ -1,6 +1,7 @@
 package org.labrad.registry
 
-import org.labrad.{Client, Credential, RegistryServerPacket, RegistryServerProxy, TlsMode}
+import org.labrad.{Client, Credential, ManagerServerProxy, RegistryServerPacket,
+    RegistryServerProxy, TlsMode}
 import org.labrad.data.{Data, Message}
 import org.labrad.types.Type
 import scala.concurrent.{Await, Future}
@@ -26,7 +27,9 @@ extends RegistryStore {
   val root = Seq("")
 
   private val lock = new Object
+  private var cxn: Client = null
   private var reg: RegistryServerProxy = null
+  private var hasGetAsString: Boolean = false
 
   /**
    * Connect to remote registry if we are not currently connected,
@@ -56,7 +59,11 @@ extends RegistryStore {
         cxn.connect()
         val registry = new RegistryServerProxy(cxn)
         Await.result(registry.streamChanges(id, true), 5.seconds)
-        reg = registry
+        val manager = new ManagerServerProxy(cxn)
+        val registrySettings = Await.result(manager.settings(Registry.NAME), 5.seconds)
+        this.cxn = cxn
+        this.reg = registry
+        this.hasGetAsString = registrySettings.map(_._2).toSet.contains("get as string")
       }
     }
   }
@@ -99,12 +106,32 @@ extends RegistryStore {
     call(dir) { _.rmDir(name) }
   }
 
-  def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): Data = {
-    call(dir) { _.get(key, default = default) }
+  def getValue(dir: Dir, key: String, default: Option[(Boolean, Data)]): (Data, Option[String]) = {
+    call(dir) { p =>
+      // We need an execution context to map over futures; use our client's execution context.
+      implicit val executionContext = cxn.executionContext
+      if (hasGetAsString) {
+        p.getAsString(key, default = default).map { case (data, text) => (data, Some(text)) }
+      } else {
+        p.get(key, default = default).map { case data => (data, None) }
+      }
+    }
   }
 
-  def setValueImpl(dir: Dir, key: String, value: Data): Unit = {
-    call(dir) { _.set(key, value) }
+  def setValueImpl(dir: Dir, key: String, value: Data, textOpt: Option[String]): Unit = {
+    textOpt match {
+      case Some(text) =>
+        call(dir) { p =>
+          if (hasGetAsString) {
+            p.setAsString(key, text)
+          } else {
+            p.set(key, value)
+          }
+        }
+
+      case None =>
+        call(dir) { _.set(key, value) }
+    }
   }
 
   def deleteImpl(dir: Dir, key: String): Unit = {
@@ -125,8 +152,8 @@ extends RegistryStore {
     rmDirImpl(dir, name)
   }
 
-  override def setValue(dir: Dir, key: String, value: Data): Unit = {
-    setValueImpl(dir, key, value)
+  override def setValue(dir: Dir, key: String, value: Data, textOpt: Option[String]): Unit = {
+    setValueImpl(dir, key, value, textOpt)
   }
 
   override def delete(dir: Dir, key: String): Unit = {
