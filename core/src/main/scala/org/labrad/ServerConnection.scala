@@ -17,7 +17,8 @@ class ServerConnection(
   val tls: TlsMode = TlsMode.STARTTLS,
   val tlsCerts: Map[String, File] = Map(),
   handler: Packet => Future[Packet],
-  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val requireSrp: Boolean = false
 )(
   implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection with Logging {

@@ -8,7 +8,9 @@ import java.net.{InetAddress, InetSocketAddress}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.util.concurrent.TimeoutException
+import org.bouncycastle.crypto.agreement.srp.SRP6Server
 import org.labrad.ContextCodec
+import org.labrad.crypto.BigInts
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.auth._
@@ -114,8 +116,12 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
   // or we have upgraded with STARTTLS to a secure connection.
   private var isSecure: Boolean = tlsPolicy == TlsPolicy.ON
 
+  // challenge for old-style password auth
   private val challenge = Array.ofDim[Byte](256)
   Random.nextBytes(challenge)
+
+  // state for secure remote password (SRP) auth
+  private var srpServer: SRP6Server = _
 
   private var username: String = ""
 
@@ -158,8 +164,15 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
       d.setBytes(challenge)
       d
 
+    case Packet(req, 1, _, Seq(Record(10, Str("")))) =>
+      val (groupName, salt, srpServer) = auth.srpInit()
+      this.srpServer = srpServer
+      val b = srpServer.generateServerCredentials()
+      handle = handleChallengeResponseSrp
+      Cluster(Str(groupName), Bytes(salt), Bytes(BigInts.toUnsignedByteArray(b)))
+
     case Packet(req, 1, _, Seq(Record(2, Str("PING")))) =>
-      ("PONG", Seq("auth-server")).toData // include manager features in ping response
+      ("PONG", Seq("auth-server", "srp")).toData // include manager features in ping response
 
     case Packet(req, 1, _, Seq(Record(Authenticator.METHODS_SETTING_ID, data))) =>
       val resp = doAuthRequest(Authenticator.METHODS_SETTING_ID, data)
@@ -200,14 +213,34 @@ extends SimpleChannelInboundHandler[Packet] with Logging {
     resp
   }
 
-  private def handleChallengeResponse(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {
-    case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
-      if (!auth.authenticate(challenge, response)) throw LabradException(2, "Incorrect password")
-      handle = handleIdentification
-      Str("LabRAD 2.0")
+  private def handleChallengeResponse(ctx: ChannelHandlerContext, packet: Packet): Data = {
+    packet match {
+      case Packet(req, 1, _, Seq(Record(0, Bytes(response)))) if req > 0 =>
+        if (!auth.authenticate(challenge, response)) throw LabradException(2, "Incorrect password")
+        handle = handleIdentification
+        Str("LabRAD 2.0")
 
-    case _ =>
-      throw LabradException(1, "Invalid authentication packet")
+      case _ =>
+        throw LabradException(1, "Invalid authentication packet")
+    }
+  }
+
+  private def handleChallengeResponseSrp(ctx: ChannelHandlerContext, packet: Packet): Data = {
+    packet match {
+      case Packet(req, 1, _, Seq(Record(11, Cluster(Bytes(aBytes), Bytes(m1Bytes))))) if req > 0 =>
+        val a = BigInts.fromUnsignedByteArray(aBytes)
+        val m1 = BigInts.fromUnsignedByteArray(m1Bytes)
+        srpServer.calculateSecret(a.bigInteger)
+        if (!srpServer.verifyClientEvidenceMessage(m1.bigInteger)) {
+          throw LabradException(2, "Incorrect password")
+        }
+        val m2 = srpServer.calculateServerEvidenceMessage()
+        handle = handleIdentification
+        Cluster(Str("LabRAD 2.0"), Bytes(BigInts.toUnsignedByteArray(m2)))
+
+      case _ =>
+        throw LabradException(1, "Invalid authentication packet")
+    }
   }
 
   private def handleIdentification(ctx: ChannelHandlerContext, packet: Packet): Data = packet match {

@@ -12,7 +12,8 @@ class Client(
   val credential: Credential = Client.defaults.credential,
   val tls: TlsMode = Client.defaults.tls,
   val tlsCerts: Map[String, File] = Map(),
-  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup
+  val workerGroup: EventLoopGroup = Connection.defaultWorkerGroup,
+  val requireSrp: Boolean = false
 )(
   implicit val executionContext: ExecutionContext = ExecutionContext.global
 ) extends Connection {
