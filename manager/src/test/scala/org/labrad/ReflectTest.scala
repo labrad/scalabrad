@@ -308,7 +308,7 @@ class ReflectTest extends FunSuite with Logging {
   def same(pa: Pattern, pb: Pattern): Boolean = (pa accepts pb) && (pb accepts pa)
 
   def testSettings[A <: Testable : ClassTag : ru.TypeTag] {
-    val inst = implicitly[ClassTag[A]].runtimeClass.newInstance.asInstanceOf[A]
+    val inst = implicitly[ClassTag[A]].runtimeClass.getConstructors().head.newInstance().asInstanceOf[A]
     test(inst.name) {
       val settings = inst.settings
       val (found, _) = try {
