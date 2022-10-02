@@ -18,8 +18,8 @@ lazy val commonSettings = Seq(
   // dependencies
   libraryDependencies ++= Seq(
     "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-    "com.lihaoyi" %% "fastparse" % "0.3.5",
     "org.clapper" %% "argot" % "1.0.4",
+    "com.lihaoyi" %% "fastparse" % "0.4.4",
     "io.netty" % "netty-all" % "4.1.82.Final",
     "joda-time" % "joda-time" % "2.1",
     "org.joda" % "joda-convert" % "1.2",

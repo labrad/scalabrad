@@ -5,21 +5,24 @@ import fastparse.core
 import fastparse.parsers.Intrinsics
 
 object Parsing {
+
+  implicit val stringReprOps = fastparse.StringReprOps
+
   /**
    * A fastparse parser defined by a regular expression.
    */
-  case class Re(pattern: String) extends core.Parser[Unit] {
+  case class Re(pattern: String) extends core.Parser[Unit, Char, String] {
     val regex = pattern.r
 
-    def parseRec(cfg: core.ParseCtx, index: Int): core.Mutable[Unit] = {
+    def parseRec(cfg: core.ParseCtx[Char, String], index: Int): core.Mutable[Unit, Char, String] = {
       val input = cfg.input
-      val rest = input.subSequence(index, input.length)
+      val rest = input.slice(index, input.length)
       regex.findPrefixMatchOf(rest) match {
         case None =>
           fail(cfg.failure, index)
 
         case Some(result) =>
-          success(cfg.success, (), index + result.end, Nil, false)
+          success(cfg.success, (), index + result.end, Set.empty, false)
       }
     }
   }
@@ -27,16 +30,18 @@ object Parsing {
   /**
    * Parse a string with the given parser and return the value or raise an exception.
    */
-  def parseOrThrow[A](p: core.Parser[A], s: String): A =
+  def parseOrThrow[A](p: core.Parser[A, Char, String], s: String): A =
     p.parse(s) match {
       case core.Parsed.Success(d, _) => d
-      case failure: core.Parsed.Failure => sys.error(failure.msg)
+      case failure: core.Parsed.Failure[_, _] => sys.error(failure.msg)
     }
 
   /**
    * Parser for the given token literal.
    */
-  def Token(token: String): core.Parser[Unit] = Intrinsics.StringIn(token)
+  def Token(token: String, ignoreCase: Boolean = false): core.Parser[Unit, Char, String] = {
+    if (ignoreCase) Intrinsics.StringInIgnoreCase(token) else Intrinsics.StringIn(token)
+  }
 
   /**
    * Parser for whitespace that uses the java regex character class.
