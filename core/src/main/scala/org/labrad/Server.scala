@@ -16,6 +16,7 @@ import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
+import scala.util.Failure
 
 trait ServerContext {
   def init(): Unit
@@ -173,8 +174,9 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   def expire(context: Context): Unit = {
     val stateOpt = contexts.synchronized { contexts.remove(context) }
     for (state <- stateOpt) {
-      state.expire().onFailure { case e =>
-        log.error(s"error expiring $context", e)
+      state.expire().onComplete {
+        case Failure(e) => log.error(s"error expiring $context", e)
+        case _ =>
       }
     }
   }
