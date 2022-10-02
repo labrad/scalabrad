@@ -1,12 +1,11 @@
-lazy val commonSettings = Seq(
-  organization := "org.labrad",
+ThisBuild / organization := "org.labrad"
+ThisBuild / scalaVersion := "2.11.7"
+ThisBuild / javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
 
+lazy val commonSettings = Seq(
   version := {
     IO.read(file("core/src/main/resources/org/labrad/version.txt")).trim()
   },
-
-  scalaVersion := "2.11.7",
-  javacOptions ++= Seq("-source", "1.7", "-target", "1.7"),
 
   scalacOptions ++= Seq(
     "-deprecation",
@@ -18,7 +17,6 @@ lazy val commonSettings = Seq(
   // dependencies
   libraryDependencies ++= Seq(
     "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-    "org.clapper" %% "argot" % "1.0.4",
     "com.lihaoyi" %% "fastparse" % "0.4.4",
     "io.netty" % "netty-all" % "4.1.82.Final",
     "joda-time" % "joda-time" % "2.1",
@@ -51,9 +49,18 @@ lazy val commonSettings = Seq(
 )
 
 lazy val all = project.in(file("."))
-  .aggregate(core, manager)
+  .aggregate(argot, core, manager)
+
+lazy val argot = project.in(file("argot"))
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.clapper" %% "grizzled-scala" % "4.10.0",
+      "org.scalatest" %% "scalatest" % "3.0.8" % "test"
+    )
+  )
 
 lazy val core = project.in(file("core"))
+  .dependsOn(argot)
   .settings(commonSettings)
   .settings(
     name := "scalabrad-core"
