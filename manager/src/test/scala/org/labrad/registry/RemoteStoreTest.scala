@@ -8,11 +8,11 @@ import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util.Await
 import org.scalatest.{FunSuite, Matchers, Tag}
-import org.scalatest.concurrent.AsyncAssertions
+import org.scalatest.concurrent.Waiters
 import org.scalatest.time.SpanSugar._
 import scala.collection._
 
-class RemoteStoreTest extends FunSuite with Matchers with AsyncAssertions {
+class RemoteStoreTest extends FunSuite with Matchers with Waiters {
 
   import ManagerUtils._
 

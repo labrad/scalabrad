@@ -42,7 +42,7 @@ lazy val commonSettings = Seq(
 
   // testing
   libraryDependencies ++= Seq(
-    "org.scalatest" %% "scalatest" % "2.2.6" % "test"
+    "org.scalatest" %% "scalatest" % "3.0.8" % "test"
   ),
 
   Test / fork := true,
