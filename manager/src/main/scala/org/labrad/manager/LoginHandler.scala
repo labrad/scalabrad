@@ -2,7 +2,7 @@ package org.labrad.manager
 
 import io.netty.channel._
 import io.netty.handler.ssl.{SslContext, SslHandler}
-import io.netty.util.{DomainNameMapping, DomainNameMappingBuilder}
+import io.netty.util.{DomainWildcardMappingBuilder, Mapping}
 import java.io.{ByteArrayOutputStream, File, FileInputStream}
 import java.net.{InetAddress, InetSocketAddress}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -28,17 +28,17 @@ import scala.util.Random
  * can pick the correct cert.
  */
 case class TlsHostConfig(
-  certs: DomainNameMapping[String],
-  certFiles: DomainNameMapping[File],
-  sslCtxs: DomainNameMapping[SslContext]
+  certs: Mapping[String, String],
+  certFiles: Mapping[String, File],
+  sslCtxs: Mapping[String, SslContext]
 )
 
 object TlsHostConfig {
   def apply(default: (File, SslContext), hosts: (String, (File, SslContext))*): TlsHostConfig = {
     val (defaultCertFile, defaultSslCtx) = default
-    val certMapping = new DomainNameMappingBuilder[String](readFile(defaultCertFile))
-    val certFileMapping = new DomainNameMappingBuilder[File](defaultCertFile)
-    val ctxMapping = new DomainNameMappingBuilder[SslContext](defaultSslCtx)
+    val certMapping = new DomainWildcardMappingBuilder[String](readFile(defaultCertFile))
+    val certFileMapping = new DomainWildcardMappingBuilder[File](defaultCertFile)
+    val ctxMapping = new DomainWildcardMappingBuilder[SslContext](defaultSslCtx)
 
     for ((host, (certFile, sslCtx)) <- hosts) {
       certMapping.add(host, readFile(certFile))

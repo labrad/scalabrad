@@ -20,7 +20,7 @@ lazy val commonSettings = Seq(
     "org.scala-lang" % "scala-reflect" % scalaVersion.value,
     "com.lihaoyi" %% "fastparse" % "0.3.5",
     "org.clapper" %% "argot" % "1.0.4",
-    "io.netty" % "netty-all" % "4.1.1.Final",
+    "io.netty" % "netty-all" % "4.1.82.Final",
     "joda-time" % "joda-time" % "2.1",
     "org.joda" % "joda-convert" % "1.2",
     "org.slf4j" % "slf4j-api" % "1.7.2",

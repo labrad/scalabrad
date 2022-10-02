@@ -32,7 +32,7 @@ object SelfSignedCert {
     val keypair = keyGen.generateKeyPair()
 
     val Array(cert, key) = BouncyCastleSelfSignedCertGenerator.generate(
-        fqdn, keypair, random, notBefore, notAfter)
+        fqdn, keypair, random, notBefore, notAfter, "RSA")
 
     SelfSignedCert(new File(cert), new File(key))
   }
