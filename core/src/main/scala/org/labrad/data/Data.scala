@@ -1533,80 +1533,80 @@ object Error {
 
 object Parsers {
 
-  import fastparse.noApi._
+  import fastparse._
+  import fastparse.MultiLineWhitespace._
   import org.labrad.util.Parsing._
-  import org.labrad.util.Parsing.AllowWhitespace._
 
-  def parseData(s: String): Data = parseOrThrow(dataAll, s)
+  def parseData(s: String): Data = parseOrThrow(dataAll(_), s)
 
-  val dataAll: Parser[Data] = P( Whitespace ~ data ~ Whitespace ~ End )
+  def dataAll[_: P]: P[Data] = P( Whitespace ~ data ~ Whitespace ~ End )
 
-  val data: Parser[Data] = P( nonArrayData | array )
+  def data[_: P]: P[Data] = P( nonArrayData | array )
 
-  val nonArrayData: Parser[Data] =
+  def nonArrayData[_: P]: P[Data] =
     P( none | bool | complex | value | time | int | uint | bytes | string | cluster | map)
 
-  val none: Parser[Data] = P( "_" ).map { _ => Data.NONE }
+  def none[_: P]: P[Data] = P( "_" ).map { _ => Data.NONE }
 
-  val bool: Parser[Data] =
+  def bool[_: P]: P[Data] =
     P( Token("true").map { _ => Bool(true) }
      | Token("false").map { _ => Bool(false) }
      )
 
-  val int: Parser[Data] =
+  def int[_: P]: P[Data] =
     P( Re("""[+-]\d+""").! ).map { s => Integer(s.substring(if (s.startsWith("+")) 1 else 0).toInt) } // i8, i16, i64
 
-  val uint: Parser[Data] =
+  def uint[_: P]: P[Data] =
     P( Re("""\d+""").! ).map { s => UInt(s.toLong) } // w8, w16, w64
 
-  val bytes: Parser[Data] =
+  def bytes[_: P]: P[Data] =
     P( Re("b\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '"')) }
      | Re("b'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\x[a-fA-F0-9]{2})*""" + "'").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '\'')) }
      )
 
-  val string: Parser[Data] =
+  def string[_: P]: P[Data] =
     P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\u[a-fA-F0-9]{4})*""" + "\"").!.map { s => Str(Translate.parseStringLiteral(s, quote = '"')) }
      | Re("'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\u[a-fA-F0-9]{4})*""" + "'").!.map { s => Str(Translate.parseStringLiteral(s, quote = '\'')) }
      )
 
-  val time: Parser[Data] =
+  def time[_: P]: P[Data] =
     P( Re("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""").! ).map { s => Time(new DateTime(s).toDate) }
 
-  val value: Parser[Data] =
+  def value[_: P]: P[Data] =
     P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit) }
 
-  val complex: Parser[Data] =
+  def complex[_: P]: P[Data] =
     P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit) }
 
-  val signedReal: Parser[Double] =
+  def signedReal[_: P]: P[Double] =
     P( "+" ~ unsignedReal.map { x => x }
      | "-" ~ unsignedReal.map { x => -x }
      | unsignedReal
      )
 
-  val unsignedReal: Parser[Double] =
+  def unsignedReal[_: P]: P[Double] =
     P( Token("NaN").map { _ => Double.NaN }
      | Token("Infinity").map { _ => Double.PositiveInfinity }
      | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
      | Re("""\d*\.\d+""").!.map { _.toDouble }
      )
 
-  val complexNum: Parser[(Double, Double)] =
+  def complexNum[_: P]: P[(Double, Double)] =
     P( signedReal ~ ("+" | "-").! ~ unsignedReal ~ "i" ).map {
          case (re, "+", im) => (re, im)
          case (re, "-", im) => (re, -im)
        }
 
-  val units = P( firstTerm ~ (divTerm | mulTerm).rep )
-  val firstTerm = P( "1".? ~ divTerm | term )
-  val mulTerm = P( "*" ~ term )
-  val divTerm = P( "/" ~ term )
-  val term = P( termName ~ exponent.? )
-  val termName = Re("""[A-Za-z'"][A-Za-z'"0-9]*""")
-  val exponent = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
-  val number = Re("""\d+""")
+  def units[_: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
+  def firstTerm[_: P] = P( "1".? ~ divTerm | term )
+  def mulTerm[_: P] = P( "*" ~ term )
+  def divTerm[_: P] = P( "/" ~ term )
+  def term[_: P] = P( termName ~ exponent.? )
+  def termName[_: P] = Re("""[A-Za-z'"][A-Za-z'"0-9]*""")
+  def exponent[_: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  def number[_: P] = Re("""\d+""")
 
-  val array: Parser[Data] = P( arrND ).map { case (elems, typ, shape) =>
+  def array[_: P]: P[Data] = P( arrND ).map { case (elems, typ, shape) =>
     val data = TreeData(TArr(typ, shape.size))
     data.setArrayShape(shape: _*)
     for ((data, elem) <- data.flatIterator zip elems.iterator) {
@@ -1615,7 +1615,7 @@ object Parsers {
     data
   }
 
-  val arrND: Parser[(Array[Data], Type, List[Int])] =
+  def arrND[_: P]: P[(Array[Data], Type, List[Int])] =
     P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
          val typ = if (elems.isEmpty) {
            TNone
@@ -1635,15 +1635,15 @@ object Parsers {
        }
      )
 
-  val cluster: Parser[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
+  def cluster[_: P]: P[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
 
-  val map: Parser[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
+  def map[_: P]: P[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
     val keyTypes = items.map { case (key, value) => key.t }.toSet
     require(keyTypes.size <= 1, s"all map keys must have the same type: ${keyTypes.mkString(",")}")
     Cluster(items.map { case (key, value) => Cluster(key, value) }: _*)
   }
 
-  val mapItem: Parser[(Data, Data)] = P( data ~ ":" ~ data )
+  def mapItem[_: P]: P[(Data, Data)] = P( data ~ ":" ~ data )
 }
 
 object Translate {

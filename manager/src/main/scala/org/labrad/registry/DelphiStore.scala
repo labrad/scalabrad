@@ -68,88 +68,88 @@ class DelphiFileStore(rootDir: File) extends FileStore(rootDir) {
  */
 object DelphiParsers {
 
-  import fastparse.noApi._
+  import fastparse._
+  import fastparse.MultiLineWhitespace._
   import org.labrad.util.Parsing._
-  import org.labrad.util.Parsing.AllowWhitespace._
 
-  def parseData(s: String): Data = parseOrThrow(dataAll, s)
+  def parseData(s: String): Data = parseOrThrow(dataAll(_), s)
 
-  val dataAll: Parser[Data] =
+  def dataAll[_: P]: P[Data] =
     P( Whitespace ~ data ~ Whitespace ~ End )
 
-  val data: Parser[Data] =
+  def data[_: P]: P[Data] =
     P( nonArrayData | array )
 
-  val nonArrayData: Parser[Data] =
+  def nonArrayData[_: P]: P[Data] =
     P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
 
-  val none: Parser[Data] =
+  def none[_: P]: P[Data] =
     P( "_" ).map { _ => Data.NONE }
 
-  val bool: Parser[Data] =
+  def bool[_: P]: P[Data] =
     P( Re("[Tt]rue").map { _ => Bool(true) }
      | Re("[Ff]alse").map { _ => Bool(false) }
      )
 
-  val int: Parser[Data] =
+  def int[_: P]: P[Data] =
     P( "+" ~ unsignedInt.map { x => Integer(x.toInt) }
      | "-" ~ unsignedInt.map { x => Integer(-x.toInt) }
      )
 
-  val uint: Parser[Data] =
+  def uint[_: P]: P[Data] =
     P( unsignedInt.map { num => UInt(num) } )
 
-  val unsignedInt: Parser[Long] =
+  def unsignedInt[_: P]: P[Long] =
     P( number.!.map(_.toLong) )
 
-  val bytes: Parser[Data] =
+  def bytes[_: P]: P[Data] =
     P( "b" ~ bytesLiteral ).map { bytes => Bytes(bytes) }
 
-  val string: Parser[Data] =
+  def string[_: P]: P[Data] =
     P( bytesLiteral ).map { bytes => Str(new String(bytes, UTF_8)) }
 
-  val bytesLiteral: Parser[Array[Byte]] =
+  def bytesLiteral[_: P]: P[Array[Byte]] =
     P( Re("""('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""").! ).map { s => DelphiFormat.stringToBytes(s) }
 
-  val time: Parser[Data] =
+  def time[_: P]: P[Data] =
     P( Re("""\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""").! ~ Re("""\d*(E-\d+)?""") ).map { s => Time(DelphiFormat.DateFormat.parseDateTime(s).toDate) }
 
-  val value: Parser[Data] =
+  def value[_: P]: P[Data] =
     P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit.orElse(Some(""))) }
 
-  val complex: Parser[Data] =
+  def complex[_: P]: P[Data] =
     P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit.orElse(Some(""))) }
 
-  val signedReal: Parser[Double] =
+  def signedReal[_: P]: P[Double] =
     P( "+" ~ unsignedReal.map { x => x }
      | "-" ~ unsignedReal.map { x => -x }
      | unsignedReal
      )
 
-  val unsignedReal: Parser[Double] =
+  def unsignedReal[_: P]: P[Double] =
     P( Token("NAN.0").map { _ => Double.NaN }
      | Token("INF.0").map { _ => Double.PositiveInfinity }
      | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
      | Re("""\d*\.\d+""").!.map { _.toDouble }
      )
 
-  val complexNum: Parser[(Double, Double)] =
+  def complexNum[_: P]: P[(Double, Double)] =
     P( (signedReal ~ ("+" | "-").! ~ unsignedReal ~ CharIn("ij")).map {
         case (re, "+", im) => (re, im)
         case (re, "-", im) => (re, -im)
        }
      )
 
-  val units = P( firstTerm ~ (divTerm | mulTerm).rep )
-  val firstTerm = P( "1".? ~ divTerm | term )
-  val mulTerm = P( "*" ~ term )
-  val divTerm = P( "/" ~ term )
-  val term = P( termName ~ exponent.? )
-  val termName = P( Re("""[A-Za-z'"][A-Za-z'"0-9]*""") )
-  val exponent = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
-  val number = P( Re("""\d+""") )
+  def units[_: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
+  def firstTerm[_: P] = P( "1".? ~ divTerm | term )
+  def mulTerm[_: P] = P( "*" ~ term )
+  def divTerm[_: P] = P( "/" ~ term )
+  def term[_: P] = P( termName ~ exponent.? )
+  def termName[_: P] = P( Re("""[A-Za-z'"][A-Za-z'"0-9]*""") )
+  def exponent[_: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  def number[_: P] = P( Re("""\d+""") )
 
-  val array: Parser[Data] = P( arrND ).map { case (elems, shape) =>
+  def array[_: P]: P[Data] = P( arrND ).map { case (elems, shape) =>
     val b = new DataBuilder
     b.array(shape: _*)
     for (elem <- elems) {
@@ -158,7 +158,7 @@ object DelphiParsers {
     b.result()
   }
 
-  val arrND: Parser[(Array[Data], List[Int])] =
+  def arrND[_: P]: P[(Array[Data], List[Int])] =
     P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
          (elems.toArray, List(elems.size))
        }
@@ -170,7 +170,7 @@ object DelphiParsers {
        }
      )
 
-  val cluster =
+  def cluster[_: P] =
     P( "(" ~/ data.rep(sep = ",").map(xs => Cluster(xs: _*)) ~ ")" )
 }
 
