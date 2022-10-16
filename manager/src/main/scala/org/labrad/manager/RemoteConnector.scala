@@ -12,6 +12,7 @@ import org.labrad.util.Logging
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.util.Failure
 
 trait LocalServer {
   def id: Long
@@ -205,9 +206,9 @@ class RemoteConnector(server: LocalServer, config: ServerConfig)(implicit ec: Ex
       def doPing(): Unit = {
         log.info(s"$srcId: ping")
         val mgr = new ManagerServerProxy(cxn)
-        mgr.echo(Str("ping")).onFailure {
-          case e: Exception =>
-            log.error(s"$srcId: error during ping", e)
+        mgr.echo(Str("ping")).onComplete {
+          case Failure(e) => log.error(s"$srcId: error during ping", e)
+          case _ =>
         }
       }
 

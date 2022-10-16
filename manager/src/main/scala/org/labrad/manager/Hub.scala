@@ -11,6 +11,7 @@ import org.labrad.util._
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
+import scala.util.Failure
 
 trait Hub {
   def allocateClientId(name: String): Long
@@ -185,8 +186,9 @@ extends Hub with Logging {
 
     // send expiration messages to all remaining servers (asynchronously)
     messager.broadcast(Manager.ExpireAll(id), sourceId = Manager.ID)
-    Future.sequence(allServers.map(_.expireAll(id)(10.seconds))) onFailure {
-      case ex => //log.warn("error while sending context expiration messages", ex)
+    Future.sequence(allServers.map(_.expireAll(id)(10.seconds))).onComplete {
+      case Failure(ex) => //log.warn("error while sending context expiration messages", ex)
+      case _ =>
     }
 
     // send server disconnect message
