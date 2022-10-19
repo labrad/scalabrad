@@ -36,10 +36,10 @@ class NoOutput extends Testable("methods with no output params") {
   def noOutput2(r: RequestContext, arg: Data): Unit = {}
 
   @Setting(id=3, name="noOutput3", doc="")
-  def noOutput3(r: RequestContext) {}
+  def noOutput3(r: RequestContext): Unit = {}
 
   @Setting(id=4, name="noOutput4", doc="")
-  def noOutput4(r: RequestContext, arg: Data) {}
+  def noOutput4(r: RequestContext, arg: Data): Unit = {}
 
   val settings = Seq(
     (1L, "noOutput", "", ""),
@@ -307,7 +307,7 @@ class ReflectTest extends FunSuite with Logging {
 
   def same(pa: Pattern, pb: Pattern): Boolean = (pa accepts pb) && (pb accepts pa)
 
-  def testSettings[A <: Testable : ClassTag : ru.TypeTag] {
+  def testSettings[A <: Testable : ClassTag : ru.TypeTag]: Unit = {
     val inst = implicitly[ClassTag[A]].runtimeClass.getConstructors().head.newInstance().asInstanceOf[A]
     test(inst.name) {
       val settings = inst.settings

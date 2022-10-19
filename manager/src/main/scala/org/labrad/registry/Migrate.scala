@@ -119,7 +119,7 @@ object Migrate {
     val tEnd = System.nanoTime()
     println(s"total time [s]: ${((tEnd - tStart) / 1e9).toInt}")
 
-    val failed = failures.result
+    val failed = failures.result()
     println(s"${failed.length} failures")
     for (s <- failed) {
       println()
@@ -184,7 +184,7 @@ object Migrate {
       }
       await(pkt.send())
 
-      val values = futures.result.map {
+      val values = futures.result().map {
         case (key, f) => key -> await(f)
       }
 
@@ -222,7 +222,7 @@ object Migrate {
         val data = store.getValue(loc, key, default = None)
         values += key -> data
       }
-      (dirs, values.result)
+      (dirs, values.result())
     }
 
     def set(path: Seq[String], keys: Map[String, Data]): Unit = {

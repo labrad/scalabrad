@@ -28,7 +28,7 @@ object Files {
     try {
       body(f)
     } finally {
-      def delete(f: File) {
+      def delete(f: File): Unit = {
         if (f.isDirectory) {
           for (child <- f.listFiles()) {
             delete(child)

@@ -12,7 +12,7 @@ import scala.collection.mutable.Queue
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 trait Permit {
-  def release()
+  def release(): Unit
 }
 
 class AsyncSemaphore(initialPermits: Int = 0, maxWaiters: Option[Int] = None) { self =>
@@ -51,7 +51,7 @@ class AsyncSemaphore(initialPermits: Int = 0, maxWaiters: Option[Int] = None) { 
    * would be exceeded.
    */
   def acquire(): Future[Permit] = {
-    val result = Promise[Permit]
+    val result = Promise[Permit]()
 
     def setAcquired(): Unit = result.success(new SemaphorePermit)
 

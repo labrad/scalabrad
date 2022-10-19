@@ -42,7 +42,7 @@ class RemoteStoreTest extends FunSuite with Matchers with Waiters {
           c2.addMessageListener {
             case Message(src, ctx, `msgId`, data) =>
               w { assert(data == Cluster(Str("a"), Bool(false), Bool(true))) }
-              w.dismiss
+              w.dismiss()
           }
 
           Await(r1.mkDir("test"))
@@ -73,7 +73,7 @@ class RemoteStoreTest extends FunSuite with Matchers with Waiters {
           c2.addMessageListener {
             case Message(src, ctx, `msgId`, data) =>
               w { assert(data == Cluster(Str("a"), Bool(false), Bool(true))) }
-              w.dismiss
+              w.dismiss()
           }
 
           Await(r1.mkDir("test"))
@@ -105,7 +105,7 @@ class RemoteStoreTest extends FunSuite with Matchers with Waiters {
           c2.addMessageListener {
             case Message(src, ctx, `msgId`, data) =>
               w { assert(data == Cluster(Str("a"), Bool(false), Bool(false))) }
-              w.dismiss
+              w.dismiss()
           }
 
           Await(r1.mkDir("test"))

@@ -422,7 +422,7 @@ class FlagOption[T](val parent: ArgotParser,
 /**
  * Base trait for parameter classes
  */
-private[argot] trait Parameter[T]
+private[argot] sealed trait Parameter[T]
   extends CommandLineArgument[T] with HasValue[T] {
   val convert: (String, Parameter[T]) => T
   val description: String

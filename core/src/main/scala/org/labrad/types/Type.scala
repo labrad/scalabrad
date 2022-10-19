@@ -16,9 +16,9 @@ object Parsers {
   def parseType(tag: String): Type = parseOrThrow(fullType(_), stripComments(tag))
   def parseUnit(s: String): Seq[(String, Ratio)] = parseOrThrow(unitStr(_), s)
 
-  def fullType[_: P] = P( Whitespace ~ aType ~ Whitespace ~ End )
+  def fullType[T: P] = P( Whitespace ~ aType ~ Whitespace ~ End )
 
-  def aType[_: P]: P[Type] =
+  def aType[T: P]: P[Type] =
     P( errorType
      | singleType.rep(sep = ",".?).map {
          case Seq()  => TNone
@@ -27,13 +27,13 @@ object Parsers {
        }
      )
 
-  def noneType[_: P]: P[Type] =
+  def noneType[T: P]: P[Type] =
     P( "_" ).map { _ => TNone }
 
-  def errorType[_: P]: P[Type] =
+  def errorType[T: P]: P[Type] =
     P( "E" ~ singleType.? ).map { t => TError(t getOrElse TNone) }
 
-  def someType[_: P]: P[Type] =
+  def someType[T: P]: P[Type] =
     P( Token("b").map { _ => TBool }
      | Token("i").map { _ => TInt }
 //     | "i8"  ^^ { _ => TInt8 }
@@ -54,29 +54,29 @@ object Parsers {
      | clusterType
      )
 
-  def singleType[_: P]: P[Type] = P( noneType | someType )
+  def singleType[T: P]: P[Type] = P( noneType | someType )
 
-  def valueType[_: P]: P[Type] =
+  def valueType[T: P]: P[Type] =
     P( "v" ~ units.? ).map { u => TValue(u) }
 
-  def complexType[_: P]: P[Type] =
+  def complexType[T: P]: P[Type] =
     P( "c" ~ units.? ).map { u => TComplex(u) }
 
-  def units[_: P]: P[String] =
+  def units[T: P]: P[String] =
     P( "[" ~ Re("""[^\[\]]*""").! ~ "]" )
 
-  def arrayType[_: P]: P[Type] =
+  def arrayType[T: P]: P[Type] =
     P( "*" ~ number.? ~ singleType ).map { case (d, t) => TArr(t, d getOrElse 1) }
 
-  def number[_: P]: P[Int] = P( Re("""\d+""").! ).map { _.toInt }
+  def number[T: P]: P[Int] = P( Re("""\d+""").! ).map { _.toInt }
 
-  def clusterType[_: P]: P[Type] =
+  def clusterType[T: P]: P[Type] =
     P( "(" ~ singleType.rep(sep = ",".?) ~ ")" ).map { ts => TCluster(ts: _*) }
 
 
-  def fullPattern[_: P] = P( Whitespace ~ aPattern ~ Whitespace ~ End )
+  def fullPattern[T: P] = P( Whitespace ~ aPattern ~ Whitespace ~ End )
 
-  def aPattern[_: P]: P[Pattern] =
+  def aPattern[T: P]: P[Pattern] =
     P( errorPattern
      | nonemptyPattern.rep(sep = "|").map {
          case Seq()  => TNone
@@ -85,17 +85,17 @@ object Parsers {
        }
      )
 
-  def nonemptyPattern[_: P]: P[Pattern] =
+  def nonemptyPattern[T: P]: P[Pattern] =
     P( singlePattern.rep(sep = ",".?, min = 1).map {
          case Seq(p) => p
          case ps     => PCluster(ps: _*)
        }
      )
 
-  def errorPattern[_: P]: P[Pattern] =
+  def errorPattern[T: P]: P[Pattern] =
     P( "E" ~ singlePattern.? ).map { p => PError(p getOrElse TNone) }
 
-  def somePattern[_: P]: P[Pattern] =
+  def somePattern[T: P]: P[Pattern] =
     P( Token("?").map { _ => PAny }
      | valuePattern
      | complexPattern
@@ -106,45 +106,45 @@ object Parsers {
      | someType
      )
 
-  def singlePattern[_: P]: P[Pattern] = P( noneType | somePattern )
+  def singlePattern[T: P]: P[Pattern] = P( noneType | somePattern )
 
-  def valuePattern[_: P]: P[Pattern] =
+  def valuePattern[T: P]: P[Pattern] =
     P( "v" ~ units.? ).map { u => PValue(u) }
 
-  def complexPattern[_: P]: P[Pattern] =
+  def complexPattern[T: P]: P[Pattern] =
     P( "c" ~ units.? ).map { u => PComplex(u) }
 
-  def arrayPattern[_: P]: P[Pattern] =
+  def arrayPattern[T: P]: P[Pattern] =
     P( "*" ~ number.? ~ singlePattern ).map { case (d, t) => PArr(t, d getOrElse 1) }
 
-  def expandoPattern[_: P]: P[Pattern] =
+  def expandoPattern[T: P]: P[Pattern] =
     P( "(" ~ somePattern ~ "...)" ).map { p => PExpando(p) }
 
-  def clusterPattern[_: P]: P[Pattern] =
+  def clusterPattern[T: P]: P[Pattern] =
     P( "(" ~ somePattern.rep(sep = ",".?) ~ ")" ).map { ps => PCluster(ps: _*) }
 
-  def choicePattern[_: P]: P[Pattern] =
+  def choicePattern[T: P]: P[Pattern] =
     P( "<" ~ nonemptyPattern.rep(sep = "|") ~ ">" ).map { ps => PChoice(ps: _*) }
 
 
-  def unitStr[_: P]: P[Seq[(String, Ratio)]] =
+  def unitStr[T: P]: P[Seq[(String, Ratio)]] =
     P( firstTerm ~ (divTerm | mulTerm).rep ).map {
          case (name, exp, rest) => (name, exp) +: rest
        }
 
-  def firstTerm[_: P] = P( "1".? ~ divTerm | term )
+  def firstTerm[T: P] = P( "1".? ~ divTerm | term )
 
-  def mulTerm[_: P] = P( "*" ~ term )
-  def divTerm[_: P] = P( "/" ~ term ).map { case (name, exp) => (name, -exp) }
+  def mulTerm[T: P] = P( "*" ~ term )
+  def divTerm[T: P] = P( "/" ~ term ).map { case (name, exp) => (name, -exp) }
 
-  def term[_: P]: P[(String, Ratio)] =
+  def term[T: P]: P[(String, Ratio)] =
     P( termName.! ~ exponent.? ).map {
          case (name, expOpt) => (name, expOpt.getOrElse(Ratio(1)))
        }
 
-  def termName[_: P] = P( Re("""[A-Za-z'"]+""") )
+  def termName[T: P] = P( Re("""[A-Za-z'"]+""") )
 
-  def exponent[_: P]: P[Ratio] =
+  def exponent[T: P]: P[Ratio] =
     P( "^" ~ "-".!.? ~ number ~ ("/" ~ number).? ).map {
          case (None,    n, None   ) => Ratio( n)
          case (None,    n, Some(d)) => Ratio( n, d)

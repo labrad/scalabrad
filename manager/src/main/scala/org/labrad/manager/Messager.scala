@@ -63,7 +63,7 @@ class MessagerImpl(hub: Hub, tracker: StatsTracker) extends Messager with Loggin
           empties += msg
         }
       }
-      for (msg <- empties.result) {
+      for (msg <- empties.result()) {
         regs -= msg
       }
     }

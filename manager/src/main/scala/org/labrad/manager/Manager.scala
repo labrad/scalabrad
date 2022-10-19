@@ -15,7 +15,7 @@ import org.labrad.{Labrad, Password, ServerConfig, ServerInfo, TlsMode}
 import org.labrad.annotations._
 import org.labrad.concurrent.ExecutionContexts
 import org.labrad.crypto.{CertConfig, Certs}
-import org.labrad.data._
+import org.labrad.data.{Message => _, _}
 import org.labrad.errors._
 import org.labrad.manager.auth._
 import org.labrad.registry._
@@ -105,7 +105,7 @@ class CentralNode(
       authTimeout = authTimeout, registryTimeout = registryTimeout,
       bossGroup = bossGroup, workerGroup = workerGroup, loginGroup = loginGroup)
 
-  def stop() {
+  def stop(): Unit = {
     listener.stop()
     loginGroup.shutdownGracefully()
     workerGroup.shutdownGracefully()
@@ -162,7 +162,7 @@ object Manager extends Logging {
   // A shared SecureRandom instance. Only created if needed because entropy collection is costly.
   private implicit lazy val secureRandom = new SecureRandom()
 
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
 
     val config = try {
       ManagerConfig.fromCommandLine(args)
@@ -540,7 +540,7 @@ object ManagerConfig {
       authServer = opts.authServer.value.orElse(env.get("LABRAD_AUTH_SERVER")).map(Util.parseBooleanOpt).getOrElse(true),
       authTimeout = opts.authTimeout.value.getOrElse(30).seconds,
       authUsersFile = sys.props("user.home") / ".labrad" / "users.sqlite",
-      oauthClients = oauthClients.result
+      oauthClients = oauthClients.result()
     )
   }
 

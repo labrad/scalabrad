@@ -10,7 +10,7 @@ import com.google.api.client.util.Key
 import org.labrad.errors.LabradException
 import org.labrad.util.Logging
 import scala.annotation.meta.field
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 sealed trait OAuthClientType
 object OAuthClientType {

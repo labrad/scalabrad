@@ -12,29 +12,29 @@ object Hydrant {
 
   def randomType: Type = {
     def gen(nesting: Int, allowArray: Boolean = true): Type = {
-      var options = Seq('_, 'b, 'i, 'w, 's, 'y, 't, 'v, 'c)
+      var options = Seq(Symbol("_"), Symbol("b"), Symbol("i"), Symbol("w"), Symbol("s"), Symbol("y"), Symbol("t"), Symbol("v"), Symbol("c"))
       if (nesting < 4) {
-        if (allowArray) options ++= Seq('array)
-        options ++= Seq('cluster)
+        if (allowArray) options ++= Seq(Symbol("array"))
+        options ++= Seq(Symbol("cluster"))
       }
       val choice = options(random.nextInt(options.size))
       choice match {
-        case '_ => TNone
-        case 'b => TBool
-        case 'i => TInt
-        case 'w => TUInt
-        case 's => TStr
-        case 'y => TBytes
-        case 't => TTime
-        case 'v => TValue(randomUnits)
-        case 'c => TComplex(randomUnits)
+        case Symbol("_") => TNone
+        case Symbol("b") => TBool
+        case Symbol("i") => TInt
+        case Symbol("w") => TUInt
+        case Symbol("s") => TStr
+        case Symbol("y") => TBytes
+        case Symbol("t") => TTime
+        case Symbol("v") => TValue(randomUnits)
+        case Symbol("c") => TComplex(randomUnits)
 
-        case 'cluster =>
+        case Symbol("cluster") =>
           val size = random.nextInt(5) + 1
           val elems = Seq.fill(size) { gen(nesting + 1) }
           TCluster(elems: _*)
 
-        case 'array =>
+        case Symbol("array") =>
           val nDims = random.nextInt(3) + 1
           val elem = gen(nesting + nDims, allowArray = false)
           TArr(elem, nDims)
@@ -72,9 +72,9 @@ object Hydrant {
 
   def randomNone = Data.NONE
 
-  def randomBool = Bool(random.nextBoolean)
+  def randomBool = Bool(random.nextBoolean())
 
-  def randomInt = Integer(random.nextInt)
+  def randomInt = Integer(random.nextInt())
 
   def randomUInt = UInt(random.nextInt(2000000000).toLong)
 
@@ -99,7 +99,7 @@ object Hydrant {
   }
 
   def randomTime = {
-    val time = System.currentTimeMillis + random.nextInt
+    val time = System.currentTimeMillis + random.nextInt()
     Time(new Date(time))
   }
 
@@ -113,7 +113,7 @@ object Hydrant {
     case Some(units) => Cplx(nextDouble, nextDouble, units)
   }
 
-  private def nextDouble = random.nextGaussian * 1e9
+  private def nextDouble = random.nextGaussian() * 1e9
 
   def randomCluster(t: TCluster) =
     Cluster(t.elems.map(randomData(_)): _*)
@@ -136,7 +136,7 @@ object Hydrant {
   }
 
   def randomError(t: Type) = {
-    val code = random.nextInt
+    val code = random.nextInt()
     val message = "random error"
     val payload = randomData(t)
     Error(code, message, payload)

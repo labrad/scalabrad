@@ -33,10 +33,10 @@ object Parsing {
   /**
    * Parser for the given token literal.
    */
-  def Token[_: P](token: String): P[Unit] = P(token)
+  def Token[T: P](token: String): P[Unit] = P(token)
 
   /**
    * Parser for whitespace that uses the java regex character class.
    */
-  def Whitespace[_: P] = P( Re("""\s*""") )
+  def Whitespace[T: P] = P( Re("""\s*""") )
 }

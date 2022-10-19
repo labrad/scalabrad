@@ -74,10 +74,10 @@ object Pretty {
   // Find the best SimpleDoc representation of a Doc.
   // The implementation uses Stream which is like List except that the tail is lazily-evaluated
   // (like Haskell lists). Note that #:: is the Stream concatenation operator (like :: for List).
-  private def best(w: Int, k: Int, x: Doc): SimpleDoc = be(w, k, Stream((0, x)))
+  private def best(w: Int, k: Int, x: Doc): SimpleDoc = be(w, k, LazyList((0, x)))
 
-  private def be(w: Int, k: Int, xs: Stream[(Int, Doc)]): SimpleDoc = xs match {
-    case Stream.Empty                => SimpleDoc.Empty
+  private def be(w: Int, k: Int, xs: LazyList[(Int, Doc)]): SimpleDoc = xs match {
+    case LazyList()                  => SimpleDoc.Empty
     case (i, Doc.Empty)        #:: z => be(w, k, z)
     case (i, Doc.Line)         #:: z => SimpleDoc.Line(i, be(w, i, z))
     case (i, Doc.Text(s))      #:: z => SimpleDoc.Text(s, be(w, k + s.length, z))
@@ -124,22 +124,22 @@ object Pretty {
   }
 
 
-  def folddoc(f: (Doc, Doc) => Doc, xs: Stream[Doc]): Doc = xs.fold(empty)(f)
-  def spread(xs: Stream[Doc]): Doc = folddoc(_ <+> _, xs)
-  def stack(xs: Stream[Doc]): Doc = folddoc(_ </> _, xs)
+  def folddoc(f: (Doc, Doc) => Doc, xs: LazyList[Doc]): Doc = xs.fold(empty)(f)
+  def spread(xs: LazyList[Doc]): Doc = folddoc(_ <+> _, xs)
+  def stack(xs: LazyList[Doc]): Doc = folddoc(_ </> _, xs)
 
   // A block enclosed by left and right delimiters, with the body on one line or else indented.
   def bracket(l: String, x: Doc, r: String): Doc =
     group(text(l) <> nest(4, x) <> line <> text(r))
 
   // Similar to bracket, but takes a stream of Docs with a delimiter to separate them.
-  def bracketAll(l: String, xs: Stream[Doc], r: String, delim: String = ", "): Doc =
+  def bracketAll(l: String, xs: LazyList[Doc], r: String, delim: String = ", "): Doc =
     bracket(l, stack(sep(xs, delim)), r)
 
   // Add delimiter test to separate a stream of Docs, with no trailing delimiter.
-  def sep(xs: Stream[Doc], delim: String): Stream[Doc] = xs match {
-    case Stream.Empty       => Stream.Empty
-    case x #:: Stream.Empty => x #:: Stream.Empty
-    case x #:: xs           => (x <> text(delim)) #:: sep(xs, delim)
+  def sep(xs: LazyList[Doc], delim: String): LazyList[Doc] = xs match {
+    case LazyList()       => LazyList()
+    case x #:: LazyList() => x #:: LazyList()
+    case x #:: xs         => (x <> text(delim)) #:: sep(xs, delim)
   }
 }

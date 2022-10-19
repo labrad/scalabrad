@@ -23,7 +23,7 @@ case class ComplexArray(re: Array[Double], im: Array[Double], units: Option[Stri
     iq.setArraySize(length)
     val it = iq.flatIterator
     for (i <- 0 until length)
-      it.next.setComplex(re(i), im(i))
+      it.next().setComplex(re(i), im(i))
     iq
   }
 }
@@ -41,7 +41,7 @@ object ComplexArray {
       val im = Array.ofDim[Double](len)
       val it = vals.flatIterator
       for (i <- 0 until len) {
-        val c = it.next
+        val c = it.next()
         re(i) = c.getReal
         im(i) = c.getImag
       }

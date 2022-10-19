@@ -37,12 +37,12 @@ class Command(name: String, doc: String = null) { self =>
  * variable since Map is a rather common type. This class itself implements Map[String, String], by
  * forwarding calls to the underlying map instance.
  */
-case class Environment(map: Map[String, String]) extends Map[String, String] {
-  override def empty: Environment = Environment(Map.empty[String, String])
+case class Environment(map: Map[String, String]) {
+  def empty: Environment = Environment(Map.empty[String, String])
   def get(key: String): Option[String] = map.get(key)
   def iterator: Iterator[(String, String)] = map.iterator
-  def + [B >: String](kv: (String, B)): Map[String, B] = map + kv
-  def - (key: String): Environment = Environment(map - key)
+  //def + [B >: String](kv: (String, B)): Map[String, B] = map + kv
+  //def - (key: String): Environment = Environment(map - key)
 }
 
 object Environment {

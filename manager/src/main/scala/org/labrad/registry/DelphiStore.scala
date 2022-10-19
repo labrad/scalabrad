@@ -43,8 +43,8 @@ class DelphiFileStore(rootDir: File) extends FileStore(rootDir) {
     val it = segment.iterator
     val b = new StringBuilder
     while (it.hasNext) {
-      b += (it.next match {
-        case '%' => decodeMap(it.next)
+      b += (it.next() match {
+        case '%' => decodeMap(it.next())
         case c => c
       })
     }
@@ -74,82 +74,82 @@ object DelphiParsers {
 
   def parseData(s: String): Data = parseOrThrow(dataAll(_), s)
 
-  def dataAll[_: P]: P[Data] =
+  def dataAll[T: P]: P[Data] =
     P( Whitespace ~ data ~ Whitespace ~ End )
 
-  def data[_: P]: P[Data] =
+  def data[T: P]: P[Data] =
     P( nonArrayData | array )
 
-  def nonArrayData[_: P]: P[Data] =
+  def nonArrayData[T: P]: P[Data] =
     P( none | bool | complex | value | time | int | uint | bytes | string | cluster )
 
-  def none[_: P]: P[Data] =
+  def none[T: P]: P[Data] =
     P( "_" ).map { _ => Data.NONE }
 
-  def bool[_: P]: P[Data] =
+  def bool[T: P]: P[Data] =
     P( Re("[Tt]rue").map { _ => Bool(true) }
      | Re("[Ff]alse").map { _ => Bool(false) }
      )
 
-  def int[_: P]: P[Data] =
+  def int[T: P]: P[Data] =
     P( "+" ~ unsignedInt.map { x => Integer(x.toInt) }
      | "-" ~ unsignedInt.map { x => Integer(-x.toInt) }
      )
 
-  def uint[_: P]: P[Data] =
+  def uint[T: P]: P[Data] =
     P( unsignedInt.map { num => UInt(num) } )
 
-  def unsignedInt[_: P]: P[Long] =
+  def unsignedInt[T: P]: P[Long] =
     P( number.!.map(_.toLong) )
 
-  def bytes[_: P]: P[Data] =
+  def bytes[T: P]: P[Data] =
     P( "b" ~ bytesLiteral ).map { bytes => Bytes(bytes) }
 
-  def string[_: P]: P[Data] =
+  def string[T: P]: P[Data] =
     P( bytesLiteral ).map { bytes => Str(new String(bytes, UTF_8)) }
 
-  def bytesLiteral[_: P]: P[Array[Byte]] =
+  def bytesLiteral[T: P]: P[Array[Byte]] =
     P( Re("""('[^'\x00-\x1F\x7F-\xFF]*'|#[0-9]{1,3})+""").! ).map { s => DelphiFormat.stringToBytes(s) }
 
-  def time[_: P]: P[Data] =
+  def time[T: P]: P[Data] =
     P( Re("""\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}(.\d{1,3})?""").! ~ Re("""\d*(E-\d+)?""") ).map { s => Time(DelphiFormat.DateFormat.parseDateTime(s).toDate) }
 
-  def value[_: P]: P[Data] =
+  def value[T: P]: P[Data] =
     P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit.orElse(Some(""))) }
 
-  def complex[_: P]: P[Data] =
+  def complex[T: P]: P[Data] =
     P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit.orElse(Some(""))) }
 
-  def signedReal[_: P]: P[Double] =
+  def signedReal[T: P]: P[Double] =
     P( "+" ~ unsignedReal.map { x => x }
      | "-" ~ unsignedReal.map { x => -x }
      | unsignedReal
      )
 
-  def unsignedReal[_: P]: P[Double] =
+  def unsignedReal[T: P]: P[Double] =
     P( Token("NAN.0").map { _ => Double.NaN }
      | Token("INF.0").map { _ => Double.PositiveInfinity }
      | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
      | Re("""\d*\.\d+""").!.map { _.toDouble }
      )
 
-  def complexNum[_: P]: P[(Double, Double)] =
+  def complexNum[T: P]: P[(Double, Double)] =
     P( (signedReal ~ ("+" | "-").! ~ unsignedReal ~ CharIn("ij")).map {
         case (re, "+", im) => (re, im)
         case (re, "-", im) => (re, -im)
        }
      )
 
-  def units[_: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
-  def firstTerm[_: P] = P( "1".? ~ divTerm | term )
-  def mulTerm[_: P] = P( "*" ~ term )
-  def divTerm[_: P] = P( "/" ~ term )
-  def term[_: P] = P( termName ~ exponent.? )
-  def termName[_: P] = P( Re("""[A-Za-z'"][A-Za-z'"0-9]*""") )
-  def exponent[_: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
-  def number[_: P] = P( Re("""\d+""") )
+  def units[T: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
+  def firstTerm[T: P] = P( "1".? ~ divTerm | term )
+  def mulTerm[T: P] = P( "*" ~ term )
+  def divTerm[T: P] = P( "/" ~ term )
+  def term[T: P] = P( termName ~ exponent.? )
+  def termName[T: P] = P( Re("""[A-Za-z'"][A-Za-z'"0-9]*""") )
+  def exponent[T: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  def number[T: P] = P( Re("""\d+""") )
 
-  def array[_: P]: P[Data] = P( arrND ).map { case (elems, shape) =>
+  def array[T: P]: P[Data] = P( arrND ).map { case (elems, shape) =>
     val b = new DataBuilder
     b.array(shape: _*)
     for (elem <- elems) {
@@ -158,7 +158,7 @@ object DelphiParsers {
     b.result()
   }
 
-  def arrND[_: P]: P[(Array[Data], List[Int])] =
+  def arrND[T: P]: P[(Array[Data], List[Int])] =
     P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
          (elems.toArray, List(elems.size))
        }
@@ -170,7 +170,7 @@ object DelphiParsers {
        }
      )
 
-  def cluster[_: P] =
+  def cluster[T: P] =
     P( "(" ~/ data.rep(sep = ",").map(xs => Cluster(xs: _*)) ~ ")" )
 }
 
@@ -223,13 +223,13 @@ object DelphiFormat {
         val idx = Array.ofDim[Int](depth)
         val sb = new StringBuilder
         val it = data.flatIterator
-        def buildString(k: Int) {
+        def buildString(k: Int): Unit = {
           sb += '['
           for (i <- 0 until shape(k)) {
             idx(k) = i
             if (i > 0) sb += ','
             if (k == shape.length - 1)
-              sb ++= dataToString(it.next)
+              sb ++= dataToString(it.next())
             else
               buildString(k + 1)
           }
@@ -283,7 +283,7 @@ object DelphiFormat {
         lastWasString = false
       }
     }
-    buf.result
+    buf.result()
   }
 
   /**

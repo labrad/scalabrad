@@ -16,12 +16,12 @@ class ManagerTest extends FunSuite with Waiters {
   test("manager returns lists of servers and settings") {
     withManager() { m =>
       withClient(m) { c =>
-        val servers = Await(mgr(c).servers)
+        val servers = Await(mgr(c).servers())
         assert(servers.size == 2)
         assert(servers.exists { case (1L, "Manager") => true; case _ => false })
         assert(servers.exists { case (_, "Registry") => true; case _ => false })
         TestSrv.withServer(m) { s =>
-          val servers2 = Await(mgr(c).servers)
+          val servers2 = Await(mgr(c).servers())
           assert(servers2.size == 3)
           assert(servers2.exists { case (_, "Scala Test Server") => true; case _ => false })
         }
@@ -36,7 +36,7 @@ class ManagerTest extends FunSuite with Waiters {
           Await(mgr(c).lookupServer("Scala Test Server"))
         }
         Thread.sleep(10000)
-        val servers = Await(mgr(c).servers)
+        val servers = Await(mgr(c).servers())
         assert(!servers.exists { case (_, "Scala Test Server") => true; case _ => false })
         val id2 = TestSrv.withServer(m) { s =>
           Await(mgr(c).lookupServer("Scala Test Server"))
@@ -59,13 +59,13 @@ class ManagerTest extends FunSuite with Waiters {
         c.addMessageListener {
           case Message(src, ctx, `connectId`, Cluster(UInt(id), Str(name))) =>
             connectWaiter { assert(name == "Scala Test Server") }
-            connectWaiter.dismiss
+            connectWaiter.dismiss()
         }
 
         c.addMessageListener {
           case Message(src, ctx, `disconnectId`, Cluster(UInt(id), Str(name))) =>
             disconnectWaiter { assert(name == "Scala Test Server") }
-            disconnectWaiter.dismiss
+            disconnectWaiter.dismiss()
         }
 
         Await(mgr(c).subscribeToNamedMessage("Server Connect", connectId, true))
@@ -102,7 +102,7 @@ class ManagerTest extends FunSuite with Waiters {
                 assert(high == c2.id)
                 assert(low == context.low)
               }
-              expireContextWaiter.dismiss
+              expireContextWaiter.dismiss()
           }
           c.send("Manager", context, "Expire Context" -> Data.NONE)
           expireContextWaiter.await(timeout(30.seconds))
@@ -111,7 +111,7 @@ class ManagerTest extends FunSuite with Waiters {
           c.addMessageListener {
             case Message(src, ctx, `expireAllId`, UInt(id)) =>
               expireAllWaiter { assert(id == c2.id) }
-              expireAllWaiter.dismiss
+              expireAllWaiter.dismiss()
           }
         }
         expireAllWaiter.await(timeout(30.seconds))

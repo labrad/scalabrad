@@ -28,10 +28,10 @@ trait IServer {
   val doc: String
   val settings: Seq[SettingInfo]
 
-  def connected(cxn: Connection, ec: ExecutionContext)
+  def connected(cxn: Connection, ec: ExecutionContext): Unit
   def handleRequest(packet: Packet): Future[Packet]
-  def expire(context: Context)
-  def stop()
+  def expire(context: Context): Unit
+  def stop(): Unit
 }
 
 abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag] extends IServer with Logging {
@@ -63,7 +63,7 @@ abstract class Server[S <: Server[S, _] : TypeTag, T <: ServerContext : TypeTag]
   /**
    * A promise that will be completed when this server shuts down.
    */
-  private val shutdownPromise = Promise[Unit]
+  private val shutdownPromise = Promise[Unit]()
 
   /**
    * Stop this server
@@ -206,7 +206,7 @@ object Server {
     val out = Seq.newBuilder[Record]
     var error = false
     while (in.hasNext && !error) {
-      val Record(id, data) = in.next
+      val Record(id, data) = in.next()
       val resp = try {
         f(RequestContext(source, context, id, data))
       } catch {
@@ -229,7 +229,7 @@ object Server {
       out += Record(id, resp)
     }
 
-    Packet(-request, source, context, out.result)
+    Packet(-request, source, context, out.result())
   }
 
   def handleAsync(packet: Packet)(f: RequestContext => Future[Data])(implicit ec: ExecutionContext): Future[Packet] = {

@@ -362,7 +362,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
     }
 
     override def clusterEnd(): State = {
-      ret(TCluster(elems: _*))
+      ret(TCluster(elems.toSeq: _*))
     }
 
     override def render(subState: String): String = {

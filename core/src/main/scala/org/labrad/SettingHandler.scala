@@ -210,7 +210,7 @@ object SettingHandler extends Logging {
     // extract a single parameter by name
     def param(name: String): Option[Constant] = {
       a.tree.children.tail.collectFirst {
-        case AssignOrNamedArg(Ident(TermName(`name`)), Literal(c)) => c
+        case NamedArg(Ident(TermName(`name`)), Literal(c)) => c
       }
     }
   }

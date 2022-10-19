@@ -55,7 +55,7 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
   }
 
   def dir(dir: File): (Seq[String], Seq[String]) = {
-    val files = dir.listFiles()
+    val files = dir.listFiles().toIndexedSeq
     val dirs = for (f <- files if f.isDirectory; n = f.getName if n.endsWith(DIR_EXT)) yield decode(n.stripSuffix(DIR_EXT))
     val keys = for (f <- files if f.isFile; n = f.getName if n.endsWith(KEY_EXT)) yield decode(n.stripSuffix(KEY_EXT))
     (dirs, keys)
@@ -127,7 +127,7 @@ abstract class FileStore(rootDir: File) extends RegistryStore {
     }
   }
 
-  private def writeFile(file: File, contents: Array[Byte]) {
+  private def writeFile(file: File, contents: Array[Byte]): Unit = {
     val os = new FileOutputStream(file)
     try
       os.write(contents)

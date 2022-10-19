@@ -1,5 +1,5 @@
 ThisBuild / organization := "org.labrad"
-ThisBuild / scalaVersion := "2.12.17"
+ThisBuild / scalaVersion := "2.13.10"
 ThisBuild / javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
 
 lazy val commonSettings = Seq(

@@ -15,7 +15,7 @@ extends FilterInputStream(in) {
 class PacketOutputStream(out: OutputStream)(implicit bo: ByteOrder = BIG_ENDIAN)
 extends BufferedOutputStream(out) {
   // Write a packet to the output stream.
-  def writePacket(packet: Packet) {
+  def writePacket(packet: Packet): Unit = {
     out.write(packet.toBytes)
     out.flush()
   }

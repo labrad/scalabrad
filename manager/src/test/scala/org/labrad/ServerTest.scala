@@ -6,7 +6,7 @@ import org.labrad.data._
 import org.labrad.manager.ManagerUtils
 import org.labrad.util.{Await, Logging}
 import org.scalatest.fixture.FunSuite
-import scala.collection._
+import scala.collection.{Seq => _, _}
 import scala.concurrent.duration._
 
 object TestSrv {

@@ -38,7 +38,7 @@ object Go {
           }
         }
       }
-      (builder.result, default)
+      (builder.result(), default)
     }
     val k = try {
       var kOpt: Option[() => A] = None

@@ -70,8 +70,8 @@ extends Hub with Logging {
   private var nClientsAllocated = 0L
   private var nClientsConnected = 0L
 
-  private val _authServerConnected = Promise[Unit]
-  private val _registryConnected = Promise[Unit]
+  private val _authServerConnected = Promise[Unit]()
+  private val _registryConnected = Promise[Unit]()
 
   val authServerConnected = _authServerConnected.future
   val registryConnected = _registryConnected.future

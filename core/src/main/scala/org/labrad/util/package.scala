@@ -28,7 +28,7 @@ class ShapeIterator(shape: Array[Int]) extends Iterator[Array[Int]] {
 
   def hasNext: Boolean = _hasNext
 
-  def next: Array[Int] = {
+  def next(): Array[Int] = {
     // increment indices
     var k = nDims - 1
     while (k >= 0) {
@@ -150,7 +150,7 @@ object Util {
     val keys = {
       val keys = Set.newBuilder[String]
       while (m.find) keys += m.group(1)
-      keys.result
+      keys.result()
     }
 
     // substitute environment variable into string

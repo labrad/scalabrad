@@ -17,7 +17,7 @@ class LookupProvider(send: Request => Future[Seq[Data]]) {
 
   def clearServer(name: String): Unit = {
     // TODO connect this to server disconnect messages from the manager
-    settingCache = settingCache.filterKeys { case (server, _) => server != name }
+    settingCache = settingCache.view.filterKeys { case (server, _) => server != name }.toMap
     serverCache -= name
   }
 

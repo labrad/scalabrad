@@ -122,13 +122,13 @@ trait Data {
       val idx = Array.ofDim[Int](depth)
       val sb = new StringBuilder
       val it = flatIterator
-      def buildString(k: Int) {
+      def buildString(k: Int): Unit = {
         sb += '['
         for (i <- 0 until shape(k)) {
           idx(k) = i
           if (i > 0) sb ++= ", "
           if (k == shape.length - 1)
-            sb ++= it.next.toString
+            sb ++= it.next().toString
           else
             buildString(k + 1)
         }
@@ -174,18 +174,18 @@ trait Data {
       case TBytes => text(this.toString)
       case TArr(elem, depth) =>
         val shape = arrayShape
-        def buildDoc(idx: Array[Int]): Doc = {
+        def buildDoc(idx: Seq[Int]): Doc = {
           val k = idx.length
           val items = if (k == shape.length - 1) {
             // array elements converted to docs
-            Stream.tabulate(shape(k)) { i => this((idx :+ i): _*).toDoc }
+            LazyList.tabulate(shape(k)) { i => this((idx :+ i): _*).toDoc }
           } else {
             // subarrays converted to docs
-            Stream.tabulate(shape(k)) { i => buildDoc((idx :+ i)) }
+            LazyList.tabulate(shape(k)) { i => buildDoc((idx :+ i)) }
           }
           bracketAll("[", items, "]")
         }
-        buildDoc(Array())
+        buildDoc(Seq())
 
       case TCluster(elems @ _*) =>
         def isKeyType(t: Type): Boolean = (t == TStr || t == TInt || t == TUInt)
@@ -195,18 +195,18 @@ trait Data {
         }
         if (elems.size >= 1 && keyTypes.forall(_ != None) && keyTypes.flatten.toSet.size == 1) {
           // show as a map
-          val items = clusterIterator.toStream.map {
+          val items = LazyList.from(clusterIterator).map {
             case Cluster(key, value) => text(key.toString) <> text(": ") <> value.toDoc
           }
           bracketAll("{", items, "}")
         } else {
           // show as a regular cluster
-          val elems = clusterIterator.toStream.map { _.toDoc }
+          val elems = LazyList.from(clusterIterator).map { _.toDoc }
           bracketAll("(", elems, ")")
         }
 
       case TError(_) =>
-        val items = Stream(
+        val items = LazyList(
           text(getErrorCode.toString),
           text(getErrorMessage.toString),
           getErrorPayload.toDoc
@@ -308,9 +308,9 @@ trait Data {
     case TError(payloadType) =>
       val data = castError
       val it = data.clusterIterator
-      it.next.setInt(code)
-      it.next.setString(message)
-      it.next.set(payload)
+      it.next().setInt(code)
+      it.next().setString(message)
+      it.next().set(payload)
     case _ => sys.error("Data type must be error")
   }
 }
@@ -336,7 +336,7 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
         } else {
           val iter = _arrayCursor(elem, depth)
           while (iter.hasNext) {
-            len += iter.next.len
+            len += iter.next().len
           }
         }
         len
@@ -348,7 +348,7 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
         } else {
           val iter = new ClusterCursor(t.elems, buf, ofs)
           while (iter.hasNext) {
-            len += iter.next.len
+            len += iter.next().len
           }
         }
         len
@@ -407,14 +407,14 @@ class Cursor(var t: Type, val buf: Array[Byte], var ofs: Int)(implicit byteOrder
             // for variable-width data, flatten recursively
             val iter = _arrayCursor(elem, depth)
             while (iter.hasNext) {
-              iter.next.flatten(os, outputOrder)
+              iter.next().flatten(os, outputOrder)
             }
           }
 
         case t: TCluster =>
           val iter = _clusterCursor(t)
           while (iter.hasNext) {
-            iter.next.flatten(os, outputOrder)
+            iter.next().flatten(os, outputOrder)
           }
 
         case TError(payload) =>
@@ -455,7 +455,7 @@ class ArrayCursor(val t: Type, val buf: Array[Byte], size: Int, ofs: Int)(implic
     idx < size
   }
 
-  def next: Cursor = {
+  def next(): Cursor = {
     require(hasNext)
     cursor.ofs = elemOfs
     idx += 1
@@ -475,7 +475,7 @@ class ClusterCursor(ts: Seq[Type], buf: Array[Byte], ofs: Int)(implicit byteOrde
     idx < ts.size
   }
 
-  def next: Cursor = {
+  def next(): Cursor = {
     require(hasNext)
     cursor.t = ts(idx)
     cursor.ofs = elemOfs
@@ -771,7 +771,7 @@ extends Data with Serializable with Cloneable {
 
   def flatten(out: ByteBuf, outputOrder: ByteOrder): Unit = flatten(out, t, buf, ofs, outputOrder)
 
-  private def flatten(os: ByteBuf, t: Type, buf: Array[Byte], ofs: Int, outputOrder: ByteOrder) {
+  private def flatten(os: ByteBuf, t: Type, buf: Array[Byte], ofs: Int, outputOrder: ByteOrder): Unit = {
     if (t.fixedWidth && outputOrder == byteOrder)
       os.writeBytes(buf, ofs, t.dataWidth)
     else {
@@ -1067,13 +1067,13 @@ object TreeData {
   def fromBytes(t: Type, in: ByteBuf)(implicit bo: ByteOrder): Data = {
     val buf = Array.ofDim[Byte](t.dataWidth)
     val heap = newHeap
-    def unflatten(t: Type, buf: Array[Byte], ofs: Int) {
+    def unflatten(t: Type, buf: Array[Byte], ofs: Int): Unit = {
       if (t.fixedWidth)
         in.readBytes(buf, ofs, t.dataWidth)
       else
         t match {
           case TStr | TBytes =>
-            val len = in.readIntOrdered
+            val len = in.readIntOrdered()
             val strBuf = Array.ofDim[Byte](len)
             buf.setInt(ofs, heap.size)
             heap += strBuf
@@ -1082,7 +1082,7 @@ object TreeData {
           case TArr(elem, depth) =>
             var size = 1
             for (i <- 0 until depth) {
-              val dim = in.readIntOrdered
+              val dim = in.readIntOrdered()
               buf.setInt(ofs + 4 * i, dim)
               size *= dim
             }
@@ -1274,7 +1274,7 @@ object Cluster {
     val data = Data(TCluster(elems.map(_.t): _*))
     val it = data.clusterIterator
     for (elem <- elems) {
-      it.next.set(elem)
+      it.next().set(elem)
     }
     data
   }
@@ -1291,7 +1291,7 @@ object Arr {
     data.setArrayShape(m)
     val it = data.flatIterator
     for (i <- 0 until m) {
-      it.next.set(a(i))
+      it.next().set(a(i))
     }
     data
   }
@@ -1371,7 +1371,7 @@ object Arr {
   }
 
   def unapplySeq(data: Data): Option[Seq[Data]] =
-    if (data.isArray) Some(data.get[Array[Data]])
+    if (data.isArray) Some(data.get[Array[Data]].toIndexedSeq)
     else None
 }
 
@@ -1384,7 +1384,7 @@ object Arr2 {
     for (i <- 0 until m) {
       assert(a(i).length == a(0).length, "array must be rectangular")
       for (j <- 0 until n)
-        it.next.set(a(i)(j))
+        it.next().set(a(i)(j))
     }
     data
   }
@@ -1410,7 +1410,7 @@ object Arr3 {
       for (j <- 0 until n) {
         assert(a(i)(j).length == a(0)(0).length, "array must be rectangular")
         for (k <- 0 until p)
-          it.next.set(a(i)(j)(k))
+          it.next().set(a(i)(j)(k))
       }
     }
     data
@@ -1539,74 +1539,74 @@ object Parsers {
 
   def parseData(s: String): Data = parseOrThrow(dataAll(_), s)
 
-  def dataAll[_: P]: P[Data] = P( Whitespace ~ data ~ Whitespace ~ End )
+  def dataAll[T: P]: P[Data] = P( Whitespace ~ data ~ Whitespace ~ End )
 
-  def data[_: P]: P[Data] = P( nonArrayData | array )
+  def data[T: P]: P[Data] = P( nonArrayData | array )
 
-  def nonArrayData[_: P]: P[Data] =
+  def nonArrayData[T: P]: P[Data] =
     P( none | bool | complex | value | time | int | uint | bytes | string | cluster | map)
 
-  def none[_: P]: P[Data] = P( "_" ).map { _ => Data.NONE }
+  def none[T: P]: P[Data] = P( "_" ).map { _ => Data.NONE }
 
-  def bool[_: P]: P[Data] =
+  def bool[T: P]: P[Data] =
     P( Token("true").map { _ => Bool(true) }
      | Token("false").map { _ => Bool(false) }
      )
 
-  def int[_: P]: P[Data] =
+  def int[T: P]: P[Data] =
     P( Re("""[+-]\d+""").! ).map { s => Integer(s.substring(if (s.startsWith("+")) 1 else 0).toInt) } // i8, i16, i64
 
-  def uint[_: P]: P[Data] =
+  def uint[T: P]: P[Data] =
     P( Re("""\d+""").! ).map { s => UInt(s.toLong) } // w8, w16, w64
 
-  def bytes[_: P]: P[Data] =
+  def bytes[T: P]: P[Data] =
     P( Re("b\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\x[a-fA-F0-9]{2})*""" + "\"").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '"')) }
      | Re("b'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\x[a-fA-F0-9]{2})*""" + "'").!.map { s => Bytes(Translate.parseBytesLiteral(s, quote = '\'')) }
      )
 
-  def string[_: P]: P[Data] =
+  def string[T: P]: P[Data] =
     P( Re("\"" + """([^"\p{Cntrl}\\]|\\[\\/bfnrtv"]|\\u[a-fA-F0-9]{4})*""" + "\"").!.map { s => Str(Translate.parseStringLiteral(s, quote = '"')) }
      | Re("'" + """([^'\p{Cntrl}\\]|\\[\\/bfnrtv']|\\u[a-fA-F0-9]{4})*""" + "'").!.map { s => Str(Translate.parseStringLiteral(s, quote = '\'')) }
      )
 
-  def time[_: P]: P[Data] =
+  def time[T: P]: P[Data] =
     P( Re("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{3})?Z""").! ).map { s => Time(new DateTime(s).toDate) }
 
-  def value[_: P]: P[Data] =
+  def value[T: P]: P[Data] =
     P( signedReal ~ units.!.? ).map { case (num, unit) => Value(num, unit) }
 
-  def complex[_: P]: P[Data] =
+  def complex[T: P]: P[Data] =
     P( complexNum ~ units.!.? ).map { case (re, im, unit) => Cplx(re, im, unit) }
 
-  def signedReal[_: P]: P[Double] =
+  def signedReal[T: P]: P[Double] =
     P( "+" ~ unsignedReal.map { x => x }
      | "-" ~ unsignedReal.map { x => -x }
      | unsignedReal
      )
 
-  def unsignedReal[_: P]: P[Double] =
+  def unsignedReal[T: P]: P[Double] =
     P( Token("NaN").map { _ => Double.NaN }
      | Token("Infinity").map { _ => Double.PositiveInfinity }
      | Re("""(\d*\.\d+|\d+(\.\d*)?)[eE][+-]?\d+""").!.map { _.toDouble }
      | Re("""\d*\.\d+""").!.map { _.toDouble }
      )
 
-  def complexNum[_: P]: P[(Double, Double)] =
+  def complexNum[T: P]: P[(Double, Double)] =
     P( signedReal ~ ("+" | "-").! ~ unsignedReal ~ "i" ).map {
          case (re, "+", im) => (re, im)
          case (re, "-", im) => (re, -im)
        }
 
-  def units[_: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
-  def firstTerm[_: P] = P( "1".? ~ divTerm | term )
-  def mulTerm[_: P] = P( "*" ~ term )
-  def divTerm[_: P] = P( "/" ~ term )
-  def term[_: P] = P( termName ~ exponent.? )
-  def termName[_: P] = Re("""[A-Za-z'"][A-Za-z'"0-9]*""")
-  def exponent[_: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
-  def number[_: P] = Re("""\d+""")
+  def units[T: P] = P( firstTerm ~ (divTerm | mulTerm).rep )
+  def firstTerm[T: P] = P( "1".? ~ divTerm | term )
+  def mulTerm[T: P] = P( "*" ~ term )
+  def divTerm[T: P] = P( "/" ~ term )
+  def term[T: P] = P( termName ~ exponent.? )
+  def termName[T: P] = Re("""[A-Za-z'"][A-Za-z'"0-9]*""")
+  def exponent[T: P] = P( "^" ~ "-".? ~ number ~ ("/" ~ number).? )
+  def number[T: P] = Re("""\d+""")
 
-  def array[_: P]: P[Data] = P( arrND ).map { case (elems, typ, shape) =>
+  def array[T: P]: P[Data] = P( arrND ).map { case (elems, typ, shape) =>
     val data = TreeData(TArr(typ, shape.size))
     data.setArrayShape(shape: _*)
     for ((data, elem) <- data.flatIterator zip elems.iterator) {
@@ -1615,7 +1615,7 @@ object Parsers {
     data
   }
 
-  def arrND[_: P]: P[(Array[Data], Type, List[Int])] =
+  def arrND[T: P]: P[(Array[Data], Type, List[Int])] =
     P( ("[" ~ nonArrayData.rep(sep = ",") ~ "]").map { elems =>
          val typ = if (elems.isEmpty) {
            TNone
@@ -1635,15 +1635,15 @@ object Parsers {
        }
      )
 
-  def cluster[_: P]: P[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
+  def cluster[T: P]: P[Data] = P( "(" ~ data.rep(sep = ",") ~ ")" ).map { elems => Cluster(elems: _*) }
 
-  def map[_: P]: P[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
+  def map[T: P]: P[Data] = P( "{" ~ mapItem.rep(sep = ",") ~ "}" ).map { items =>
     val keyTypes = items.map { case (key, value) => key.t }.toSet
     require(keyTypes.size <= 1, s"all map keys must have the same type: ${keyTypes.mkString(",")}")
     Cluster(items.map { case (key, value) => Cluster(key, value) }: _*)
   }
 
-  def mapItem[_: P]: P[(Data, Data)] = P( data ~ ":" ~ data )
+  def mapItem[T: P]: P[(Data, Data)] = P( data ~ ":" ~ data )
 }
 
 object Translate {
@@ -1747,7 +1747,7 @@ object Translate {
       })
       pos += 1
     }
-    buf.result
+    buf.result()
   }
 
   def parseStringLiteral(s: String, quote: Char = '"'): String = {

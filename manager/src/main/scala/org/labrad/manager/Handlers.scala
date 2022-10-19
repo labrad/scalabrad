@@ -128,7 +128,7 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
   }
 
   // support methods for manager settings
-  def startServing: Unit = ???
+  def startServing(): Unit = ???
 
   def addSetting(id: Long, name: String, doc: String, accepts: TypeInfo, returns: TypeInfo): Unit = ???
   def delSetting(id: Long): Unit = ???
@@ -170,7 +170,7 @@ with ServerActor with ManagerSupport with Logging {
             case None => sys.error(s"No setting with id $id")
           }
         }
-        val promise = Promise[Packet]
+        val promise = Promise[Packet]()
         val key = (packet.target, -packet.id)
         promises(key) = promise
         contexts += packet.context
@@ -206,7 +206,7 @@ with ServerActor with ManagerSupport with Logging {
 
 
   // support methods for manager settings
-  override def startServing: Unit = synchronized {
+  override def startServing(): Unit = synchronized {
     hub.setServerInfo(ServerInfo(id, name, doc, settingsById.values.toSeq))
   }
 
@@ -255,7 +255,7 @@ with ServerActor with ManagerSupport with Logging {
           0L
       }
     }
-    for (msg <- messages.result) {
+    for (msg <- messages.result()) {
       message(msg)
     }
     Future.successful(result)
@@ -283,7 +283,7 @@ with ServerActor with ManagerSupport with Logging {
           0L
       }
     }
-    for (msg <- messages.result) {
+    for (msg <- messages.result()) {
       message(msg)
     }
     Future.successful(result)
@@ -514,7 +514,7 @@ class ManagerImpl(id: Long, name: String, hub: Hub, stub: ManagerSupport, tracke
                |Before calling this setting, the server will not appear in the list of active
                |servers nor any metadata lookups.""")
   def startServing(): Unit = {
-    stub.startServing
+    stub.startServing()
     messager.broadcast(Manager.ConnectServer(id, name), sourceId = Manager.ID)
   }
 

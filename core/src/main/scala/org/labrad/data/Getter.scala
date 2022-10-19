@@ -128,7 +128,7 @@ object Getter {
     def get(data: Data): (T1, T2) = {
       require(data.clusterSize == 2)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()))
     }
   }
 
@@ -136,7 +136,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3) = {
       require(data.clusterSize == 3)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()))
     }
   }
 
@@ -144,7 +144,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4) = {
       require(data.clusterSize == 4)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()))
     }
   }
 
@@ -152,7 +152,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4, T5) = {
       require(data.clusterSize == 5)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next), g5.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()), g5.get(it.next()))
     }
   }
 
@@ -160,7 +160,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4, T5, T6) = {
       require(data.clusterSize == 6)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next), g5.get(it.next), g6.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()), g5.get(it.next()), g6.get(it.next()))
     }
   }
 
@@ -168,7 +168,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4, T5, T6, T7) = {
       require(data.clusterSize == 7)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next), g5.get(it.next), g6.get(it.next), g7.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()), g5.get(it.next()), g6.get(it.next()), g7.get(it.next()))
     }
   }
 
@@ -176,7 +176,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4, T5, T6, T7, T8) = {
       require(data.clusterSize == 8)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next), g5.get(it.next), g6.get(it.next), g7.get(it.next), g8.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()), g5.get(it.next()), g6.get(it.next()), g7.get(it.next()), g8.get(it.next()))
     }
   }
 
@@ -184,7 +184,7 @@ object Getter {
     def get(data: Data): (T1, T2, T3, T4, T5, T6, T7, T8, T9) = {
       require(data.clusterSize == 9)
       val it = data.clusterIterator
-      (g1.get(it.next), g2.get(it.next), g3.get(it.next), g4.get(it.next), g5.get(it.next), g6.get(it.next), g7.get(it.next), g8.get(it.next), g9.get(it.next))
+      (g1.get(it.next()), g2.get(it.next()), g3.get(it.next()), g4.get(it.next()), g5.get(it.next()), g6.get(it.next()), g7.get(it.next()), g8.get(it.next()), g9.get(it.next()))
     }
   }
 }

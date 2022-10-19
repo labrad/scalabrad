@@ -4,6 +4,15 @@ import scala.collection.mutable
 import scala.math
 
 trait RatioIsFractional extends Fractional[Ratio] {
+  def parseString(str: String): Option[Ratio] = str.split("/") match {
+    case Array("", _) => None
+    case Array(_, "") => None
+    case Array(numStr, denomStr) => for {
+      num <- implicitly[Numeric[Int]].parseString(numStr)
+      denom <- implicitly[Numeric[Int]].parseString(denomStr)
+    } yield Ratio(num, denom)
+    case _ => None
+  }
   def plus(x: Ratio, y: Ratio) = Ratio(x.num * y.denom + y.num * x.denom, x.denom * y.denom)
   def minus(x: Ratio, y: Ratio) = Ratio(x.num * y.denom - y.num * x.denom, x.denom * y.denom)
   def times(x: Ratio, y: Ratio) = Ratio(x.num * y.num, x.denom * y.denom)
@@ -244,7 +253,7 @@ object Units {
         for ((prefix, pre) <- prefixes)
           builder += (prefix + name) -> (pre * factor, dims)
     }
-    builder.result
+    builder.result()
   }
 
 

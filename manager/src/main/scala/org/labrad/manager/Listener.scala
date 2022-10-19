@@ -138,7 +138,7 @@ class Listener(
     throw new Exception(s"some listeners failed to start: ${failures.mkString(", ")}")
   }
 
-  def stop() {
+  def stop(): Unit = {
     log.info("shutting down")
     shutdown(channels)
   }

@@ -10,16 +10,16 @@ trait Requester {
   def cxn: Connection
   def context: Context
 
-  def call(setting: String, data: Data*): Future[Data]
-  def callUnit(setting: String, data: Data*): Future[Unit] = call(setting, data: _*).map { _ => () }
-  def call[T](setting: String, data: Data*)(implicit getter: Getter[T]): Future[T] = call(setting, data: _*).map { result => getter.get(result) }
+  def callData(setting: String, data: Data*): Future[Data]
+  def callUnit(setting: String, data: Data*): Future[Unit] = callData(setting, data: _*).map { _ => () }
+  def call[T](setting: String, data: Data*)(implicit getter: Getter[T]): Future[T] = callData(setting, data: _*).map { result => getter.get(result) }
 }
 
 
 abstract class ServerProxy(val cxn: Connection, val name: String, val context: Context) extends Requester {
   implicit def executionContext = cxn.executionContext
 
-  override def call(setting: String, args: Data*): Future[Data] = {
+  override def callData(setting: String, args: Data*): Future[Data] = {
     val data = args match {
       case Seq() => Data.NONE
       case Seq(data) => data
@@ -35,9 +35,9 @@ class PacketProxy(val server: ServerProxy, val context: Context) extends Request
   def cxn = server.cxn
 
   private val records = mutable.Buffer.empty[(String, Data)]
-  private val promise = Promise[Seq[Data]]
+  private val promise = Promise[Seq[Data]]()
 
-  override def call(setting: String, args: Data*): Future[Data] = {
+  override def callData(setting: String, args: Data*): Future[Data] = {
     val idx = records.size
     val data = args match {
       case Seq() => Data.NONE
@@ -49,7 +49,7 @@ class PacketProxy(val server: ServerProxy, val context: Context) extends Request
   }
 
   def send(): Future[Unit] = {
-    promise.completeWith(server.cxn.send(server.name, context, records: _*))
+    promise.completeWith(server.cxn.send(server.name, context, records.toSeq: _*))
     promise.future.map(_ => ())
   }
 }
@@ -83,7 +83,7 @@ trait ManagerServer extends Requester {
     call[String]("Data To Pretty String", Integer(width), data)
 
   def stringToData(s: String): Future[Data] =
-    call("String To Data", Str(s))
+    callData("String To Data", Str(s))
 
   def subscribeToNamedMessage(name: String, msgId: Long, active: Boolean): Future[Unit] =
     callUnit("Subscribe to Named Message", Cluster(Str(name), UInt(msgId), Bool(active)))
@@ -95,7 +95,7 @@ trait ManagerServer extends Requester {
     call[String]("Connection Username", UInt(id))
 
   def echo(data: Data): Future[Data] =
-    call("Echo", data)
+    callData("Echo", data)
 }
 
 class ManagerServerProxy(cxn: Connection, name: String = "Manager", context: Context = Context(0, 0))
@@ -119,8 +119,8 @@ trait RegistryServer extends Requester {
 
   def get(key: String, pat: String = "?", default: Option[(Boolean, Data)] = None): Future[Data] = {
     default match {
-      case Some((set, default)) => call("get", Str(key), Str(pat), Bool(set), default)
-      case None => call("get", Str(key), Str(pat))
+      case Some((set, default)) => callData("get", Str(key), Str(pat), Bool(set), default)
+      case None => callData("get", Str(key), Str(pat))
     }
   }
   def set(key: String, value: Data): Future[Unit] = callUnit("set", Str(key), value)

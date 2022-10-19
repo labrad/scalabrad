@@ -80,7 +80,7 @@ object Packet {
 
       records += Record(id, data)
     }
-    records.result
+    records.result()
   }
 }
 

@@ -23,6 +23,6 @@ class ContextMgr[T <: ServerContext](factory: => T, handlerFactory: T => Request
   }
 
   def expire()(implicit ctx: ExecutionContext): Future[Unit] = semaphore.map {
-    if (server != null) server.expire
+    if (server != null) server.expire()
   }
 }

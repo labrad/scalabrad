@@ -10,9 +10,9 @@ object Futures {
    */
   implicit class RichNettyFuture[A](val future: NettyFuture[A]) extends AnyVal {
     def toScala: Future[A] = {
-      val p = Promise[A]
+      val p = Promise[A]()
       future.addListener(new GenericFutureListener[NettyFuture[A]] {
-        def operationComplete(f: NettyFuture[A]) {
+        def operationComplete(f: NettyFuture[A]): Unit = {
           f.isSuccess match {
             case true => p.success(f.getNow)
             case false => p.failure(f.cause)

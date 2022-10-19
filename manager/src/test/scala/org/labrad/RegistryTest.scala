@@ -9,7 +9,7 @@ import org.labrad.util.{Await, Files}
 import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.Waiters
 import org.scalatest.time.SpanSugar._
-import scala.collection._
+import scala.collection.{Seq => _, _}
 
 class RegistryTest extends FunSuite with Matchers with Waiters {
 
@@ -155,7 +155,7 @@ class RegistryTest extends FunSuite with Matchers with Waiters {
         c.addMessageListener {
           case Message(src, ctx, `msgId`, data) =>
             w { assert(data == Cluster(Str("a"), Bool(false), Bool(true))) }
-            w.dismiss
+            w.dismiss()
         }
 
         Await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
@@ -177,14 +177,14 @@ class RegistryTest extends FunSuite with Matchers with Waiters {
         c.addMessageListener {
           case Message(src, ctx, `msgId`, data) =>
             w { assert(data == Cluster(Str("a"), Bool(false), Bool(true))) }
-            w.dismiss
+            w.dismiss()
         }
 
         Await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
         Await(c.send("Registry", "set" -> Cluster(Str("a"), Str("first"))))
         Await(c.send("Registry", "Notify on Change" -> Cluster(UInt(msgId), Bool(true))))
         Await(c.send("Registry", "set" -> Cluster(Str("a"), Str("second"))))
-        w.await
+        w.await()
       }
     }
   }
@@ -200,14 +200,14 @@ class RegistryTest extends FunSuite with Matchers with Waiters {
         c.addMessageListener {
           case Message(src, ctx, `msgId`, data) =>
             w { assert(data == Cluster(Str("a"), Bool(false), Bool(false))) }
-            w.dismiss
+            w.dismiss()
         }
 
         Await(c.send("Registry", "mkdir" -> Str("test"), "cd" -> Str("test")))
         Await(c.send("Registry", "set" -> Cluster(Str("a"), Str("first"))))
         Await(c.send("Registry", "Notify on Change" -> Cluster(UInt(msgId), Bool(true))))
         Await(c.send("Registry", "del" -> Str("a")))
-        w.await
+        w.await()
       }
     }
   }
@@ -238,10 +238,10 @@ class RegistryTest extends FunSuite with Matchers with Waiters {
         }
 
         Await(reg.cd(".."))
-        assert(dirs() contains "b")
+        assert(dirs().contains("b"))
 
         Await(reg.cd(".."))
-        assert(dirs() contains "a")
+        assert(dirs().contains("a"))
 
         intercept[Exception] {
           Await(reg.rmDir("a"))

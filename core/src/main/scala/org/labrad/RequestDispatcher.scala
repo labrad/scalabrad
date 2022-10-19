@@ -14,9 +14,9 @@ class RequestDispatcher(sendFunc: Packet => Unit) extends Logging {
   private val promises = mutable.Map.empty[Int, Promise[Seq[Data]]]
 
   def startRequest(request: Request): Future[Seq[Data]] = {
-    val promise = Promise[Seq[Data]]
+    val promise = Promise[Seq[Data]]()
     val id = synchronized {
-      val id = if (idPool.isEmpty) nextId else idPool.dequeue
+      val id = if (idPool.isEmpty) nextId else idPool.dequeue()
       promises(id) = promise
       id
     }
@@ -51,7 +51,7 @@ class RequestDispatcher(sendFunc: Packet => Unit) extends Logging {
         idPool += id
         promise
       }
-      promises.clear
+      promises.clear()
       ps
     }
     ps.foreach(_.failure(cause))
