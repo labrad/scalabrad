@@ -1,8 +1,7 @@
 package org.labrad.data
 
-import java.io.{InputStream, IOException, OutputStream}
+import java.io.{InputStream, OutputStream}
 import java.nio.ByteOrder
-import scala.math
 
 object EndianAwareByteArray {
   implicit class RichByteArray(val buf: Array[Byte]) extends AnyVal {

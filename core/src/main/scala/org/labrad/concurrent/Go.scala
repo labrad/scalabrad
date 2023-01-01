@@ -2,8 +2,7 @@ package org.labrad.concurrent
 
 import java.util.{Timer, TimerTask}
 import java.util.concurrent._
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.locks.{Lock, ReentrantLock}
+import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.Duration
 import scala.util.Try

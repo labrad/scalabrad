@@ -1,8 +1,6 @@
 package org.labrad.manager
 
-import io.netty.handler.ssl.{SslContext, SslContextBuilder}
-import io.netty.handler.ssl.util.SelfSignedCert
-import io.netty.util.DomainNameMapping
+import io.netty.handler.ssl.SslContextBuilder
 import java.io.File
 import java.net.{InetAddress, URI}
 import java.nio.CharBuffer
@@ -12,18 +10,15 @@ import java.security.{MessageDigest, SecureRandom}
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
 import org.labrad.{Labrad, Password, ServerConfig, ServerInfo, TlsMode}
-import org.labrad.annotations._
 import org.labrad.concurrent.ExecutionContexts
 import org.labrad.crypto.{CertConfig, Certs}
 import org.labrad.data.{Message => _, _}
-import org.labrad.errors._
 import org.labrad.manager.auth._
 import org.labrad.registry._
 import org.labrad.util._
 import org.labrad.util.Paths._
 import org.labrad.util.cli.{Command, Environment}
-import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, Await}
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 

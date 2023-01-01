@@ -2,14 +2,14 @@ package org.labrad
 package data
 
 import io.netty.buffer.{ByteBuf, Unpooled}
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, Serializable}
+import java.io.Serializable
 import java.nio.ByteOrder
-import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
+import java.nio.ByteOrder.BIG_ENDIAN
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Date
 import org.joda.time.{DateTime, DateTimeZone}
 import org.labrad.data.EndianAwareByteArray._
-import org.labrad.errors.{LabradException, NonIndexableTypeException}
+import org.labrad.errors.LabradException
 import org.labrad.types._
 import scala.annotation.tailrec
 import scala.collection.mutable.Buffer

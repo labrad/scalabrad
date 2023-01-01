@@ -2,7 +2,7 @@ package org.labrad.concurrent
 
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 object ExecutionContexts {
 

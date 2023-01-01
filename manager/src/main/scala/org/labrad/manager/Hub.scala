@@ -1,12 +1,9 @@
 package org.labrad.manager
 
 import org.labrad.ServerInfo
-import org.labrad.annotations._
 import org.labrad.data._
-import org.labrad.errors._
 import org.labrad.manager.auth._
 import org.labrad.registry._
-import org.labrad.types._
 import org.labrad.util._
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}

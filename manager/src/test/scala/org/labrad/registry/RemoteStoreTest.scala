@@ -1,16 +1,12 @@
 package org.labrad.registry
 
 import org.labrad.{RegistryServerProxy, TlsMode}
-import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
-import org.labrad.registry._
-import org.labrad.types._
 import org.labrad.util.Await
-import org.scalatest.{FunSuite, Matchers, Tag}
+import org.scalatest.{FunSuite, Matchers}
 import org.scalatest.concurrent.Waiters
 import org.scalatest.time.SpanSugar._
-import scala.collection._
 
 class RemoteStoreTest extends FunSuite with Matchers with Waiters {
 

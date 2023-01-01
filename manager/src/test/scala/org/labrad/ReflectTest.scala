@@ -7,7 +7,6 @@ import org.labrad.manager.{ClientActor, Hub, ManagerImpl, ServerActor}
 import org.labrad.types.Pattern
 import org.labrad.util.Logging
 import org.scalatest.FunSuite
-import scala.concurrent.Future
 import scala.reflect.ClassTag
 import scala.reflect.runtime.{ currentMirror => cm, universe => ru }
 

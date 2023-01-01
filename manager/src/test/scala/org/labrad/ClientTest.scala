@@ -1,19 +1,14 @@
 package org.labrad
 
-import java.io.File
-import java.nio.ByteOrder
-import java.util.{Date, Random}
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
-import org.labrad.types._
-import org.labrad.util.{Logging, Util}
 import org.scalatest.FunSuite
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 class ClientTest extends FunSuite {
 
-  def testWithClient(name: String)(func: Client => Unit) = test(name) {
+  def testWithClient(name: String)(func: Client => Unit): Unit = test(name) {
     ManagerUtils.withManager() { m =>
       ManagerUtils.withClient(m) { c =>
         func(c)

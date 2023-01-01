@@ -1,9 +1,7 @@
 package org.labrad
 
 import java.io.File
-import org.labrad.data._
 import org.labrad.manager.{ManagerUtils, TlsPolicy}
-import org.labrad.types._
 import org.scalatest.FunSuite
 import scala.concurrent.Await
 import scala.concurrent.duration._

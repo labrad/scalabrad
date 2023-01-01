@@ -3,7 +3,6 @@ package org.labrad.data
 import java.io.{BufferedOutputStream, FilterInputStream, InputStream, OutputStream}
 import java.nio.ByteOrder
 import java.nio.ByteOrder.BIG_ENDIAN
-import org.labrad.types.Type
 
 class PacketInputStream(in: InputStream)(implicit bo: ByteOrder = BIG_ENDIAN)
 extends FilterInputStream(in) {

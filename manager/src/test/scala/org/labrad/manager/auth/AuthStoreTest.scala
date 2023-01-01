@@ -1,6 +1,5 @@
 package org.labrad.manager.auth
 
-import org.labrad.registry._
 import org.labrad.util.Files
 import org.scalatest.fixture.FunSuite
 

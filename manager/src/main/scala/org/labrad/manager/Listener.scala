@@ -2,16 +2,12 @@ package org.labrad.manager
 
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.channel._
-import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
-import io.netty.handler.ssl.{SniHandler, SslContext}
-import io.netty.util.DomainNameMapping
-import java.util.concurrent.ThreadFactory
+import io.netty.handler.ssl.SniHandler
 import java.util.concurrent.atomic.AtomicLong
 import org.labrad.PacketCodec
 import org.labrad.util._
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success, Try}
 

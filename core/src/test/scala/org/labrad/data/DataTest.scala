@@ -8,7 +8,7 @@ import org.scalatest.FunSuite
 class DataTest extends FunSuite {
   val rand = new Random
 
-  def testBothEndian(name: String)(func: ByteOrder => Unit) {
+  def testBothEndian(name: String)(func: ByteOrder => Unit): Unit = {
     for (byteOrder <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN))
       test(name + ":" + byteOrder) { func(byteOrder) }
   }
@@ -43,10 +43,10 @@ class DataTest extends FunSuite {
     d.setArraySize(20)
     val it1 = d.flatIterator
     for (count <- 0 until 20)
-      it1.next.setString("This is string " + count)
+      it1.next().setString("This is string " + count)
     val it2 = d.flatIterator
     for (count <- 0 until 20)
-      assert(it2.next.getString == "This is string " + count)
+      assert(it2.next().getString == "This is string " + count)
   }
 
   testBothEndian("simple cluster") { implicit bo: ByteOrder =>
@@ -60,12 +60,12 @@ class DataTest extends FunSuite {
     val im = rand.nextGaussian
 
     val it1 = d1.clusterIterator
-    it1.next.setBool(b)
-    it1.next.setInt(i)
-    it1.next.setUInt(l)
-    it1.next.setString(s)
-    it1.next.setValue(d)
-    it1.next.setComplex(re, im)
+    it1.next().setBool(b)
+    it1.next().setInt(i)
+    it1.next().setUInt(l)
+    it1.next().setString(s)
+    it1.next().setValue(d)
+    it1.next().setComplex(re, im)
 
     val elems = d1.clusterIterator.toSeq
     assert(b == elems(0).getBool)
@@ -91,14 +91,14 @@ class DataTest extends FunSuite {
       val re = rand.nextGaussian
       val im = rand.nextGaussian
 
-      val cluster = arrIt.next
+      val cluster = arrIt.next()
       val it = cluster.clusterIterator
-      it.next.setBool(b)
-      it.next.setInt(i)
-      it.next.setUInt(l)
-      it.next.setString(s)
-      it.next.setValue(d)
-      it.next.setComplex(re, im)
+      it.next().setBool(b)
+      it.next().setInt(i)
+      it.next().setUInt(l)
+      it.next().setString(s)
+      it.next().setValue(d)
+      it.next().setComplex(re, im)
 
       val elems = cluster.clusterIterator.toSeq
       assert(b == elems(0).getBool)

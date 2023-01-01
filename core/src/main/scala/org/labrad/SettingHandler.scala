@@ -2,10 +2,8 @@ package org.labrad
 
 import java.lang.reflect.InvocationTargetException
 import java.util.Date
-import org.labrad.annotations.Setting
-import org.labrad.annotations.Matchers._
 import org.labrad.data._
-import org.labrad.types.{Pattern, PArr, PChoice, PCluster, PValue, PComplex, TNone}
+import org.labrad.types.{Pattern, PArr, PChoice, PCluster, PValue, TNone}
 import org.labrad.util.Logging
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}

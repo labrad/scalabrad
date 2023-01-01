@@ -1,8 +1,5 @@
 package org.labrad.types
 
-import scala.collection.mutable
-import scala.math
-
 trait RatioIsFractional extends Fractional[Ratio] {
   def parseString(str: String): Option[Ratio] = str.split("/") match {
     case Array("", _) => None

@@ -8,7 +8,7 @@ import org.scalatest.FunSuite
 class DataBuilderTest extends FunSuite {
   val rand = new Random
 
-  def testBothEndian(name: String)(func: ByteOrder => Unit) {
+  def testBothEndian(name: String)(func: ByteOrder => Unit): Unit = {
     for (byteOrder <- List(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN))
       test(name + ":" + byteOrder) { func(byteOrder) }
   }
@@ -66,7 +66,7 @@ class DataBuilderTest extends FunSuite {
       val d = b.result()
       val it = d.flatIterator
       for (count <- 0 until 20) {
-        assert(it.next.getString == s"This is string $count")
+        assert(it.next().getString == s"This is string $count")
       }
     }
     check(DataBuilder())

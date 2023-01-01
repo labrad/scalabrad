@@ -3,7 +3,7 @@ package org.labrad
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
 import org.labrad.util.Await
-import org.scalatest.{FunSuite, Tag}
+import org.scalatest.FunSuite
 import org.scalatest.concurrent.Waiters
 import org.scalatest.time.SpanSugar._
 

@@ -6,7 +6,6 @@ import org.labrad.{ Reflect, RequestContext, Server, ServerInfo, SettingInfo, Ty
 import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.errors._
-import org.labrad.registry._
 import org.labrad.types._
 import org.labrad.util._
 import scala.collection.mutable
@@ -48,10 +47,12 @@ extends SimpleChannelInboundHandler[Packet] with ClientActor with ManagerSupport
 
   // handle incoming packets
   override def channelRead0(ctx: ChannelHandlerContext, packet: Packet): Unit = {
-    packet match {
-      case Packet(0, _, _, _)          => handleMessage(packet)
-      case Packet(r, _, _, _) if r > 0 => handleRequest(packet)
-      case Packet(r, _, _, _) if r < 0 => handleResponse(packet)
+    if (packet.id > 0) {
+      handleRequest(packet)
+    } else if (packet.id == 0) {
+      handleMessage(packet)
+    } else {
+      handleResponse(packet)
     }
   }
 

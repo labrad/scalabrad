@@ -1,9 +1,7 @@
 package org.labrad
 
-import java.net.URI
 import org.labrad.util.cli.Environment
 import org.scalatest.FunSuite
-import scala.util.{Failure, Success}
 
 class ServerConfigTest extends FunSuite {
 

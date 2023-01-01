@@ -1,9 +1,8 @@
 package org.labrad.data
 
-import io.netty.buffer.{ByteBuf, Unpooled}
+import io.netty.buffer.Unpooled
 import java.nio.ByteOrder
 import java.nio.ByteOrder._
-import java.nio.charset.StandardCharsets.UTF_8
 import org.labrad.types._
 import scala.collection.mutable
 
@@ -406,7 +405,7 @@ class DataBuilder(tOpt: Option[Type] = None)(implicit byteOrder: ByteOrder = BIG
 
     override def clusterEnd(): State = {
       require(i == size, s"cannot end cluster. still expecting ${size - i} elements")
-      ret(TCluster(types: _*))
+      ret(TCluster(types.toSeq: _*))
     }
 
     override def render(subState: String): String = {

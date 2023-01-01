@@ -2,7 +2,6 @@ package org.labrad.registry
 
 import org.labrad.{Client, Credential, RegistryServerPacket, RegistryServerProxy, TlsMode}
 import org.labrad.data.{Data, Message}
-import org.labrad.types.Type
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 

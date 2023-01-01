@@ -2,11 +2,9 @@ package org.labrad.registry
 
 import java.io.File
 import java.nio.charset.StandardCharsets.UTF_8
-import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormat
 import org.labrad.data._
 import org.labrad.types._
-import scala.util.matching.Regex
 
 
 /**

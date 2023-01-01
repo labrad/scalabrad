@@ -1,6 +1,5 @@
 package org.labrad.util
 
-import org.labrad.Connection
 import org.labrad.Labrad.Manager
 import org.labrad.data._
 import scala.concurrent.{ExecutionContext, Future}

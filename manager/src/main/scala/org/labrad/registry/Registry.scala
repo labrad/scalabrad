@@ -2,11 +2,8 @@ package org.labrad.registry
 
 import org.labrad._
 import org.labrad.annotations._
-import org.labrad.concurrent.{Chan, Send, Time}
-import org.labrad.concurrent.Go._
 import org.labrad.data._
-import org.labrad.errors._
-import org.labrad.manager.{LocalServer, MultiheadServer, RemoteConnector, ServerActor}
+import org.labrad.manager.{LocalServer, MultiheadServer}
 import org.labrad.types._
 import org.labrad.util.{AsyncSemaphore, Logging}
 import scala.collection.mutable

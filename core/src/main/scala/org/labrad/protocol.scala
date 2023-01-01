@@ -3,13 +3,11 @@ package org.labrad
 import io.netty.buffer.{ByteBuf, Unpooled}
 import io.netty.channel._
 import io.netty.handler.codec._
-import io.netty.util.AttributeKey
 import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.ByteOrder.{BIG_ENDIAN, LITTLE_ENDIAN}
 import java.util.{List => JList}
 import org.labrad.data._
-import org.labrad.types._
 import org.labrad.util.Logging
 
 

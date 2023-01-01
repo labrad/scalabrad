@@ -1,7 +1,6 @@
 package org.labrad.data
 
 import java.util.Date
-import org.labrad.types._
 
 trait ToData[T] {
   def apply(b: DataBuilder, value: T): Unit

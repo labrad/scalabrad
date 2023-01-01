@@ -1,11 +1,9 @@
 package org.labrad
 
-import java.io.{File, PrintWriter, StringWriter}
+import java.io.{PrintWriter, StringWriter}
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.regex.Pattern
 import org.clapper.argot._
 import org.clapper.argot.ArgotConverters._
-import org.labrad.annotations.IsServer
 import org.labrad.concurrent.ExecutionContexts
 import org.labrad.data._
 import org.labrad.errors.LabradException
@@ -14,7 +12,6 @@ import org.labrad.util.cli.{Command, Environment}
 import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
-import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.Failure
 
@@ -278,9 +275,6 @@ object Server {
   }
 
   def start(server: IServer, config: ServerConfig): Connection = {
-
-    val shutdownCalled = new AtomicBoolean(false)
-
     val name = Util.interpolateEnvironmentVars(config.nameOpt.getOrElse(server.name))
     val port = if (config.tls == TlsMode.ON) config.tlsPort else config.port
     val cxn = new ServerConnection(

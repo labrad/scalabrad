@@ -328,7 +328,6 @@ case class TCluster(override val elems: Type*) extends PCluster(elems: _*) with 
   def offset(i: Int) = offsets(i)
 }
 
-
 class PArr protected(val elem: Pattern, val depth: Int) extends Pattern {
   require(depth > 0)
 

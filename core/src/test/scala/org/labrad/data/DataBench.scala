@@ -1,6 +1,5 @@
 package org.labrad.data
 
-import io.netty.buffer.{ByteBuf, Unpooled}
 import java.nio.ByteOrder
 import java.nio.ByteOrder._
 

@@ -17,7 +17,7 @@ trait Permit {
 
 class AsyncSemaphore(initialPermits: Int = 0, maxWaiters: Option[Int] = None) { self =>
   require(maxWaiters.getOrElse(0) >= 0)
-  @volatile private[this] var waiters = new Queue[() => Unit]
+  private[this] val waiters = new Queue[() => Unit]
   @volatile private[this] var availablePermits = initialPermits
 
   private[this] class SemaphorePermit extends Permit {

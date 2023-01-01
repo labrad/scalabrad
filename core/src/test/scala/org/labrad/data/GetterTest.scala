@@ -1,8 +1,5 @@
 package org.labrad.data
 
-import java.nio.ByteOrder
-import java.util.{Date, Random}
-import org.labrad.types._
 import org.scalatest.FunSuite
 
 class GetterTest extends FunSuite {

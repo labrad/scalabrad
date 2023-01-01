@@ -1,6 +1,5 @@
 ThisBuild / organization := "org.labrad"
 ThisBuild / scalaVersion := "2.13.10"
-ThisBuild / javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
 
 lazy val commonSettings = Seq(
   version := {
@@ -9,7 +8,9 @@ lazy val commonSettings = Seq(
 
   scalacOptions ++= Seq(
     "-deprecation",
-    "-feature"
+    "-feature",
+    "-Werror",
+    "-Wunused:imports"
   ),
 
   licenses += ("GPL-2.0", url("http://www.gnu.org/licenses/gpl-2.0.html")),

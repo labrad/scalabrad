@@ -1,13 +1,10 @@
 package org.labrad.manager
 
 import org.labrad._
-import org.labrad.annotations._
 import org.labrad.concurrent.{Chan, Send, Time}
 import org.labrad.concurrent.Go._
 import org.labrad.data._
-import org.labrad.errors._
 import org.labrad.registry.RegistryStore
-import org.labrad.types._
 import org.labrad.util.Logging
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}

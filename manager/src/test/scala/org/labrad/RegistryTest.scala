@@ -1,6 +1,5 @@
 package org.labrad
 
-import org.labrad.annotations._
 import org.labrad.data._
 import org.labrad.manager.ManagerUtils
 import org.labrad.registry._
@@ -9,7 +8,6 @@ import org.labrad.util.{Await, Files}
 import org.scalatest.{FunSuite, Matchers, Tag}
 import org.scalatest.concurrent.Waiters
 import org.scalatest.time.SpanSugar._
-import scala.collection.{Seq => _, _}
 
 class RegistryTest extends FunSuite with Matchers with Waiters {
 

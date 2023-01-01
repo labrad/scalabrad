@@ -2,7 +2,6 @@ package org.labrad
 
 import org.labrad.annotations.Setting
 import org.labrad.data._
-import scala.collection.mutable
 import scala.reflect.runtime.universe._
 
 case class RequestContext(

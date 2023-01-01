@@ -9,7 +9,6 @@ import org.labrad.data.Data
 import org.labrad.util.Util
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import scala.io.Source
 
 object Migrate {
 

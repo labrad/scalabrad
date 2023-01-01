@@ -1,7 +1,6 @@
 package org.labrad.data
 
 import java.util.Date
-import org.labrad.types._
 
 trait Setter[T] {
   // set a Data object with a value of the correct type.

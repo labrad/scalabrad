@@ -3,8 +3,8 @@ package org.labrad.manager
 import io.netty.channel._
 import io.netty.handler.ssl.{SslContext, SslHandler}
 import io.netty.util.{DomainWildcardMappingBuilder, Mapping}
-import java.io.{ByteArrayOutputStream, File, FileInputStream}
-import java.net.{InetAddress, InetSocketAddress}
+import java.io.File
+import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.util.concurrent.TimeoutException
@@ -12,9 +12,7 @@ import org.labrad.ContextCodec
 import org.labrad.data._
 import org.labrad.errors._
 import org.labrad.manager.auth._
-import org.labrad.types._
 import org.labrad.util._
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.Random
 

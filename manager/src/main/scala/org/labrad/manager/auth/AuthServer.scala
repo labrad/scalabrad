@@ -3,12 +3,9 @@ package org.labrad.manager.auth
 import org.labrad._
 import org.labrad.annotations._
 import org.labrad.data._
-import org.labrad.errors._
 import org.labrad.manager.{Hub, LocalServer, MultiheadServer}
 import org.labrad.registry.RegistryStore
-import org.labrad.types._
-import org.labrad.util.{AsyncSemaphore, Logging}
-import scala.collection.mutable
+import org.labrad.util.Logging
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 

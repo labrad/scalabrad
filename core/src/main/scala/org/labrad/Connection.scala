@@ -2,23 +2,20 @@ package org.labrad
 
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel.{Channel, ChannelHandlerContext, ChannelOption, ChannelInitializer, EventLoopGroup, SimpleChannelInboundHandler}
-import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
 import io.netty.handler.ssl.{SslContext, SslContextBuilder}
 import java.io.{File, IOException}
-import java.net.{InetAddress, InetSocketAddress}
+import java.net.InetSocketAddress
 import java.nio.{ByteOrder, CharBuffer}
 import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.Files
 import java.security.MessageDigest
-import java.util.concurrent.{ExecutionException, Executors, ThreadFactory, TimeUnit}
+import java.util.concurrent.{ExecutionException, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import org.labrad.Labrad.Manager
 import org.labrad.Labrad.Authenticator
 import org.labrad.data._
 import org.labrad.errors._
-import org.labrad.events.MessageListener
 import org.labrad.util.{Counter, LookupProvider, NettyUtil}
 import org.labrad.util.Futures._
 import org.labrad.util.Paths._
@@ -190,7 +187,7 @@ trait Connection {
       if (useStartTls) {
         val Str(cert) = Await.result(sendManagerRequest(1, ("STARTTLS", host).toData), timeout)
 
-        var handler = makeSslContext(host).newHandler(channel.alloc(), host, port)
+        val handler = makeSslContext(host).newHandler(channel.alloc(), host, port)
         channel.pipeline.addFirst("sslHandler", handler)
         Await.result(handler.handshakeFuture.toScala, 10.seconds)
       }
@@ -324,10 +321,14 @@ trait Connection {
   private val contextCounter = new Counter(0, 0xFFFFFFFFL)
   def newContext = Context(0, contextCounter.next)
 
-  protected def handlePacket(packet: Packet): Unit = packet match {
-    case Packet(id, _, _, _) if id > 0 => handleRequest(packet)
-    case Packet( 0, _, _, _)           => handleMessage(packet)
-    case Packet(id, _, _, _) if id < 0 => handleResponse(packet)
+  protected def handlePacket(packet: Packet): Unit = {
+    if (packet.id > 0) {
+      handleRequest(packet)
+    } else if (packet.id == 0) {
+      handleMessage(packet)
+    } else {
+      handleResponse(packet)
+    }
   }
 
   protected def handleResponse(packet: Packet): Unit = {

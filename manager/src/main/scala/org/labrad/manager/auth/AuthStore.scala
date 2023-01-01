@@ -2,18 +2,10 @@ package org.labrad.manager.auth
 
 import anorm._
 import anorm.SqlParser._
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier
-import com.google.api.client.json.jackson2.JacksonFactory
-import com.google.api.client.http.javanet.NetHttpTransport
-import java.io.{ByteArrayInputStream, File}
+import java.io.File
 import java.sql.{Connection, DriverManager}
-import org.labrad.data._
-import org.labrad.errors._
-import org.labrad.registry.RegistryStore
 import org.labrad.util.Logging
 import org.mindrot.jbcrypt.BCrypt
-import scala.collection.JavaConverters._
 
 trait AuthStore {
   def listUsers(): Seq[(String, Boolean)]
